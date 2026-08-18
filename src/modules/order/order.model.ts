@@ -17,7 +17,14 @@ const orderSchema = new Schema<IOrder>(
       }
     ],
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true },
+    subTotal: { type: Number, required: true },
+    shippingCharge: { type: Number, default: 0 },
     totalPrice: { type: Number, required: true },
+    paymentStatus: {
+      type: String,
+      enum: ['unpaid', 'paid'],
+      default: 'unpaid',
+    },
     status: {
       type: String,
       enum: ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'],

@@ -15,7 +15,10 @@ export interface IOrder extends Document {
   note?: string;
   items: IOrderItem[];
   tenantId: Types.ObjectId;
+  subTotal: number;
+  shippingCharge: number;
   totalPrice: number;
+  paymentStatus: 'unpaid' | 'paid';
   status: 'pending' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled';
   createdAt: Date;
   updatedAt: Date;

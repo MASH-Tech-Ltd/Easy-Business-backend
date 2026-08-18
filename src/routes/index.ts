@@ -99,7 +99,7 @@ const moduleRoutes = [
 moduleRoutes.forEach((route) => router.use(route.path, route.route));
 
 router.get('/', (req, res) => {
-  res.json({ message: 'Welcome to Electronics Multitenant API' });
+  res.json({ message: 'Welcome to MashEasy Multitenant API' });
 });
 
 export default router;

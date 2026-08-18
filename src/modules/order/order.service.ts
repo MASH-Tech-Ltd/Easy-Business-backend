@@ -72,24 +72,16 @@ const updateOrder = async (id: string, payload: Partial<IOrder>, tenantId: strin
   if (!order) return null;
 
   const oldStatus = order.status;
-  const newStatus = payload.status;
+  const newStatus = payload.status || oldStatus;
+  
+  const isOldCompleted = ['confirmed', 'shipped', 'delivered'].includes(oldStatus);
+  const isNewCompleted = ['confirmed', 'shipped', 'delivered'].includes(newStatus);
+  
+  // Check if items are being modified
+  const itemsChanged = !!payload.items;
 
-  const result = await Order.findOneAndUpdate({ _id: id, tenantId }, payload, { new: true });
-
-  // If status changes to a completed state from pending
-  if (oldStatus === 'pending' && (newStatus === 'confirmed' || newStatus === 'shipped' || newStatus === 'delivered')) {
-    try {
-      for (const item of order.items) {
-        await Product.findByIdAndUpdate(item.productId, {
-          $inc: { salesCount: item.quantity, stock: -item.quantity }
-        });
-      }
-    } catch (e) {
-      console.error("Error updating product counts:", e);
-    }
-  } 
-  // If status changes to cancelled from a completed state
-  else if ((oldStatus === 'confirmed' || oldStatus === 'shipped' || oldStatus === 'delivered') && newStatus === 'cancelled') {
+  // 1. Revert old stock if the order was completed AND (it is now cancelled/pending OR the items are changing)
+  if (isOldCompleted && (!isNewCompleted || itemsChanged)) {
     try {
       for (const item of order.items) {
         await Product.findByIdAndUpdate(item.productId, {
@@ -98,6 +90,22 @@ const updateOrder = async (id: string, payload: Partial<IOrder>, tenantId: strin
       }
     } catch (e) {
       console.error("Error reverting product counts:", e);
+    }
+  }
+
+  // Perform the update
+  const result = await Order.findOneAndUpdate({ _id: id, tenantId }, payload, { new: true });
+
+  // 2. Apply new stock if the order is now completed AND (it was previously not completed OR the items changed)
+  if (result && isNewCompleted && (!isOldCompleted || itemsChanged)) {
+    try {
+      for (const item of result.items) {
+        await Product.findByIdAndUpdate(item.productId, {
+          $inc: { salesCount: item.quantity, stock: -item.quantity }
+        });
+      }
+    } catch (e) {
+      console.error("Error updating product counts:", e);
     }
   }
 

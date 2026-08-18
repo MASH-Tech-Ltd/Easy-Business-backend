@@ -6,6 +6,7 @@ import { upload } from '../../middleware/multer.middleware';
 const router = Router();
 
 router.post('/create-product', authMiddleware('tenant_admin'), upload.array('images', 5), ProductController.createProduct);
+router.get('/check-limit', authMiddleware('tenant_admin'), ProductController.checkProductLimit);
 router.get('/get-all-product', ProductController.getAllProducts);
 router.get('/my-products', authMiddleware('tenant_admin'), ProductController.getMyProducts);
 router.get('/get-product-by-tenant/:tenantId', ProductController.getProductsByTenant);

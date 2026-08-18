@@ -17,7 +17,7 @@ export const seedDemoStorefront = async () => {
 
     // 1. Create Tenant
     const tenant = new Tenant({
-      name: 'Demo Electronics Store',
+      name: 'Demo MashEasy Store',
       slug,
       status: 'active',
       contactEmail: 'hello@demostore.com'

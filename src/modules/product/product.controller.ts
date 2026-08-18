@@ -3,11 +3,14 @@ import { ProductService } from "./product.service";
 import ApiResponse from "../../utils/apiResponse";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { uploadCloudinary } from "../../helpers/cloudinary";
+import { Subscription } from "../subscription/subscription.model";
+import CustomError from "../../helpers/CustomError";
+import { Product } from "./product.model";
 
 const createProduct = asyncHandler(async (req: Request, res: Response) => {
   req.body.tenantId = (req as any).user.tenantId;
 
-  if (req.body.features && typeof req.body.features === 'string') {
+  if (req.body.features && typeof req.body.features === "string") {
     try {
       req.body.features = JSON.parse(req.body.features);
     } catch (e) {
@@ -15,7 +18,7 @@ const createProduct = asyncHandler(async (req: Request, res: Response) => {
     }
   }
 
-  if (req.body.videos && typeof req.body.videos === 'string') {
+  if (req.body.videos && typeof req.body.videos === "string") {
     try {
       req.body.videos = JSON.parse(req.body.videos);
     } catch (e) {
@@ -24,18 +27,18 @@ const createProduct = asyncHandler(async (req: Request, res: Response) => {
   }
 
   if (req.body.isAuthentic !== undefined) {
-    req.body.isAuthentic = req.body.isAuthentic === 'true';
+    req.body.isAuthentic = req.body.isAuthentic === "true";
   }
-  
-  if (req.body.dimensions && typeof req.body.dimensions === 'string') {
+
+  if (req.body.dimensions && typeof req.body.dimensions === "string") {
     try {
       req.body.dimensions = JSON.parse(req.body.dimensions);
     } catch (e) {
       delete req.body.dimensions;
     }
   }
-  
-  if (req.body.specifications && typeof req.body.specifications === 'string') {
+
+  if (req.body.specifications && typeof req.body.specifications === "string") {
     try {
       req.body.specifications = JSON.parse(req.body.specifications);
     } catch (e) {
@@ -49,7 +52,7 @@ const createProduct = asyncHandler(async (req: Request, res: Response) => {
       const uploadResult = await uploadCloudinary(file.path);
       req.body.images.push({
         public_id: uploadResult.public_id,
-        secure_url: uploadResult.secure_url
+        secure_url: uploadResult.secure_url,
       });
     }
   }
@@ -80,7 +83,13 @@ const getProductsByTenant = asyncHandler(
 const getMyProducts = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = (req as any).user.tenantId;
   const result = await ProductService.getMyProducts(tenantId, req.query);
-  ApiResponse.sendSuccess(res, 200, "Products retrieved successfully", result.data, result.meta);
+  ApiResponse.sendSuccess(
+    res,
+    200,
+    "Products retrieved successfully",
+    result.data,
+    result.meta,
+  );
 });
 
 const getSingleProduct = asyncHandler(async (req: Request, res: Response) => {
@@ -89,7 +98,7 @@ const getSingleProduct = asyncHandler(async (req: Request, res: Response) => {
 });
 
 const updateProduct = asyncHandler(async (req: Request, res: Response) => {
-  if (req.body.features && typeof req.body.features === 'string') {
+  if (req.body.features && typeof req.body.features === "string") {
     try {
       req.body.features = JSON.parse(req.body.features);
     } catch (e) {
@@ -97,7 +106,7 @@ const updateProduct = asyncHandler(async (req: Request, res: Response) => {
     }
   }
 
-  if (req.body.videos && typeof req.body.videos === 'string') {
+  if (req.body.videos && typeof req.body.videos === "string") {
     try {
       req.body.videos = JSON.parse(req.body.videos);
     } catch (e) {
@@ -105,7 +114,7 @@ const updateProduct = asyncHandler(async (req: Request, res: Response) => {
     }
   }
 
-  if (req.body.dimensions && typeof req.body.dimensions === 'string') {
+  if (req.body.dimensions && typeof req.body.dimensions === "string") {
     try {
       req.body.dimensions = JSON.parse(req.body.dimensions);
     } catch (e) {
@@ -113,7 +122,7 @@ const updateProduct = asyncHandler(async (req: Request, res: Response) => {
     }
   }
 
-  if (req.body.specifications && typeof req.body.specifications === 'string') {
+  if (req.body.specifications && typeof req.body.specifications === "string") {
     try {
       req.body.specifications = JSON.parse(req.body.specifications);
     } catch (e) {
@@ -122,7 +131,7 @@ const updateProduct = asyncHandler(async (req: Request, res: Response) => {
   }
 
   if (req.body.isAuthentic !== undefined) {
-    req.body.isAuthentic = req.body.isAuthentic === 'true';
+    req.body.isAuthentic = req.body.isAuthentic === "true";
   }
 
   let existingImages = [];
@@ -140,7 +149,7 @@ const updateProduct = asyncHandler(async (req: Request, res: Response) => {
       const uploadResult = await uploadCloudinary(file.path);
       newImages.push({
         public_id: uploadResult.public_id,
-        secure_url: uploadResult.secure_url
+        secure_url: uploadResult.secure_url,
       });
     }
   }
@@ -161,8 +170,22 @@ const deleteProduct = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 200, "Product deleted successfully", result);
 });
 
+const checkProductLimit = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = (req as any).user.tenantId;
+  const subscription = await Subscription.findOne({ tenantId, status: 'active' }).populate('packageId');
+  if (subscription && subscription.packageId) {
+    const productLimit = (subscription.packageId as any).productLimit;
+    const currentCount = await Product.countDocuments({ tenantId });
+    if (currentCount >= productLimit) {
+      throw new CustomError(403, "PRODUCT_LIMIT_REACHED");
+    }
+  }
+  ApiResponse.sendSuccess(res, 200, "Limit check passed", { allowed: true });
+});
+
 export const ProductController = {
   createProduct,
+  checkProductLimit,
   getAllProducts,
   getMyProducts,
   getProductsByTenant,
