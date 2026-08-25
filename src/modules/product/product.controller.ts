@@ -3,12 +3,19 @@ import { ProductService } from "./product.service";
 import ApiResponse from "../../utils/apiResponse";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { uploadCloudinary } from "../../helpers/cloudinary";
-import { Subscription } from "../subscription/subscription.model";
+import { SubscriptionService } from "../subscription/subscription.service";
 import CustomError from "../../helpers/CustomError";
 import { Product } from "./product.model";
+import { Subscription } from "../subscription/subscription.model";
 
 const createProduct = asyncHandler(async (req: Request, res: Response) => {
-  req.body.tenantId = (req as any).user.tenantId;
+  const tenantId = (req as any).user.tenantId;
+  req.body.tenantId = tenantId;
+
+  const activeSub = await SubscriptionService.getTenantSubscription(tenantId);
+  if (!activeSub || activeSub.status !== 'active') {
+    throw new CustomError(403, 'You do not have an active subscription. Please upgrade your plan to add products.');
+  }
 
   if (req.body.features && typeof req.body.features === "string") {
     try {
@@ -61,6 +68,7 @@ const createProduct = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 201, "Product created successfully", result);
 });
 
+// SECURITY FIX: getAllProducts is now super_admin only — guarded at the route level
 const getAllProducts = asyncHandler(async (req: Request, res: Response) => {
   const result = await ProductService.getAllProducts();
   ApiResponse.sendSuccess(res, 200, "Products retrieved successfully", result);
@@ -98,6 +106,9 @@ const getSingleProduct = asyncHandler(async (req: Request, res: Response) => {
 });
 
 const updateProduct = asyncHandler(async (req: Request, res: Response) => {
+  // SECURITY FIX (IDOR): Get tenantId from JWT, not from request body
+  const tenantId = (req as any).user.tenantId;
+
   if (req.body.features && typeof req.body.features === "string") {
     try {
       req.body.features = JSON.parse(req.body.features);
@@ -158,15 +169,19 @@ const updateProduct = asyncHandler(async (req: Request, res: Response) => {
     req.body.images = [...existingImages, ...newImages];
   }
 
+  // SECURITY FIX (IDOR): Pass tenantId so service scopes the query to caller's tenant
   const result = await ProductService.updateProduct(
     req.params.id as string,
+    tenantId,
     req.body,
   );
   ApiResponse.sendSuccess(res, 200, "Product updated successfully", result);
 });
 
 const deleteProduct = asyncHandler(async (req: Request, res: Response) => {
-  const result = await ProductService.deleteProduct(req.params.id as string);
+  // SECURITY FIX (IDOR): Scope delete to caller's tenantId from JWT
+  const tenantId = (req as any).user.tenantId;
+  const result = await ProductService.deleteProduct(req.params.id as string, tenantId);
   ApiResponse.sendSuccess(res, 200, "Product deleted successfully", result);
 });
 

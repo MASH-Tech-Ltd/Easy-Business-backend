@@ -1,11 +1,18 @@
 import { Courier } from './courier.model';
 import { ICourier } from './courier.interface';
 import { encryptText, decryptText } from '../../utils/encryption';
+import { Tenant } from '../tenant/tenant.model';
+import CustomError from '../../helpers/CustomError';
 
 const getCourierChargeByTenant = async (tenantId: string): Promise<ICourier> => {
   let courier = await Courier.findOne({ tenantId });
   if (!courier) {
-    // Auto-create default if not exists
+    // SECURITY FIX: Validate tenant exists before auto-creating a courier record.
+    // Previously any random tenantId from the URL would create a DB document.
+    const tenantExists = await Tenant.exists({ _id: tenantId, status: 'active' });
+    if (!tenantExists) {
+      throw new CustomError(404, 'Tenant not found');
+    }
     courier = await Courier.create({ tenantId, insideDhaka: 60, outsideDhaka: 120 });
   }
   return courier;

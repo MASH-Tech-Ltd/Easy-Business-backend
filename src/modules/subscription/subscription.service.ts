@@ -32,25 +32,39 @@ const assignPackage = async (payload: { tenantId: string, packageId: string }): 
 };
 
 const getTenantSubscription = async (tenantId: string): Promise<ISubscription | null> => {
-  let result = await Subscription.findOne({ tenantId, status: { $in: ['active', 'pending'] } }).populate('packageId');
-  
-  // Backward compatibility: If no subscription exists for an old tenant, assign the Free package
-  if (!result) {
-    const freePackage = await Package.findOne({ price: 0, billingCycle: 'monthly' });
-    if (freePackage) {
-      const startDate = new Date();
-      const endDate = new Date();
-      endDate.setMonth(endDate.getMonth() + 1);
+  // Find the most recent active/pending subscription
+  let result = await Subscription.findOne(
+    { tenantId, status: { $in: ['active', 'pending'] } },
+    null,
+    { sort: { createdAt: -1 } }
+  ).populate('packageId');
 
+  // Backward compatibility: If no active/pending subscription exists,
+  // check if they have ANY subscription history (including expired ones).
+  if (!result) {
+    const hasAnySubscription = await Subscription.exists({ tenantId });
+    
+    if (!hasAnySubscription) {
+      const trialStart = new Date();
+      const trialEnd = new Date();
+      trialEnd.setDate(trialEnd.getDate() + 5);
+      
       result = await Subscription.create({
         tenantId,
-        packageId: freePackage._id,
-        startDate,
-        endDate,
+        startDate: trialStart,
+        endDate: trialEnd,
         status: 'active',
+        isTrial: true,
       });
-      result = await Subscription.findById(result._id).populate('packageId');
     }
+  }
+
+  // Lazy expiry: if the active subscription has passed its endDate, mark it expired
+  if (result && result.status === 'active' && new Date(result.endDate) < new Date()) {
+    result.status = 'expired';
+    await result.save();
+    // Return null so callers treat this as "no active subscription"
+    return null;
   }
 
   return result;

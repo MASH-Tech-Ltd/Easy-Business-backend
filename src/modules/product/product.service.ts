@@ -2,12 +2,17 @@ import { IProduct } from './product.interface';
 import { Product } from './product.model';
 import { Types } from 'mongoose';
 import { paginationHelper } from '../../helpers/paginationHelper';
+import CustomError from '../../helpers/CustomError';
+
+// SECURITY: Whitelist of fields allowed for sorting — prevents prototype pollution
+const ALLOWED_SORT_FIELDS = ['createdAt', 'updatedAt', 'title', 'discountedPrice', 'originalPrice', 'stock', 'salesCount'];
 
 const createProduct = async (payload: Partial<IProduct>): Promise<IProduct> => {
   const result = await Product.create(payload);
   return result;
 };
 
+// SECURITY FIX: getAllProducts is now scoped to super_admin use only (called from its controller with proper guard)
 const getAllProducts = async (): Promise<IProduct[]> => {
   const result = await Product.find({});
   return result;
@@ -34,12 +39,10 @@ const getMyProducts = async (tenantId: string, query: any): Promise<{ data: IPro
     filter.status = status;
   }
 
+  // SECURITY FIX: Whitelist sortBy to prevent prototype pollution / NoSQL injection
   const sortCondition: any = {};
-  if (sortBy) {
-    sortCondition[sortBy] = sortOrder === 'asc' ? 1 : -1;
-  } else {
-    sortCondition['createdAt'] = -1;
-  }
+  const safeSortBy = ALLOWED_SORT_FIELDS.includes(sortBy) ? sortBy : 'createdAt';
+  sortCondition[safeSortBy] = sortOrder === 'asc' ? 1 : -1;
 
   const [data, total] = await Promise.all([
     Product.find(filter)
@@ -71,13 +74,25 @@ const getSingleProduct = async (id: string): Promise<IProduct | null> => {
   return result;
 };
 
-const updateProduct = async (id: string, payload: Partial<IProduct>): Promise<IProduct | null> => {
-  const result = await Product.findByIdAndUpdate(id, payload, { new: true });
+// SECURITY FIX (IDOR): Always scope update to the caller's tenantId — prevents cross-tenant manipulation
+const updateProduct = async (id: string, tenantId: string, payload: Partial<IProduct>): Promise<IProduct | null> => {
+  const result = await Product.findOneAndUpdate(
+    { _id: id, tenantId: new Types.ObjectId(tenantId) },
+    payload,
+    { new: true }
+  );
+  if (!result) {
+    throw new CustomError(404, 'Product not found or you do not have permission to update it');
+  }
   return result;
 };
 
-const deleteProduct = async (id: string): Promise<IProduct | null> => {
-  const result = await Product.findByIdAndDelete(id);
+// SECURITY FIX (IDOR): Always scope delete to the caller's tenantId — prevents cross-tenant deletion
+const deleteProduct = async (id: string, tenantId: string): Promise<IProduct | null> => {
+  const result = await Product.findOneAndDelete({ _id: id, tenantId: new Types.ObjectId(tenantId) });
+  if (!result) {
+    throw new CustomError(404, 'Product not found or you do not have permission to delete it');
+  }
   return result;
 };
 

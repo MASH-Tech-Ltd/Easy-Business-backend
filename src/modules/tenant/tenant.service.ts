@@ -148,13 +148,9 @@ const updateMyStore = async (tenantId: string, payload: any) => {
 };
 
 const getStoreInfoByDomain = async (domain: string) => {
-  let store = await Tenant.findOne({ domain });
-  
-  // Fallback for local development if domain is localhost and no explicit domain found
-  if (!store && domain === 'localhost') {
-    store = await Tenant.findOne().sort({ createdAt: 1 });
-  }
-
+  // SECURITY FIX: Removed localhost fallback — it was leaking the first tenant's data
+  // to anyone who sent domain=localhost. Always do an exact domain lookup.
+  const store = await Tenant.findOne({ domain });
   if (!store) {
     throw new CustomError(404, 'Store not found for domain');
   }

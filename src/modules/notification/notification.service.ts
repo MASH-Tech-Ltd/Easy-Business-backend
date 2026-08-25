@@ -34,8 +34,13 @@ export const notificationService = {
     return Notification.find({ recipientId: userId }).sort({ createdAt: -1 }).limit(50);
   },
 
-  async markAsRead(notificationId: string) {
-    return Notification.findByIdAndUpdate(notificationId, { read: true }, { new: true });
+  // SECURITY FIX (IDOR): Scope update to the owner — prevents marking other users' notifications as read
+  async markAsRead(notificationId: string, userId: string) {
+    return Notification.findOneAndUpdate(
+      { _id: notificationId, recipientId: userId },
+      { read: true },
+      { new: true }
+    );
   },
 
   async markAllAsRead(userId: string) {

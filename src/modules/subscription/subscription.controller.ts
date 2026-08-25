@@ -9,7 +9,16 @@ const assignPackage = asyncHandler(async (req: Request, res: Response) => {
 });
 
 const getTenantSubscription = asyncHandler(async (req: Request, res: Response) => {
-  const result = await SubscriptionService.getTenantSubscription(req.params.tenantId as string);
+  const callerRole = (req as any).user.role;
+  const callerTenantId = (req as any).user.tenantId?.toString();
+  const requestedTenantId = req.params.tenantId as string;
+
+  // SECURITY FIX: tenant_admin can only view their own subscription — prevent IDOR
+  if (callerRole === 'tenant_admin' && callerTenantId !== requestedTenantId) {
+    return ApiResponse.sendError(res, 403, 'Forbidden: You can only view your own subscription');
+  }
+
+  const result = await SubscriptionService.getTenantSubscription(requestedTenantId);
   ApiResponse.sendSuccess(res, 200, 'Tenant subscription retrieved successfully', result);
 });
 

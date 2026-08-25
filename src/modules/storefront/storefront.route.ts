@@ -4,6 +4,7 @@ import { StorefrontController } from './storefront.controller';
 const router = Router();
 
 // Public routes, no auth middleware required
+router.get('/:tenantSlug/status', StorefrontController.getStatus);
 router.get('/:tenantSlug/info', StorefrontController.getInfo);
 router.get('/:tenantSlug/theme', StorefrontController.getTheme);
 router.get('/:tenantSlug/products', StorefrontController.getProducts);

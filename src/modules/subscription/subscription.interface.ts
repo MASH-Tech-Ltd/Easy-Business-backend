@@ -6,6 +6,7 @@ export interface ISubscription extends Document {
   startDate: Date;
   endDate: Date;
   status: 'pending' | 'active' | 'expired' | 'cancelled';
+  isTrial?: boolean;
   createdAt?: Date;
   updatedAt?: Date;
 }

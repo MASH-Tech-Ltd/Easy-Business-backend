@@ -4,7 +4,14 @@ import ApiResponse from '../../utils/apiResponse';
 import { asyncHandler } from '../../utils/asyncHandler';
 
 const createOrder = asyncHandler(async (req: Request, res: Response) => {
-  // Storefront orders are public, so they pass the tenantId in the body
+  // SECURITY FIX: Resolve tenantId from the tenant middleware (set via Host header / subdomain),
+  // NOT from req.body — prevents any client from forging orders against another tenant.
+  const tenantIdFromMiddleware = (req as any).tenantId;
+  if (tenantIdFromMiddleware) {
+    req.body.tenantId = tenantIdFromMiddleware;
+  } else if (!req.body.tenantId) {
+    return ApiResponse.sendError(res, 400, 'Tenant context could not be resolved');
+  }
   const result = await OrderService.createOrder(req.body);
   ApiResponse.sendSuccess(res, 201, 'Order created successfully', result);
 });

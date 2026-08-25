@@ -7,7 +7,8 @@ let io: Server | null = null;
 export const initSocket = (httpServer: http.Server): Server => {
   if (io) return io;
 
-  const allowedOrigins = [
+  // SECURITY FIX: Socket.io CORS should use the same allow-list as HTTP CORS — never '*'
+  const socketAllowedOrigins = [
     "http://localhost:3000",
     "http://localhost:3001",
     "http://localhost:3002",
@@ -22,7 +23,7 @@ export const initSocket = (httpServer: http.Server): Server => {
 
   io = new Server(httpServer, {
     cors: {
-      origin: "*",
+      origin: socketAllowedOrigins,
       methods: ["GET", "POST"],
     },
   });

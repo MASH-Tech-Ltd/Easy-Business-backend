@@ -4,7 +4,7 @@ import { authMiddleware } from '../../middleware/authMiddleware';
 
 const router = Router();
 
-// These should ideally be protected by authMiddleware('super_admin')
-router.get('/overview', BillingController.getBillingOverview);
+// SECURITY FIX: Billing data requires super_admin authentication
+router.get('/overview', authMiddleware('super_admin'), BillingController.getBillingOverview);
 
 export const BillingRoutes = router;

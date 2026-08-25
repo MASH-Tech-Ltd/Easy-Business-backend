@@ -18,6 +18,7 @@ import { FraudCheckRoutes } from '../modules/fraudCheck/fraudCheck.route';
 import { UserRoutes } from '../modules/user/user.route';
 import { SupportRoutes } from '../modules/support/support.route';
 import { NotificationRoutes } from '../modules/notification/notification.route';
+import { SeedRoutes } from '../modules/seed/seed.route';
 
 const router = Router();
 
@@ -93,6 +94,10 @@ const moduleRoutes = [
   {
     path: '/support',
     route: SupportRoutes,
+  },
+  {
+    path: '/seed',
+    route: SeedRoutes,
   }
 ];
 

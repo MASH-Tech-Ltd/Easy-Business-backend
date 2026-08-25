@@ -3,9 +3,17 @@ import { CategoryService } from './category.service';
 import ApiResponse from '../../utils/apiResponse';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { uploadCloudinary } from "../../helpers/cloudinary";
+import CustomError from "../../helpers/CustomError";
+import { SubscriptionService } from "../subscription/subscription.service";
 
 const createCategory = asyncHandler(async (req: Request, res: Response) => {
-  req.body.tenantId = (req as any).user.tenantId;
+  const tenantId = (req as any).user.tenantId;
+  req.body.tenantId = tenantId;
+
+  const activeSub = await SubscriptionService.getTenantSubscription(tenantId);
+  if (!activeSub || activeSub.status !== 'active') {
+    throw new CustomError(403, 'You do not have an active subscription. Please upgrade your plan to add categories.');
+  }
 
   if (req.file) {
     const uploadResult = await uploadCloudinary(req.file.path);

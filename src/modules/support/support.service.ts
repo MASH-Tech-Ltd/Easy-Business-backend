@@ -177,10 +177,15 @@ export const supportService = {
     return ticket;
   },
 
-  async updateTicketStatus(ticketId: string, status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED') {
-    const ticket = await SupportTicket.findById(ticketId);
+  // SECURITY FIX: tenantId scopes the update to a specific tenant's ticket
+  // super_admin passes undefined (no scope), tenant_admin passes their tenantId
+  async updateTicketStatus(ticketId: string, status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED', tenantId?: string) {
+    const query: any = { _id: ticketId };
+    if (tenantId) query.tenantId = tenantId;
+
+    const ticket = await SupportTicket.findOne(query);
     if (!ticket) {
-      throw new Error('Ticket not found');
+      return null;
     }
 
     ticket.status = status;
@@ -216,10 +221,14 @@ export const supportService = {
     return ticket;
   },
 
-  async deleteTicket(ticketId: string) {
-    const ticket = await SupportTicket.findById(ticketId);
+  // SECURITY FIX: tenantId scopes the delete to a specific tenant's ticket
+  async deleteTicket(ticketId: string, tenantId?: string) {
+    const query: any = { _id: ticketId };
+    if (tenantId) query.tenantId = tenantId;
+
+    const ticket = await SupportTicket.findOne(query);
     if (!ticket) {
-      throw new Error('Ticket not found');
+      return null;
     }
 
     // Emit event before deleting so clients can redirect

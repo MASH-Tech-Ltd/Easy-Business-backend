@@ -54,7 +54,6 @@ export const globalErrorHandler = (
   next: NextFunction
 ): Response | void => {
   console.error("Global Error Handler caught an error:", error);
-  console.error("Request Body:", req.body);
   
   if (req.file && req.file.path && fs.existsSync(req.file.path)) {
     try { fs.unlinkSync(req.file.path); } catch (e) { console.error("Failed to delete temp file:", e); }

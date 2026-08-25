@@ -73,14 +73,15 @@ export const updateTicketStatus = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
-    
-    // Both super admin and tenant admin can update status
     const role = (req as any).user.role;
-    if (role !== 'super_admin' && role !== 'tenant_admin') {
-      return res.status(403).json({ success: false, message: 'Not authorized' });
-    }
 
-    const ticket = await supportService.updateTicketStatus(id as string, status);
+    // SECURITY FIX: tenant_admin can only update status on their own tickets
+    const tenantId = role === 'super_admin' ? undefined : (req as any).user.tenantId;
+
+    const ticket = await supportService.updateTicketStatus(id as string, status, tenantId as string);
+    if (!ticket) {
+      return res.status(404).json({ success: false, message: 'Ticket not found or not authorized' });
+    }
     res.status(200).json({ success: true, data: ticket });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
@@ -91,13 +92,14 @@ export const deleteTicket = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const role = (req as any).user.role;
-    
-    // Both super admin and tenant admin can delete
-    if (role !== 'super_admin' && role !== 'tenant_admin') {
-      return res.status(403).json({ success: false, message: 'Not authorized' });
-    }
 
-    await supportService.deleteTicket(id as string);
+    // SECURITY FIX: tenant_admin can only delete their own tickets
+    const tenantId = role === 'super_admin' ? undefined : (req as any).user.tenantId;
+
+    const deleted = await supportService.deleteTicket(id as string, tenantId as string);
+    if (!deleted) {
+      return res.status(404).json({ success: false, message: 'Ticket not found or not authorized' });
+    }
     res.status(200).json({ success: true, message: 'Ticket deleted successfully' });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
