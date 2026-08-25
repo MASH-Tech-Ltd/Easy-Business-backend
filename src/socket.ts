@@ -52,6 +52,16 @@ export const initSocket = (httpServer: http.Server): Server => {
       console.log(`Socket ${socket.id} left user_${userId}`);
     });
 
+    socket.on("join_tenant_room", (tenantId: string) => {
+      socket.join(`tenant_${tenantId}`);
+      console.log(`Socket ${socket.id} joined tenant_${tenantId}`);
+    });
+
+    socket.on("leave_tenant_room", (tenantId: string) => {
+      socket.leave(`tenant_${tenantId}`);
+      console.log(`Socket ${socket.id} left tenant_${tenantId}`);
+    });
+
     socket.on("typing_start", (data: { ticketId: string, senderName: string }) => {
       socket.to(`ticket_${data.ticketId}`).emit("typing_start", data);
     });

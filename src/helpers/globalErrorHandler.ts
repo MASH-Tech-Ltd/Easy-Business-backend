@@ -53,7 +53,11 @@ export const globalErrorHandler = (
   res: Response,
   next: NextFunction
 ): Response | void => {
-  console.error("Global Error Handler caught an error:", error);
+  if (error.name === 'BulkWriteError' || (error as any).code === 11000) {
+    console.error(`Global Error Handler caught a database error: ${error.message}`);
+  } else {
+    console.error("Global Error Handler caught an error:", error);
+  }
   
   if (req.file && req.file.path && fs.existsSync(req.file.path)) {
     try { fs.unlinkSync(req.file.path); } catch (e) { console.error("Failed to delete temp file:", e); }
@@ -95,8 +99,9 @@ export const globalErrorHandler = (
       }));
       err = new CustomError(400, "Validation failed", validationErrors);
     } else if ((error as any).code === 11000) {
-      const key = Object.keys((error as any).keyValue)[0];
-      const value = (error as any).keyValue[key as string];
+      const keyValue = (error as any).keyValue || {};
+      const key = Object.keys(keyValue)[0] || 'unknown field';
+      const value = keyValue[key as string] || '';
       let message = `Duplicate field value: ${value}`;
 
       if (key === "phone") {

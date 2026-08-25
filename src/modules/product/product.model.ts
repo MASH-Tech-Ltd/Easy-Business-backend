@@ -4,7 +4,7 @@ import { IProduct } from './product.interface';
 const productSchema = new Schema<IProduct>(
   {
     title: { type: String, required: true },
-    slug: { type: String, required: true, unique: true },
+    slug: { type: String, required: true },
     shortDescription: { type: String },
     description: { type: String },
     images: [{
@@ -46,16 +46,24 @@ const productSchema = new Schema<IProduct>(
   }
 );
 
-function generateSlug(title: string): string {
-  return title.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Math.random().toString(36).substring(2, 8);
+function generateSlug(title: string, suffix?: string): string {
+  // Remove special characters, keep spaces to replace with hyphens, and ensure no consecutive hyphens
+  let slug = title.toLowerCase().trim().replace(/[^a-z0-9\s-]/g, '').replace(/[\s-]+/g, '-');
+  
+  if (suffix) {
+    const cleanSuffix = suffix.toLowerCase().trim().replace(/[^a-z0-9\s-]/g, '').replace(/[\s-]+/g, '-');
+    slug = `${slug}-${cleanSuffix}`;
+  }
+  
+  return slug;
 }
 
 productSchema.pre('validate', function() {
   if (this.title && !this.slug) {
-    this.slug = generateSlug(this.title);
+    this.slug = generateSlug(this.title, this.sku);
   }
 });
 
-
+productSchema.index({ tenantId: 1, slug: 1 }, { unique: true });
 
 export const Product = model<IProduct>('Product', productSchema);

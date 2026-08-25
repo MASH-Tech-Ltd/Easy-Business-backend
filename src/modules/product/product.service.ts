@@ -64,9 +64,46 @@ const getMyProducts = async (tenantId: string, query: any): Promise<{ data: IPro
   };
 };
 
-const getProductsByTenant = async (tenantId: string): Promise<IProduct[]> => {
-  const result = await Product.find({ tenantId: new Types.ObjectId(tenantId) }).populate('categoryId');
-  return result;
+const getProductsByTenant = async (tenantId: string, query: any): Promise<{ data: IProduct[], meta: any }> => {
+  const { page, limit, skip } = paginationHelper(query?.page, query?.limit);
+  const { search, sortBy, sortOrder, categoryId } = query;
+
+  const filter: any = { tenantId: new Types.ObjectId(tenantId), status: 'ACTIVE' };
+  
+  if (search) {
+    filter.$or = [
+      { title: { $regex: search, $options: 'i' } },
+      { description: { $regex: search, $options: 'i' } },
+      { shortDescription: { $regex: search, $options: 'i' } },
+    ];
+  }
+
+  if (categoryId && categoryId !== 'all') {
+    filter.categoryId = new Types.ObjectId(categoryId);
+  }
+
+  const sortCondition: any = {};
+  const safeSortBy = ALLOWED_SORT_FIELDS.includes(sortBy) ? sortBy : 'createdAt';
+  sortCondition[safeSortBy] = sortOrder === 'asc' ? 1 : -1;
+
+  const [data, total] = await Promise.all([
+    Product.find(filter)
+      .populate('categoryId')
+      .sort(sortCondition)
+      .skip(skip)
+      .limit(limit),
+    Product.countDocuments(filter)
+  ]);
+
+  return {
+    data,
+    meta: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    }
+  };
 };
 
 const getSingleProduct = async (id: string): Promise<IProduct | null> => {

@@ -1,7 +1,9 @@
 import { ISubscription } from './subscription.interface';
 import { Subscription } from './subscription.model';
 import { Package } from '../package/package.model';
+import { Tenant } from '../tenant/tenant.model';
 import CustomError from '../../helpers/CustomError';
+import { paginationHelper } from '../../helpers/paginationHelper';
 
 const assignPackage = async (payload: { tenantId: string, packageId: string }): Promise<ISubscription> => {
   const selectedPackage = await Package.findById(payload.packageId);
@@ -10,7 +12,14 @@ const assignPackage = async (payload: { tenantId: string, packageId: string }): 
   }
 
   const startDate = new Date();
-  const endDate = new Date();
+  
+  // Find current active subscription to calculate baseline for expiration
+  const currentActive = await Subscription.findOne({ tenantId: payload.tenantId, status: 'active' });
+  const baseDate = (currentActive && currentActive.endDate > new Date()) 
+    ? new Date(currentActive.endDate) 
+    : new Date();
+
+  const endDate = new Date(baseDate);
   if (selectedPackage.billingCycle === 'yearly') {
     endDate.setFullYear(endDate.getFullYear() + 1);
   } else {
@@ -104,7 +113,14 @@ const approveSubscription = async (subscriptionId: string): Promise<ISubscriptio
 
   const selectedPackage = subscription.packageId as any;
   const startDate = new Date();
-  const endDate = new Date();
+  
+  // Find current active subscription to calculate baseline for expiration
+  const currentActive = await Subscription.findOne({ tenantId: subscription.tenantId, status: 'active' });
+  const baseDate = (currentActive && currentActive.endDate > new Date()) 
+    ? new Date(currentActive.endDate) 
+    : new Date();
+
+  const endDate = new Date(baseDate);
   if (selectedPackage.billingCycle === 'yearly') {
     endDate.setFullYear(endDate.getFullYear() + 1);
   } else {
@@ -137,26 +153,53 @@ const rejectSubscription = async (subscriptionId: string): Promise<ISubscription
   return subscription;
 };
 
-const getAllSubscriptions = async (): Promise<ISubscription[]> => {
-  // Sort pending requests at the top, then sort by createdAt descending
-  const subscriptions = await Subscription.find({})
-    .populate({
-      path: 'tenantId',
-      populate: { path: 'ownerId', select: 'email name' }
-    })
-    .populate('packageId')
-    .sort({ status: -1, createdAt: -1 }); 
-  // Note: in mongoose sort, sorting by status string will sort alphabetically (active, cancelled, expired, pending).
-  // 'pending' starts with p, so it comes last. We should probably sort in JS or use an aggregation to guarantee pending is first.
-  
-  // Custom sort in JS to ensure 'pending' is at the very top:
-  return subscriptions.sort((a, b) => {
-    if (a.status === 'pending' && b.status !== 'pending') return -1;
-    if (a.status !== 'pending' && b.status === 'pending') return 1;
-    const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-    const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-    return timeB - timeA;
-  });
+const getAllSubscriptions = async (query: any): Promise<{ data: any[]; meta: any }> => {
+  const { page, limit, skip } = paginationHelper(query?.page, query?.limit);
+  const { search, status, sortBy } = query;
+
+  let filter: any = {};
+  if (status && status !== 'all') {
+    filter.status = status;
+  }
+
+  if (search) {
+    const tenants = await Tenant.find({
+      $or: [
+        { name: { $regex: search, $options: 'i' } },
+        { domain: { $regex: search, $options: 'i' } }
+      ]
+    }).select('_id');
+    const tenantIds = tenants.map(t => t._id);
+    filter.tenantId = { $in: tenantIds };
+  }
+
+  let sortCriteria: any = { status: -1, createdAt: -1 };
+  if (sortBy === 'newest') sortCriteria = { createdAt: -1 };
+  else if (sortBy === 'oldest') sortCriteria = { createdAt: 1 };
+
+  const [data, total] = await Promise.all([
+    Subscription.find(filter)
+      .populate({
+        path: 'tenantId',
+        populate: { path: 'ownerId', select: 'email name' }
+      })
+      .populate('packageId')
+      .sort(sortCriteria)
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Subscription.countDocuments(filter)
+  ]);
+
+  return {
+    data,
+    meta: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    }
+  };
 };
 
 const updateSubscription = async (subscriptionId: string, payload: Partial<ISubscription>): Promise<ISubscription> => {

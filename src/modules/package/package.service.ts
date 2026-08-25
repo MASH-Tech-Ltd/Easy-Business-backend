@@ -33,8 +33,17 @@ const updatePackage = async (id: string, payload: Partial<IPackage>): Promise<IP
   return result;
 };
 
+const deletePackage = async (id: string): Promise<IPackage | null> => {
+  const result = await Package.findByIdAndDelete(id);
+  if (!result) {
+    throw new CustomError(404, 'Package not found');
+  }
+  return result;
+};
+
 export const PackageService = {
   createPackage,
   getAllPackages,
   updatePackage,
+  deletePackage
 };

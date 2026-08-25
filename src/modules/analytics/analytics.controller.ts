@@ -60,6 +60,81 @@ const getDashboardStats = asyncHandler(async (req: Request, res: Response) => {
   });
 });
 
+const getDashboardSummary = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = (req as any).user.tenantId;
+  const days = parseInt(req.query.days as string) || 7;
+  const mongoose = require('mongoose');
+
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+
+  const { Tenant } = require('../tenant/tenant.model');
+  const { Subscription } = require('../subscription/subscription.model');
+  const { Product } = require('../product/product.model');
+  const { Category } = require('../category/category.model');
+
+  // Run all independent queries in parallel using Promise.all
+  const [
+    storeInfo,
+    totalOrders,
+    totalCustomers,
+    revenueResult,
+    recentOrders,
+    subscription,
+    totalProds,
+    draftProds,
+    topProducts,
+    allCats
+  ] = await Promise.all([
+    Tenant.findById(tenantId).select('name slug'),
+    Order.countDocuments({ tenantId, createdAt: { $gte: startDate } }),
+    Customer.countDocuments({ tenantId }),
+    Order.aggregate([
+      { $match: { tenantId: new mongoose.Types.ObjectId(tenantId), createdAt: { $gte: startDate }, status: { $regex: new RegExp('^delivered$', 'i') } } },
+      { $group: { _id: null, totalRevenue: { $sum: '$totalPrice' } } }
+    ]),
+    Order.find({ tenantId }).sort({ createdAt: -1 }).limit(5),
+    Subscription.findOne({ tenantId, status: 'active' }).populate('packageId'),
+    Product.countDocuments({ tenantId }),
+    Product.countDocuments({ tenantId, status: 'DRAFT' }),
+    Product.find({ tenantId }).sort({ salesCount: -1 }).limit(4).lean(),
+    Category.find({ tenantId }).select('status')
+  ]);
+
+  const totalRevenue = revenueResult.length > 0 ? revenueResult[0].totalRevenue : 0;
+
+  // Calculate category stats
+  const categoryStats = {
+    total: allCats.length,
+    active: allCats.filter((c: any) => c.status !== 'INACTIVE').length,
+    inactive: allCats.filter((c: any) => c.status === 'INACTIVE').length,
+  };
+
+  const productStats = {
+    total: totalProds,
+    active: totalProds - draftProds,
+    inactive: draftProds
+  };
+
+  // Compile final result
+  const summary = {
+    store: storeInfo,
+    stats: {
+      totalRevenue,
+      totalOrders,
+      totalCustomers,
+      conversionRate: 3.2 // static for now
+    },
+    recentOrders,
+    subscription,
+    productStats,
+    topProducts,
+    categoryStats
+  };
+
+  ApiResponse.sendSuccess(res, 200, 'Dashboard summary retrieved', summary);
+});
+
 const getSuperAdminStats = asyncHandler(async (req: Request, res: Response) => {
   const { Tenant } = require('../tenant/tenant.model');
   const { Subscription } = require('../subscription/subscription.model');
@@ -99,4 +174,5 @@ const getSuperAdminStats = asyncHandler(async (req: Request, res: Response) => {
 export const AnalyticsController = {
   getDashboardStats,
   getSuperAdminStats,
+  getDashboardSummary,
 };

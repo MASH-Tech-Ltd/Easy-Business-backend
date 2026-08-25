@@ -2,6 +2,8 @@ import { Order } from './order.model';
 import { IOrder } from './order.interface';
 import { Customer } from '../customer/customer.model';
 import { Product } from '../product/product.model';
+import { getIO } from '../../socket';
+import { Notification } from '../notification/notification.model';
 
 const createOrder = async (payload: IOrder): Promise<IOrder> => {
   const result = await Order.create(payload);
@@ -30,10 +32,33 @@ const createOrder = async (payload: IOrder): Promise<IOrder> => {
     console.error('Error tracking customer details:', error);
   }
 
+  try {
+    const io = getIO();
+    io.to(`tenant_${payload.tenantId}`).emit('new_order', result);
+
+    // Create database notification for the merchant
+    const tenantAdmin = await User.findOne({ tenantId: payload.tenantId, role: 'tenant_admin' });
+    if (tenantAdmin) {
+      const notification = await Notification.create({
+        recipientId: tenantAdmin._id,
+        tenantId: payload.tenantId,
+        type: 'NEW_ORDER',
+        title: 'New Order Received',
+        message: `Order from ${payload.customerName} for ${payload.totalPrice} BDT`,
+        relatedEntityId: result._id
+      });
+      // Emit to the merchant's personal user room so the NotificationBell component updates
+      io.to(`user_${tenantAdmin._id}`).emit('new_notification', notification);
+    }
+  } catch (error) {
+    console.error('Socket emit error for new_order:', error);
+  }
+
   return result;
 };
 
 import { paginationHelper } from '../../helpers/paginationHelper';
+import { User } from '../auth/auth.model';
 
 const getOrdersByTenant = async (tenantId: string, query: any = {}) => {
   const { page, limit, skip } = paginationHelper(query.page, query.limit);

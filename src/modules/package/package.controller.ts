@@ -20,8 +20,14 @@ const updatePackage = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 200, 'Package updated successfully', result);
 });
 
+const deletePackage = asyncHandler(async (req: Request, res: Response) => {
+  const result = await PackageService.deletePackage(req.params.id as string);
+  ApiResponse.sendSuccess(res, 200, 'Package deleted successfully', result);
+});
+
 export const PackageController = {
   createPackage,
   getAllPackages,
   updatePackage,
+  deletePackage
 };

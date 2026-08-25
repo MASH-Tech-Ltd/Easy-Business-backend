@@ -7,6 +7,7 @@ import { Subscription } from '../subscription/subscription.model';
 import ApiResponse from '../../utils/apiResponse';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { Types } from 'mongoose';
+import { paginationHelper } from '../../helpers/paginationHelper';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -118,6 +119,22 @@ const getProducts = asyncHandler(async (req: Request, res: Response) => {
     if (maxPrice !== undefined) query.discountedPrice.$lte = Number(maxPrice);
   }
 
+  const { page: pageNum, limit: limitNum, skip } = paginationHelper(page as string, (limit as string) || 20);
+
+  if (sort === 'random') {
+    const randomDocs = await Product.aggregate([
+      { $match: query },
+      { $sample: { size: Number(limitNum) } }
+    ]);
+    const populatedDocs = await Product.populate(randomDocs, { path: 'categoryId' });
+    const total = await Product.countDocuments(query);
+
+    return ApiResponse.sendSuccess(res, 200, 'Products retrieved successfully', {
+      data: populatedDocs,
+      pagination: { total, page: pageNum, totalPages: Math.ceil(total / limitNum) }
+    });
+  }
+
   let productsQuery = Product.find(query).populate('categoryId');
   if (sort === 'price_asc') productsQuery = productsQuery.sort({ discountedPrice: 1 });
   else if (sort === 'price_desc') productsQuery = productsQuery.sort({ discountedPrice: -1 });
@@ -126,9 +143,6 @@ const getProducts = asyncHandler(async (req: Request, res: Response) => {
   else if (sort === 'brand') productsQuery = productsQuery.sort({ brand: 1 });
   else productsQuery = productsQuery.sort({ createdAt: -1 });
 
-  const pageNum = Number(page) || 1;
-  const limitNum = Number(limit) || 20;
-  const skip = (pageNum - 1) * limitNum;
   productsQuery = productsQuery.skip(skip).limit(limitNum);
 
   const [products, total] = await Promise.all([productsQuery, Product.countDocuments(query)]);

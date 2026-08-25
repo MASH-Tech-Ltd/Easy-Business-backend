@@ -45,8 +45,8 @@ const rejectSubscription = asyncHandler(async (req: Request, res: Response) => {
 });
 
 const getAllSubscriptions = asyncHandler(async (req: Request, res: Response) => {
-  const result = await SubscriptionService.getAllSubscriptions();
-  ApiResponse.sendSuccess(res, 200, 'All subscriptions retrieved successfully', result);
+  const result = await SubscriptionService.getAllSubscriptions(req.query);
+  ApiResponse.sendSuccess(res, 200, 'All subscriptions retrieved successfully', result.data, result.meta);
 });
 
 const updateSubscription = asyncHandler(async (req: Request, res: Response) => {

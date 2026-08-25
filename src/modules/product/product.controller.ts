@@ -78,12 +78,14 @@ const getProductsByTenant = asyncHandler(
   async (req: Request, res: Response) => {
     const result = await ProductService.getProductsByTenant(
       req.params.tenantId as string,
+      req.query
     );
     ApiResponse.sendSuccess(
       res,
       200,
       "Products retrieved successfully",
-      result,
+      result.data,
+      result.meta
     );
   },
 );

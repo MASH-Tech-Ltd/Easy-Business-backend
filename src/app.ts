@@ -4,6 +4,7 @@ import morgan from 'morgan';
 import routes from './routes/index';
 import { globalErrorHandler } from './helpers/globalErrorHandler';
 import { notFound } from './middleware/notFound';
+import { globalRateLimiter } from './middleware/rateLimiter';
 import config from './config/index';
 
 const app: Application = express();
@@ -41,6 +42,7 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan(config.env === 'development' ? 'dev' : 'short'));
+app.use(globalRateLimiter);
 
 import { tenantMiddleware } from './middleware/tenant.middleware';
 

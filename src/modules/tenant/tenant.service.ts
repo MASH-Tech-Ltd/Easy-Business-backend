@@ -8,6 +8,8 @@ import { Subscription } from "../subscription/subscription.model";
 import { Order } from "../order/order.model";
 import { Courier } from "../courier/courier.model";
 import { FraudCheck } from "../fraudCheck/fraudCheck.model";
+import { Category } from "../category/category.model";
+import { Product } from "../product/product.model";
 import mongoose from "mongoose";
 
 const createTenant = async (payload: any): Promise<ITenant> => {
@@ -182,10 +184,22 @@ const updateTenant = async (id: string, payload: Partial<ITenant>) => {
 };
 
 const getTenantMetrics = async (tenantId: string) => {
-  const [totalOrders, fraudChecks, courierConfigs] = await Promise.all([
+  const [
+    totalOrders, 
+    fraudChecks, 
+    courierConfigs,
+    totalCategories,
+    activeCategories,
+    totalProducts,
+    activeProducts
+  ] = await Promise.all([
     Order.countDocuments({ tenantId }),
     FraudCheck.countDocuments({ tenantId }),
-    Courier.find({ tenantId })
+    Courier.find({ tenantId }),
+    Category.countDocuments({ tenantId }),
+    Category.countDocuments({ tenantId, status: 'ACTIVE' }),
+    Product.countDocuments({ tenantId }),
+    Product.countDocuments({ tenantId, status: 'ACTIVE' })
   ]);
 
   const configuredCouriers = courierConfigs.filter(c => c.provider).map(c => c.provider);
@@ -194,7 +208,11 @@ const getTenantMetrics = async (tenantId: string) => {
     totalOrders,
     fraudChecks,
     courierStatus: configuredCouriers.length > 0 ? `Configured (${configuredCouriers.length})` : 'Not Configured',
-    configuredCouriers
+    configuredCouriers,
+    totalCategories,
+    activeCategories,
+    totalProducts,
+    activeProducts
   };
 };
 

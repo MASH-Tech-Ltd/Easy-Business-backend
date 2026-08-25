@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import config from '../config';
+import { roleBasedRateLimiter } from './rateLimiter';
 
 export const authMiddleware = (...requiredRoles: string[]) => {
   return async (req: Request, res: Response, next: NextFunction) => {
@@ -18,7 +19,9 @@ export const authMiddleware = (...requiredRoles: string[]) => {
       }
 
       req.user = verifiedUser;
-      next();
+      
+      // Apply role-based rate limiting automatically to all protected routes
+      return roleBasedRateLimiter(req, res, next);
     } catch (error) {
       return res.status(401).json({ success: false, message: 'Invalid token' });
     }
