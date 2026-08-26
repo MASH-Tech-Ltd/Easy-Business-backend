@@ -153,6 +153,45 @@ const getProducts = asyncHandler(async (req: Request, res: Response) => {
   });
 });
 
+const getBestsellingProducts = asyncHandler(async (req: Request, res: Response) => {
+  const tenantSlug = req.params.tenantSlug as string;
+  const tenantId = await resolveTenant(tenantSlug);
+  const { storeDown } = await checkStoreSubscription(tenantId);
+  if (storeDown) {
+    return res.status(402).json({ success: false, storeDown: true, message: 'Store subscription inactive or expired' });
+  }
+
+  const limitNum = req.query.limit ? parseInt(req.query.limit as string) : 8;
+  const bestsellers = await Product.find({ tenantId, status: 'ACTIVE' })
+    .populate('categoryId')
+    .sort({ salesCount: -1 })
+    .limit(limitNum);
+
+  ApiResponse.sendSuccess(res, 200, 'Bestselling products retrieved successfully', {
+    data: bestsellers
+  });
+});
+
+const getJustForYouProducts = asyncHandler(async (req: Request, res: Response) => {
+  const tenantSlug = req.params.tenantSlug as string;
+  const tenantId = await resolveTenant(tenantSlug);
+  const { storeDown } = await checkStoreSubscription(tenantId);
+  if (storeDown) {
+    return res.status(402).json({ success: false, storeDown: true, message: 'Store subscription inactive or expired' });
+  }
+
+  const limitNum = req.query.limit ? parseInt(req.query.limit as string) : 8;
+  const randomDocs = await Product.aggregate([
+    { $match: { tenantId, status: 'ACTIVE' } },
+    { $sample: { size: limitNum } }
+  ]);
+  const populatedDocs = await Product.populate(randomDocs, { path: 'categoryId' });
+
+  ApiResponse.sendSuccess(res, 200, 'Just For You products retrieved successfully', {
+    data: populatedDocs
+  });
+});
+
 const getProductBySlug = asyncHandler(async (req: Request, res: Response) => {
   const tenantSlug = req.params.tenantSlug as string;
   const slug = req.params.slug as string;
@@ -210,6 +249,8 @@ export const StorefrontController = {
   getInfo,
   getTheme,
   getProducts,
+  getBestsellingProducts,
+  getJustForYouProducts,
   getProductBySlug,
   getCategories,
   getBrands,

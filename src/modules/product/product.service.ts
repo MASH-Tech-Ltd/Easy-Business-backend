@@ -106,6 +106,17 @@ const getProductsByTenant = async (tenantId: string, query: any): Promise<{ data
   };
 };
 
+const getBestsellingProducts = async (tenantId: string, limit: number = 8): Promise<IProduct[]> => {
+  const result = await Product.find({ 
+    tenantId: new Types.ObjectId(tenantId), 
+    status: 'ACTIVE' 
+  })
+    .populate('categoryId')
+    .sort({ salesCount: -1 })
+    .limit(limit);
+  return result;
+};
+
 const getSingleProduct = async (id: string): Promise<IProduct | null> => {
   const result = await Product.findById(id).populate('categoryId');
   return result;
@@ -138,6 +149,7 @@ export const ProductService = {
   getAllProducts,
   getMyProducts,
   getProductsByTenant,
+  getBestsellingProducts,
   getSingleProduct,
   updateProduct,
   deleteProduct,

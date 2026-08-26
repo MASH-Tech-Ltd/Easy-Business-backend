@@ -20,6 +20,17 @@ export interface IFooterSetting {
   copyrightText?: string;
 }
 
+export interface IBannerSetting {
+  image?: {
+    public_id: string;
+    secure_url: string;
+  };
+  title?: string;
+  subtitle?: string;
+  buttonText?: string;
+  buttonLink?: string;
+}
+
 export interface ITheme extends Document {
   tenantId: Types.ObjectId;
   themeId: string;
@@ -27,6 +38,11 @@ export interface ITheme extends Document {
   fontFamily: string;
   language?: string;
   footer?: IFooterSetting;
+  banner?: IBannerSetting;
+  buttonColors?: {
+    addToCart?: string;
+    buyNow?: string;
+  };
 }
 
 const footerSchema = new Schema<IFooterSetting>({
@@ -49,6 +65,17 @@ const footerSchema = new Schema<IFooterSetting>({
   copyrightText: { type: String, default: '' },
 }, { _id: false });
 
+const bannerSchema = new Schema<IBannerSetting>({
+  image: {
+    public_id: { type: String, default: '' },
+    secure_url: { type: String, default: '' },
+  },
+  title: { type: String, default: '' },
+  subtitle: { type: String, default: '' },
+  buttonText: { type: String, default: '' },
+  buttonLink: { type: String, default: '' },
+}, { _id: false });
+
 const themeSchema = new Schema<ITheme>(
   {
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, unique: true },
@@ -57,6 +84,11 @@ const themeSchema = new Schema<ITheme>(
     fontFamily: { type: String, default: 'Inter' },
     language: { type: String, enum: ['en', 'bn'], default: 'en' },
     footer: { type: footerSchema, default: () => ({}) },
+    banner: { type: bannerSchema, default: () => ({}) },
+    buttonColors: {
+      addToCart: { type: String, default: '' },
+      buyNow: { type: String, default: '' },
+    },
   },
   { timestamps: true }
 );

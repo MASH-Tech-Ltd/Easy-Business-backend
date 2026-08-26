@@ -90,6 +90,12 @@ const getProductsByTenant = asyncHandler(
   },
 );
 
+const getBestsellingProducts = asyncHandler(async (req: Request, res: Response) => {
+  const limit = req.query.limit ? parseInt(req.query.limit as string) : 8;
+  const result = await ProductService.getBestsellingProducts(req.params.tenantId as string, limit);
+  ApiResponse.sendSuccess(res, 200, "Bestselling products retrieved successfully", result);
+});
+
 const getMyProducts = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = (req as any).user.tenantId;
   const result = await ProductService.getMyProducts(tenantId, req.query);
@@ -206,6 +212,7 @@ export const ProductController = {
   getAllProducts,
   getMyProducts,
   getProductsByTenant,
+  getBestsellingProducts,
   getSingleProduct,
   updateProduct,
   deleteProduct,
