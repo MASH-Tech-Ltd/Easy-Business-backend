@@ -11,15 +11,19 @@ const assignPackage = async (payload: { tenantId: string, packageId: string }): 
     throw new CustomError(404, 'Package not found');
   }
 
-  const startDate = new Date();
-  
-  // Find current active subscription to calculate baseline for expiration
-  const currentActive = await Subscription.findOne({ tenantId: payload.tenantId, status: 'active' });
-  const baseDate = (currentActive && currentActive.endDate > new Date()) 
-    ? new Date(currentActive.endDate) 
-    : new Date();
+  // Find the most recent subscription (any status) to calculate the baseline.
+  // If renewing before expiry: startDate = previous endDate (seamless extension, no gap).
+  // If renewing after expiry:  startDate = previous endDate (credit from when the last period ended).
+  // If no prior subscription at all: startDate = now.
+  const lastSub = await Subscription.findOne(
+    { tenantId: payload.tenantId, status: { $in: ['active', 'expired', 'cancelled'] } },
+    null,
+    { sort: { endDate: -1 } }
+  );
 
-  const endDate = new Date(baseDate);
+  const startDate = (lastSub && lastSub.endDate) ? new Date(lastSub.endDate) : new Date();
+  const endDate = new Date(startDate);
+
   if (selectedPackage.billingCycle === 'yearly') {
     endDate.setFullYear(endDate.getFullYear() + 1);
   } else {
@@ -41,35 +45,16 @@ const assignPackage = async (payload: { tenantId: string, packageId: string }): 
 };
 
 const getTenantSubscription = async (tenantId: string): Promise<ISubscription | null> => {
-  // Find the most recent active/pending subscription
+  // Sort by endDate DESC so the subscription with the furthest expiry is checked first.
+  // This prevents an older expired record from shadowing a valid active one.
   let result = await Subscription.findOne(
     { tenantId, status: { $in: ['active', 'pending'] } },
     null,
-    { sort: { createdAt: -1 } }
+    { sort: { endDate: -1 } }
   ).populate('packageId');
 
-  // Backward compatibility: If no active/pending subscription exists,
-  // check if they have ANY subscription history (including expired ones).
-  if (!result) {
-    const hasAnySubscription = await Subscription.exists({ tenantId });
-    
-    if (!hasAnySubscription) {
-      const trialStart = new Date();
-      const trialEnd = new Date();
-      trialEnd.setDate(trialEnd.getDate() + 5);
-      
-      result = await Subscription.create({
-        tenantId,
-        startDate: trialStart,
-        endDate: trialEnd,
-        status: 'active',
-        isTrial: true,
-      });
-    }
-  }
-
   // Lazy expiry: if the active subscription has passed its endDate, mark it expired
-  if (result && result.status === 'active' && new Date(result.endDate) < new Date()) {
+  if (result && result.status === 'active' && new Date(result.endDate).getTime() < Date.now()) {
     result.status = 'expired';
     await result.save();
     // Return null so callers treat this as "no active subscription"
@@ -112,15 +97,18 @@ const approveSubscription = async (subscriptionId: string): Promise<ISubscriptio
   }
 
   const selectedPackage = subscription.packageId as any;
-  const startDate = new Date();
-  
-  // Find current active subscription to calculate baseline for expiration
-  const currentActive = await Subscription.findOne({ tenantId: subscription.tenantId, status: 'active' });
-  const baseDate = (currentActive && currentActive.endDate > new Date()) 
-    ? new Date(currentActive.endDate) 
-    : new Date();
 
-  const endDate = new Date(baseDate);
+  // Find the most recent non-pending subscription (active or expired) to determine
+  // the correct start date. New period always begins from where the last one ended.
+  const lastSub = await Subscription.findOne(
+    { tenantId: subscription.tenantId, status: { $in: ['active', 'expired', 'cancelled'] } },
+    null,
+    { sort: { endDate: -1 } }
+  );
+
+  const startDate = (lastSub && lastSub.endDate) ? new Date(lastSub.endDate) : new Date();
+  const endDate = new Date(startDate);
+
   if (selectedPackage.billingCycle === 'yearly') {
     endDate.setFullYear(endDate.getFullYear() + 1);
   } else {

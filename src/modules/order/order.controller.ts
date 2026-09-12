@@ -36,9 +36,27 @@ const deleteOrder = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 200, 'Order deleted successfully', result);
 });
 
+const trackOrder = asyncHandler(async (req: Request, res: Response) => {
+  const tenantIdFromMiddleware = (req as any).tenantId;
+  const tenantIdFromQuery = req.query.tenantId as string;
+  const tenantId = tenantIdFromMiddleware || tenantIdFromQuery;
+  
+  if (!tenantId) {
+    return ApiResponse.sendError(res, 400, 'Tenant context could not be resolved');
+  }
+
+  const { id } = req.params;
+  const result = await OrderService.getOrderById(id as string, tenantId);
+  if (!result) {
+    return ApiResponse.sendError(res, 404, 'Order not found');
+  }
+  ApiResponse.sendSuccess(res, 200, 'Order found', result);
+});
+
 export const OrderController = {
   createOrder,
   getMyOrders,
   updateOrder,
   deleteOrder,
+  trackOrder,
 };

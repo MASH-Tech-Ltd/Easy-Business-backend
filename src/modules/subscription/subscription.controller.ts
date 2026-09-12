@@ -24,7 +24,26 @@ const getTenantSubscription = asyncHandler(async (req: Request, res: Response) =
 
 const getMySubscription = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = (req as any).user.tenantId;
+  const includeExpired = req.query.includeExpired === 'true';
+
   const result = await SubscriptionService.getTenantSubscription(tenantId);
+
+  if (!result && includeExpired) {
+    // No active sub — return the last expired/cancelled one for display purposes
+    const lastSub = await (await import('./subscription.model')).Subscription.findOne(
+      { tenantId, status: { $in: ['expired', 'cancelled'] } },
+      null,
+      { sort: { endDate: -1 } }
+    ).populate('packageId');
+
+    if (lastSub) {
+      return ApiResponse.sendSuccess(res, 200, 'My subscription retrieved successfully', {
+        ...lastSub.toObject(),
+        status: 'expired', // normalise to expired regardless of cancelled
+      });
+    }
+  }
+
   ApiResponse.sendSuccess(res, 200, 'My subscription retrieved successfully', result);
 });
 

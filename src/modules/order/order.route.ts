@@ -7,6 +7,9 @@ const router = Router();
 // Storefront creates order (public)
 router.post('/create-order', OrderController.createOrder);
 
+// Storefront tracks order (public)
+router.get('/track/:id', OrderController.trackOrder);
+
 // Dashboard gets orders (protected)
 router.get('/my-orders', authMiddleware('tenant_admin'), OrderController.getMyOrders);
 

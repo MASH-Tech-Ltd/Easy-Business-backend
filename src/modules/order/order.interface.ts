@@ -9,6 +9,7 @@ export interface IOrderItem {
 }
 
 export interface IOrder extends Document {
+  orderId: string;
   customerName: string;
   customerPhone: string;
   shippingAddress: string;

@@ -3,7 +3,6 @@ import { Tenant } from "./tenant.model";
 import { User } from "../auth/auth.model";
 import CustomError from "../../helpers/CustomError";
 import { paginationHelper } from "../../helpers/paginationHelper";
-import { Package } from "../package/package.model";
 import { Subscription } from "../subscription/subscription.model";
 import { Order } from "../order/order.model";
 import { Courier } from "../courier/courier.model";
@@ -49,21 +48,18 @@ const createTenant = async (payload: any): Promise<ITenant> => {
     newTenant[0].ownerId = adminUser[0]._id;
     await newTenant[0].save({ session });
 
-    // 4. Assign 1-Month Free Tier Package
-    const freePackage = await Package.findOne({ price: 0, billingCycle: 'monthly' }).session(session);
-    if (freePackage) {
-      const startDate = new Date();
-      const endDate = new Date();
-      endDate.setMonth(endDate.getMonth() + 1);
+    // 4. Create a 5-day free trial subscription (first-time only, no package required)
+    const trialStart = new Date();
+    const trialEnd = new Date();
+    trialEnd.setDate(trialEnd.getDate() + 5);
 
-      await Subscription.create([{
-        tenantId: newTenant[0]._id,
-        packageId: freePackage._id,
-        startDate,
-        endDate,
-        status: 'active'
-      }], { session });
-    }
+    await Subscription.create([{
+      tenantId: newTenant[0]._id,
+      startDate: trialStart,
+      endDate: trialEnd,
+      status: 'active',
+      isTrial: true,
+    }], { session });
 
     await session.commitTransaction();
     session.endSession();

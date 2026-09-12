@@ -6,6 +6,15 @@ import { getIO } from '../../socket';
 import { Notification } from '../notification/notification.model';
 
 const createOrder = async (payload: IOrder): Promise<IOrder> => {
+  let newOrderId;
+  let isUnique = false;
+  while (!isUnique) {
+    newOrderId = Math.floor(100000 + Math.random() * 900000).toString();
+    const existing = await Order.findOne({ orderId: newOrderId });
+    if (!existing) isUnique = true;
+  }
+  payload.orderId = newOrderId;
+
   const result = await Order.create(payload);
 
   try {
@@ -142,9 +151,22 @@ const deleteOrder = async (id: string, tenantId: string) => {
   return result;
 };
 
+import mongoose from 'mongoose';
+
+const getOrderById = async (id: string, tenantId?: string) => {
+  const cleanId = id.replace(/^#/, '');
+  
+  let query: any = { orderId: cleanId };
+  if (tenantId) query.tenantId = tenantId;
+  
+  const result = await Order.findOne(query);
+  return result;
+};
+
 export const OrderService = {
   createOrder,
   getOrdersByTenant,
   updateOrder,
   deleteOrder,
+  getOrderById,
 };

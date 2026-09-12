@@ -27,7 +27,7 @@ const checkStoreSubscription = async (tenantId: Types.ObjectId) => {
   const sub = await Subscription.findOne(
     { tenantId, status: { $in: ['active', 'pending'] } },
     null,
-    { sort: { createdAt: -1 } }
+    { sort: { endDate: -1 } }
   );
 
   if (!sub) {
@@ -42,14 +42,15 @@ const checkStoreSubscription = async (tenantId: Types.ObjectId) => {
   if (sub.status === 'active' && end < now) {
     sub.status = 'expired';
     await sub.save();
-    return { storeDown: true, daysLeft: 0, isTrial: sub.isTrial ?? false, reason: 'Subscription expired' };
+    const reason = sub.isTrial ? 'Trial expired' : 'Subscription expired';
+    return { storeDown: true, daysLeft: 0, isTrial: sub.isTrial ?? false, reason };
   }
 
   return {
     storeDown: false,
     daysLeft,
     isTrial: sub.isTrial ?? false,
-    reason: 'Active',
+    reason: sub.isTrial ? 'Trial active' : 'Active',
   };
 };
 

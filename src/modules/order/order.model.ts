@@ -3,6 +3,7 @@ import { IOrder } from './order.interface';
 
 const orderSchema = new Schema<IOrder>(
   {
+    orderId: { type: String, unique: true },
     customerName: { type: String, required: true },
     customerPhone: { type: String, required: true },
     shippingAddress: { type: String, required: true },
