@@ -14,5 +14,6 @@ router.get('/get-product-by-tenant/:tenantId', ProductController.getProductsByTe
 router.get('/get-product/:id', ProductController.getSingleProduct);
 router.patch('/update-product/:id', authMiddleware('tenant_admin'), upload.array('images', 5), ProductController.updateProduct);
 router.delete('/delete-product/:id', authMiddleware('tenant_admin'), ProductController.deleteProduct);
+router.delete('/tenant/:tenantId/all', authMiddleware('super_admin'), ProductController.deleteAllProductsByTenant);
 
 export const ProductRoutes = router;

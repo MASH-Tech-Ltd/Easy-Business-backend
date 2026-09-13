@@ -2,6 +2,7 @@ import { ITenant } from "./tenant.interface";
 import { Tenant } from "./tenant.model";
 import { User } from "../auth/auth.model";
 import CustomError from "../../helpers/CustomError";
+import { deleteCloudinary } from '../../helpers/cloudinary';
 import { paginationHelper } from "../../helpers/paginationHelper";
 import { Subscription } from "../subscription/subscription.model";
 import { Order } from "../order/order.model";
@@ -222,8 +223,53 @@ const deleteTenant = async (id: string) => {
       throw new CustomError(404, 'Tenant not found');
     }
     
+    // Find the user to delete their avatar
+    const adminUser = await User.findOne({ tenantId: id }, null, { session });
+    if (adminUser && adminUser.avatar && adminUser.avatar.public_id) {
+      const { deleteCloudinary } = require('../../helpers/cloudinary');
+      await deleteCloudinary(adminUser.avatar.public_id, 'image').catch((err: any) => console.error("Cloudinary delete error:", err));
+    }
+    
     // Also delete the associated admin user
-    await User.findOneAndDelete({ tenantId: id }, { session });
+    if (adminUser) {
+      await User.findByIdAndDelete(adminUser._id, { session });
+    }
+    
+    // Cascading deletes for all tenant data
+    
+    // 1. Delete product images from Cloudinary
+    const products = await Product.find({ tenantId: id }, null, { session });
+    if (products.length > 0) {
+      const { deleteCloudinary } = require('../../helpers/cloudinary');
+      for (const product of products) {
+        if (product.images && product.images.length > 0) {
+          for (const image of product.images) {
+            if (image.public_id) {
+              await deleteCloudinary(image.public_id, 'image').catch((err: any) => console.error("Cloudinary delete error:", err));
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Delete tenant logo from Cloudinary
+    if (tenant.logo && typeof tenant.logo === 'string') {
+       const parts = tenant.logo.split('/');
+       const filename = parts.pop();
+       if (filename) {
+         const publicId = filename.split('.')[0];
+         if (publicId) {
+           await deleteCloudinary(publicId, 'image').catch((err: any) => console.error("Cloudinary delete error:", err));
+         }
+       }
+    }
+    
+    await Product.deleteMany({ tenantId: id }, { session });
+    await Category.deleteMany({ tenantId: id }, { session });
+    await Order.deleteMany({ tenantId: id }, { session });
+    await Subscription.deleteMany({ tenantId: id }, { session });
+    await FraudCheck.deleteMany({ tenantId: id }, { session });
+    await Courier.deleteMany({ tenantId: id }, { session });
     
     await session.commitTransaction();
     session.endSession();

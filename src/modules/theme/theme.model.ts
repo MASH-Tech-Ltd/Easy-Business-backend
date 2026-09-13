@@ -31,18 +31,28 @@ export interface IBannerSetting {
   buttonLink?: string;
 }
 
+export interface IShippingZone {
+  name: string;
+  cost: number;
+  division?: string;
+  districts?: string[];
+}
+
 export interface ITheme extends Document {
   tenantId: Types.ObjectId;
   themeId: string;
   primaryColor: string;
   fontFamily: string;
   language?: string;
+  currencySymbol?: string;
   footer?: IFooterSetting;
   banner?: IBannerSetting;
   buttonColors?: {
     addToCart?: string;
     buyNow?: string;
   };
+  shippingZones?: IShippingZone[];
+  defaultShippingCost?: number;
 }
 
 const footerSchema = new Schema<IFooterSetting>({
@@ -83,12 +93,25 @@ const themeSchema = new Schema<ITheme>(
     primaryColor: { type: String, default: '#5022C3' },
     fontFamily: { type: String, default: 'Inter' },
     language: { type: String, enum: ['en', 'bn'], default: 'en' },
+    currencySymbol: { type: String, default: '৳' },
     footer: { type: footerSchema, default: () => ({}) },
     banner: { type: bannerSchema, default: () => ({}) },
     buttonColors: {
       addToCart: { type: String, default: '' },
       buyNow: { type: String, default: '' },
     },
+    shippingZones: {
+      type: [
+        {
+          name: { type: String, required: true },
+          cost: { type: Number, required: true, default: 0 },
+          division: { type: String, default: '' },
+          districts: [{ type: String }],
+        }
+      ],
+      default: [],
+    },
+    defaultShippingCost: { type: Number, default: 120 },
   },
   { timestamps: true }
 );

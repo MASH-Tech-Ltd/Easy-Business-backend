@@ -9,12 +9,14 @@ import { asyncHandler } from '../../utils/asyncHandler';
 import { Types } from 'mongoose';
 import { paginationHelper } from '../../helpers/paginationHelper';
 
+import CustomError from '../../helpers/CustomError';
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // Utility to resolve tenantId from slug
 const resolveTenant = async (slug: string) => {
   const tenant = await Tenant.findOne({ slug, status: 'active' });
-  if (!tenant) throw new Error('Tenant not found');
+  if (!tenant) throw new CustomError(404, 'Tenant not found');
   return tenant._id as Types.ObjectId;
 };
 
@@ -60,8 +62,8 @@ const getStatus = asyncHandler(async (req: Request, res: Response) => {
   const tenantSlug = req.params.tenantSlug as string;
   const tenant = await Tenant.findOne({ slug: tenantSlug, status: 'active' });
   if (!tenant) {
-    return res.status(200).json({
-      success: true,
+    return res.status(404).json({
+      success: false,
       data: { storeDown: true, daysLeft: 0, isTrial: false, reason: 'Store not found' },
     });
   }
@@ -225,7 +227,7 @@ const getBrands = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = await resolveTenant(tenantSlug);
   const { storeDown } = await checkStoreSubscription(tenantId);
   if (storeDown) {
-    return res.status(402).json({ success: false, storeDown: true, message: 'Store subscription inactive or expired' });
+    return res.status(200).json({ success: false, storeDown: true, message: 'Store subscription inactive or expired' });
   }
   const query: any = { tenantId, status: 'ACTIVE', brand: { $nin: [null, ''] } };
   if (categoryId) query.categoryId = categoryId;
@@ -236,9 +238,10 @@ const getBrands = asyncHandler(async (req: Request, res: Response) => {
 
 const getInfo = asyncHandler(async (req: Request, res: Response) => {
   const tenantSlug = req.params.tenantSlug as string;
-  const tenant = await Tenant.findOne({ slug: tenantSlug, status: 'active' }).select('name logo slug domain settings');
+  const tenant = await Tenant.findOne({ slug: tenantSlug, status: 'active' }).select('name logo slug domain settings description');
   if (!tenant) {
-    return ApiResponse.sendError(res, 404, 'Tenant not found');
+    // We MUST return 200 here. Next.js ISR ignores 404s and will keep the stale cache!
+    return res.status(200).json({ success: true, data: null, message: 'Tenant not found' });
   }
   // getInfo is intentionally NOT blocked by subscription — the storefront app needs tenant info
   // even to display the "store down" page (e.g. store name, logo).

@@ -13,6 +13,7 @@ const tenantSchema = new Schema<ITenant>(
     contactEmail: { type: String },
     contactPhone: { type: String },
     contactAddress: { type: String },
+    description: { type: String },
     theme: { type: Schema.Types.Mixed },
     settings: { type: Schema.Types.Mixed },
   },

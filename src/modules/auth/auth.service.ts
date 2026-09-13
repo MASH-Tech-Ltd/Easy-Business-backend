@@ -3,6 +3,7 @@ import { User } from './auth.model';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import config from '../../config';
+import CustomError from '../../helpers/CustomError';
 
 import mongoose from 'mongoose';
 import { Tenant } from '../tenant/tenant.model';
@@ -78,17 +79,17 @@ const register = async (payload: Partial<IUser>): Promise<Omit<IUser, 'password'
   }
 };
 
-const login = async (payload: Partial<IUser>): Promise<{ accessToken: string, user: any }> => {
+const login = async (payload: Partial<IUser>): Promise<{ accessToken: string, refreshToken: string, user: any }> => {
   const { email, password } = payload;
   const user = await User.findOne({ email: email as string }).select('+password');
   
   if (!user || !user.password) {
-    throw new Error('User not found or password not set');
+    throw new CustomError(401, 'Invalid email or password');
   }
 
   const isPasswordMatch = await bcrypt.compare(password as string, user.password);
   if (!isPasswordMatch) {
-    throw new Error('Invalid email or password');
+    throw new CustomError(401, 'Invalid email or password');
   }
 
   const jwtPayload = {
@@ -98,8 +99,12 @@ const login = async (payload: Partial<IUser>): Promise<{ accessToken: string, us
     tenantId: user.tenantId,
   };
 
-  const accessToken = jwt.sign(jwtPayload, config.jwt_secret, {
-    expiresIn: config.jwt_expires_in as any,
+  const accessToken = jwt.sign(jwtPayload, config.jwt_access_secret, {
+    expiresIn: config.jwt_access_expires_in as any,
+  });
+
+  const refreshToken = jwt.sign(jwtPayload, config.jwt_refresh_secret, {
+    expiresIn: config.jwt_refresh_expires_in as any,
   });
 
   const userObj = user.toObject();
@@ -107,6 +112,7 @@ const login = async (payload: Partial<IUser>): Promise<{ accessToken: string, us
 
   return {
     accessToken,
+    refreshToken,
     user: userObj,
   };
 };

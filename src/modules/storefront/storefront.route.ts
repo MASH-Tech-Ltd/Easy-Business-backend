@@ -1,9 +1,13 @@
 import { Router } from 'express';
 import { StorefrontController } from './storefront.controller';
 
+import { storefrontAuth } from '../../middlewares/storefrontAuth';
+
 const router = Router();
 
-// Public routes, no auth middleware required
+// Secure routes with API key
+router.use(storefrontAuth);
+
 router.get('/:tenantSlug/status', StorefrontController.getStatus);
 router.get('/:tenantSlug/info', StorefrontController.getInfo);
 router.get('/:tenantSlug/theme', StorefrontController.getTheme);

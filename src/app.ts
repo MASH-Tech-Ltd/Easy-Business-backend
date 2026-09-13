@@ -1,5 +1,6 @@
 import express, { Application, Request, Response } from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import morgan from 'morgan';
 import routes from './routes/index';
 import { globalErrorHandler } from './helpers/globalErrorHandler';
@@ -19,13 +20,14 @@ const allowedOrigins = [
   'http://localhost:5174',
 ];
 
+import { Tenant } from './modules/tenant/tenant.model';
+
 app.use(
   cors({
-    origin: (origin, callback) => {
-      // Allow server-to-server requests (no Origin header) only in development
+    origin: async (origin, callback) => {
+      // Allow server-to-server requests (no Origin header) for Next.js proxy
       if (!origin) {
-        if (config.env === 'development') return callback(null, true);
-        return callback(new Error('CORS: Missing origin header'), false);
+        return callback(null, true);
       }
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
@@ -34,13 +36,30 @@ app.use(
       if (origin.endsWith('.localhost:3000') || origin.endsWith('.localhost:3001')) {
         return callback(null, true);
       }
+
+      try {
+        // Handle custom domains dynamically
+        // Remove protocol for DB lookup if stored without it
+        const host = new URL(origin).host;
+        const tenant = await Tenant.findOne({ 
+          $or: [{ domain: host }, { customDomain: host }] 
+        });
+
+        if (tenant) {
+          return callback(null, true);
+        }
+      } catch (err) {
+        return callback(new Error('CORS: Error checking custom domain'), false);
+      }
+
       return callback(new Error(`CORS: Origin '${origin}' not allowed`), false);
     },
     credentials: true,
   }),
 );
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(helmet());
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 app.use(morgan(config.env === 'development' ? 'dev' : 'short'));
 app.use(globalRateLimiter);
 

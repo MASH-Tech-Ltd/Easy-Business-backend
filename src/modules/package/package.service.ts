@@ -12,7 +12,7 @@ const getAllPackages = async (page?: string | number, limit?: string | number): 
   const { page: currentPage, limit: perPage, skip } = paginationHelper(page, limit);
 
   const total = await Package.countDocuments();
-  const result = await Package.find().skip(skip).limit(perPage);
+  const result = await Package.find().sort({ billingCycle: 1, price: 1 }).skip(skip).limit(perPage);
   
   return {
     data: result,

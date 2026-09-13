@@ -206,6 +206,12 @@ const checkProductLimit = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 200, "Limit check passed", { allowed: true });
 });
 
+const deleteAllProductsByTenant = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = req.params.tenantId;
+  const result = await ProductService.deleteAllProductsByTenant(tenantId as string);
+  ApiResponse.sendSuccess(res, 200, "All products for the store have been deleted successfully", result);
+});
+
 export const ProductController = {
   createProduct,
   checkProductLimit,
@@ -216,4 +222,5 @@ export const ProductController = {
   getSingleProduct,
   updateProduct,
   deleteProduct,
+  deleteAllProductsByTenant,
 };

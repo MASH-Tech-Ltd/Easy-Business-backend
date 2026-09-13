@@ -3,6 +3,7 @@ import { Product } from './product.model';
 import { Types } from 'mongoose';
 import { paginationHelper } from '../../helpers/paginationHelper';
 import CustomError from '../../helpers/CustomError';
+import { deleteCloudinary } from '../../helpers/cloudinary';  
 
 // SECURITY: Whitelist of fields allowed for sorting — prevents prototype pollution
 const ALLOWED_SORT_FIELDS = ['createdAt', 'updatedAt', 'title', 'discountedPrice', 'originalPrice', 'stock', 'salesCount'];
@@ -141,6 +142,35 @@ const deleteProduct = async (id: string, tenantId: string): Promise<IProduct | n
   if (!result) {
     throw new CustomError(404, 'Product not found or you do not have permission to delete it');
   }
+  
+  if (result.images && result.images.length > 0) {
+    for (const image of result.images) {
+      if (image.public_id) {
+        await deleteCloudinary(image.public_id, 'image').catch((err: any) => console.error("Cloudinary delete error:", err));
+      }
+    }
+  }
+  
+  return result;
+};
+
+// FEATURE: Delete all products by tenant (for super admin)
+const deleteAllProductsByTenant = async (tenantId: string): Promise<any> => {
+  const products = await Product.find({ tenantId: new Types.ObjectId(tenantId) });
+  if (products.length > 0) {
+    const { deleteCloudinary } = require('../../helpers/cloudinary');
+    for (const product of products) {
+      if (product.images && product.images.length > 0) {
+        for (const image of product.images) {
+          if (image.public_id) {
+            await deleteCloudinary(image.public_id, 'image').catch((err: any) => console.error("Cloudinary delete error:", err));
+          }
+        }
+      }
+    }
+  }
+  
+  const result = await Product.deleteMany({ tenantId: new Types.ObjectId(tenantId) });
   return result;
 };
 
@@ -153,4 +183,5 @@ export const ProductService = {
   getSingleProduct,
   updateProduct,
   deleteProduct,
+  deleteAllProductsByTenant,
 };

@@ -11,6 +11,7 @@ export interface ITenant extends Document {
   contactEmail?: string;
   contactPhone?: string;
   contactAddress?: string;
+  description?: string;
   theme?: Record<string, any>;
   settings?: Record<string, any>;
 }

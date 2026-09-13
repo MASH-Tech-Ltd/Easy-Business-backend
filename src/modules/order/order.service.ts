@@ -1,12 +1,76 @@
 import { Order } from './order.model';
+import CustomError from '../../helpers/CustomError';
 import { IOrder } from './order.interface';
 import { Customer } from '../customer/customer.model';
 import { Product } from '../product/product.model';
 import { getIO } from '../../socket';
 import { Notification } from '../notification/notification.model';
+import { Theme } from '../theme/theme.model';
+import { computeShipping } from '../../utils/computeShipping';
+import { paginationHelper } from '../../helpers/paginationHelper';
+import { User } from '../auth/auth.model';
+import mongoose from 'mongoose';
 
 const createOrder = async (payload: IOrder): Promise<IOrder> => {
-  let newOrderId;
+  // ─── SECURITY: Recalculate shipping from the DB, ignore client-sent values ───
+  // Extract the shipping address parts (expected format: "street, upazila, district, division")
+  const addressParts = (payload.shippingAddress || '').split(',').map((p: string) => p.trim());
+  const district = addressParts[addressParts.length - 2] || '';
+  const division = addressParts[addressParts.length - 1] || '';
+
+  try {
+    // ── Step 1: Fetch real product prices from DB (prevents client price manipulation) ──
+    const productIds = payload.items.map((item: any) => item.productId);
+    const dbProducts = await Product.find(
+      { _id: { $in: productIds }, tenantId: payload.tenantId },
+      { _id: 1, discountedPrice: 1, originalPrice: 1 }
+    );
+
+    // Build a map of productId → trusted price
+    const priceMap = new Map<string, number>(
+      dbProducts.map((p: any) => [p._id.toString(), p.discountedPrice ?? p.originalPrice])
+    );
+
+    // Override each item's price with the real DB value and reject unknown products
+    for (const item of payload.items as any[]) {
+      const trustedPrice = priceMap.get(item.productId.toString());
+      if (trustedPrice === undefined) {
+        throw new Error(`Product not found or does not belong to this tenant: ${item.productId}`);
+      }
+      item.price = trustedPrice; // overwrite client-supplied price
+    }
+
+    // ── Step 2: Recompute subTotal from now-trusted item prices ──────────────────
+    const trustedSubTotal = payload.items.reduce(
+      (sum: number, item: any) => sum + item.price * item.quantity,
+      0
+    );
+
+    // ── Step 3: Recalculate shipping from DB ────────────────────────────────────
+    const theme = await Theme.findOne({ tenantId: payload.tenantId }).select(
+      'shippingZones defaultShippingCost'
+    );
+    const zones = theme?.shippingZones || [];
+    const defaultCost = theme?.defaultShippingCost ?? 120;
+    const { cost: trustedShippingCharge } = computeShipping(
+      division,
+      district,
+      zones as any[],
+      defaultCost
+    );
+
+    // ── Step 4: Override ALL money fields — client values are fully ignored ──────
+    payload.subTotal = Math.round(trustedSubTotal);
+    payload.shippingCharge = trustedShippingCharge;
+    payload.totalPrice = Math.round(trustedSubTotal + trustedShippingCharge);
+  } catch (err) {
+    // SECURITY: Do NOT fall through — if price recalculation fails, reject the order entirely
+    // to prevent client-manipulated prices from being saved.
+    throw new CustomError(400, `Order rejected: could not verify product prices. Please try again. (${(err as Error).message})`);
+  }
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  let newOrderId = '';
   let isUnique = false;
   while (!isUnique) {
     newOrderId = Math.floor(100000 + Math.random() * 900000).toString();
@@ -65,9 +129,6 @@ const createOrder = async (payload: IOrder): Promise<IOrder> => {
 
   return result;
 };
-
-import { paginationHelper } from '../../helpers/paginationHelper';
-import { User } from '../auth/auth.model';
 
 const getOrdersByTenant = async (tenantId: string, query: any = {}) => {
   const { page, limit, skip } = paginationHelper(query.page, query.limit);
@@ -150,8 +211,6 @@ const deleteOrder = async (id: string, tenantId: string) => {
   const result = await Order.findOneAndDelete({ _id: id, tenantId });
   return result;
 };
-
-import mongoose from 'mongoose';
 
 const getOrderById = async (id: string, tenantId?: string) => {
   const cleanId = id.replace(/^#/, '');
