@@ -3,12 +3,33 @@ import { Product } from './product.model';
 import { Types } from 'mongoose';
 import { paginationHelper } from '../../helpers/paginationHelper';
 import CustomError from '../../helpers/CustomError';
-import { deleteCloudinary } from '../../helpers/cloudinary';  
+import { deleteCloudinary } from '../../helpers/cloudinary';
+import { Subscription } from '../subscription/subscription.model';  
 
 // SECURITY: Whitelist of fields allowed for sorting — prevents prototype pollution
 const ALLOWED_SORT_FIELDS = ['createdAt', 'updatedAt', 'title', 'discountedPrice', 'originalPrice', 'stock', 'salesCount'];
 
 const createProduct = async (payload: Partial<IProduct>): Promise<IProduct> => {
+  const { tenantId } = payload;
+  if (!tenantId) {
+    throw new CustomError(400, 'tenantId is required to create a product');
+  }
+
+  // Find the active subscription
+  const subscription = await Subscription.findOne({ tenantId, status: 'active' }).populate('packageId');
+  if (!subscription) {
+    throw new CustomError(403, 'No active subscription found. Please subscribe to a plan to continue.');
+  }
+
+  // If packageId is null, it represents the Free Tier which has a limit of 20 products
+  const productLimit = subscription.packageId ? (subscription.packageId as any).productLimit : 20;
+
+  // Check current product count
+  const currentProductCount = await Product.countDocuments({ tenantId });
+  if (currentProductCount >= productLimit) {
+    throw new CustomError(403, `Product limit reached. Your current plan allows up to ${productLimit} products. Please upgrade to add more.`);
+  }
+
   const result = await Product.create(payload);
   return result;
 };

@@ -43,4 +43,6 @@ export default {
     apiKey: process.env.CLOUDINARY_API_KEY,
     apiSecret: process.env.CLOUDINARY_API_SECRET,
   },
+  smtp_user: process.env.HOST_MAIL,
+  smtp_pass: process.env.APP_PASSWORD,
 };

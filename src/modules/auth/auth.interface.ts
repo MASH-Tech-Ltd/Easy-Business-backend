@@ -13,4 +13,6 @@ export interface IUser extends Document {
     public_id: string;
     secure_url: string;
   };
+  passwordResetToken?: string | undefined;
+  passwordResetExpires?: Date | undefined;
 }

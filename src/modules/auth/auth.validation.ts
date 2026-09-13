@@ -36,6 +36,24 @@ export const loginSchema = z.object({
     .min(1, 'Password is required'),
 });
 
+export const forgotPasswordSchema = z.object({
+  email: z
+    .string({ error: 'Email is required' })
+    .trim()
+    .toLowerCase()
+    .email('Please provide a valid email address'),
+});
+
+export const resetPasswordSchema = z.object({
+  otp: z
+    .string({ error: 'OTP is required' })
+    .min(1, 'OTP is required'),
+  password: z
+    .string({ error: 'Password is required' })
+    .min(8, 'Password must be at least 8 characters')
+    .max(28, 'Password must be at most 28 characters'),
+});
+
 // ── Middleware factories ──────────────────────────────────────────────────────
 
 type ZodSchema = z.ZodTypeAny;

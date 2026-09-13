@@ -16,7 +16,9 @@ const userSchema = new Schema<IUser>(
     avatar: {
       public_id: { type: String },
       secure_url: { type: String }
-    }
+    },
+    passwordResetToken: { type: String },
+    passwordResetExpires: { type: Date }
   },
   {
     timestamps: true,
