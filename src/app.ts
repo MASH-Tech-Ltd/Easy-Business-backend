@@ -10,6 +10,7 @@ import { globalRateLimiter } from './middleware/rateLimiter';
 import config from './config/index';
 
 const app: Application = express();
+app.set('trust proxy', 1);
 
 // SECURITY FIX: Strict CORS allow-list — never trust unknown origins
 const allowedOrigins = [

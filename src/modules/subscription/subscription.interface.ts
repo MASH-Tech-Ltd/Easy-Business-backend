@@ -7,6 +7,14 @@ export interface ISubscription extends Document {
   endDate: Date;
   status: 'pending' | 'active' | 'expired' | 'cancelled';
   isTrial?: boolean;
+  purchasedAddons?: {
+    _id?: Types.ObjectId;
+    addonId: Types.ObjectId | string;
+    limit: number;
+    used: number;
+    isActive: boolean;
+    status?: 'pending' | 'active' | 'rejected';
+  }[];
   createdAt?: Date;
   updatedAt?: Date;
 }

@@ -21,4 +21,10 @@ router.put('/update/:id', authMiddleware('super_admin'), SubscriptionController.
 router.delete('/delete/:id', authMiddleware('super_admin'), SubscriptionController.deleteSubscription);
 router.get('/get-all-subscriptions', authMiddleware('super_admin'), SubscriptionController.getAllSubscriptions);
 
+router.post('/addons/purchase', authMiddleware('tenant_admin'), SubscriptionController.purchaseAddon);
+router.get('/addons/requests', authMiddleware('super_admin'), SubscriptionController.getAllAddonRequests);
+router.put('/addons/:subscriptionId/:addonId/approve', authMiddleware('super_admin'), SubscriptionController.approveAddonRequest);
+router.put('/addons/:subscriptionId/:addonId/reject', authMiddleware('super_admin'), SubscriptionController.rejectAddonRequest);
+router.delete('/addons/:subscriptionId/:addonId', authMiddleware('super_admin'), SubscriptionController.removeAddon);
+
 export const SubscriptionRoutes = router;

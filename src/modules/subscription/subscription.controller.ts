@@ -78,6 +78,35 @@ const deleteSubscription = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 200, 'Subscription deleted successfully', null);
 });
 
+const purchaseAddon = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = (req as any).user.tenantId;
+  const result = await SubscriptionService.purchaseAddon(tenantId, req.body);
+  ApiResponse.sendSuccess(res, 200, 'Addon purchased successfully', result);
+});
+
+const getAllAddonRequests = asyncHandler(async (req: Request, res: Response) => {
+  const result = await SubscriptionService.getAllAddonRequests(req.query);
+  ApiResponse.sendSuccess(res, 200, 'All addon requests retrieved successfully', result);
+});
+
+const approveAddonRequest = asyncHandler(async (req: Request, res: Response) => {
+  const { subscriptionId, addonId } = req.params;
+  const result = await SubscriptionService.approveAddonRequest(subscriptionId as string, addonId as string);
+  ApiResponse.sendSuccess(res, 200, 'Addon request approved successfully', result);
+});
+
+const rejectAddonRequest = asyncHandler(async (req: Request, res: Response) => {
+  const { subscriptionId, addonId } = req.params;
+  const result = await SubscriptionService.rejectAddonRequest(subscriptionId as string, addonId as string);
+  ApiResponse.sendSuccess(res, 200, 'Addon request rejected successfully', result);
+});
+
+const removeAddon = asyncHandler(async (req: Request, res: Response) => {
+  const { subscriptionId, addonId } = req.params;
+  const result = await SubscriptionService.removeAddon(subscriptionId as string, addonId as string);
+  ApiResponse.sendSuccess(res, 200, 'Addon removed successfully', result);
+});
+
 export const SubscriptionController = {
   assignPackage,
   getTenantSubscription,
@@ -85,7 +114,12 @@ export const SubscriptionController = {
   requestPackage,
   approveSubscription,
   rejectSubscription,
-  getAllSubscriptions,
   updateSubscription,
   deleteSubscription,
+  getAllSubscriptions,
+  purchaseAddon,
+  getAllAddonRequests,
+  approveAddonRequest,
+  rejectAddonRequest,
+  removeAddon
 };

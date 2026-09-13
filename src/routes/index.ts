@@ -4,6 +4,7 @@ import { ProductRoutes } from '../modules/product/product.route';
 import { TenantRoutes } from '../modules/tenant/tenant.route';
 import { CategoryRoutes } from '../modules/category/category.route';
 import { PackageRoutes } from '../modules/package/package.route';
+import { AddonRoutes } from '../modules/addon/addon.route';
 import { SubscriptionRoutes } from '../modules/subscription/subscription.route';
 import { OrderRoutes } from '../modules/order/order.route';
 import { CourierRoutes } from '../modules/courier/courier.route';
@@ -19,6 +20,7 @@ import { UserRoutes } from '../modules/user/user.route';
 import { SupportRoutes } from '../modules/support/support.route';
 import { NotificationRoutes } from '../modules/notification/notification.route';
 import { SeedRoutes } from '../modules/seed/seed.route';
+import { CheckoutLeadRoutes } from '../modules/checkoutLead/checkoutLead.route';
 
 const router = Router();
 
@@ -50,6 +52,10 @@ const moduleRoutes = [
   {
     path: '/subscriptions',
     route: SubscriptionRoutes,
+  },
+  {
+    path: '/addons',
+    route: AddonRoutes,
   },
   {
     path: '/orders',
@@ -98,7 +104,11 @@ const moduleRoutes = [
   {
     path: '/seed',
     route: SeedRoutes,
-  }
+  },
+  {
+    path: '/checkout-leads',
+    route: CheckoutLeadRoutes,
+  },
 ];
 
 moduleRoutes.forEach((route) => router.use(route.path, route.route));

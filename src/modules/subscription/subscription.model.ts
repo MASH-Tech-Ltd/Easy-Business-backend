@@ -9,6 +9,15 @@ const subscriptionSchema = new Schema<ISubscription>(
     endDate: { type: Date, required: true },
     status: { type: String, enum: ['active', 'expired', 'cancelled', 'pending'], default: 'active' },
     isTrial: { type: Boolean, default: false },
+    purchasedAddons: [
+      {
+        addonId: { type: Schema.Types.ObjectId, ref: 'Addon' },
+        limit: { type: Number, default: 0 },
+        used: { type: Number, default: 0 },
+        isActive: { type: Boolean, default: false },
+        status: { type: String, enum: ['pending', 'active', 'rejected'], default: 'pending' },
+      },
+    ],
   },
   {
     timestamps: true,

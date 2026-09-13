@@ -5,6 +5,7 @@ import { authMiddleware } from '../../middleware/authMiddleware';
 const router = Router();
 
 // SuperAdmin route
+router.get('/customer-stats', authMiddleware('super_admin'), FraudCheckController.getCustomerStats);
 router.get(
   '/all',
   authMiddleware('super_admin'),

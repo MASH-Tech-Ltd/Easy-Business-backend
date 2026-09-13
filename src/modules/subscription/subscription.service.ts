@@ -1,5 +1,6 @@
 import { ISubscription } from './subscription.interface';
 import { Subscription } from './subscription.model';
+import { Addon } from '../addon/addon.model';
 import { Package } from '../package/package.model';
 import { Tenant } from '../tenant/tenant.model';
 import CustomError from '../../helpers/CustomError';
@@ -21,7 +22,17 @@ const assignPackage = async (payload: { tenantId: string, packageId: string }): 
     { sort: { endDate: -1 } }
   );
 
-  const startDate = (lastSub && lastSub.endDate) ? new Date(lastSub.endDate) : new Date();
+  let startDate = (lastSub && lastSub.endDate) ? new Date(lastSub.endDate) : new Date();
+
+  // If the last subscription was a free trial, start the new paid one immediately
+  if (lastSub && lastSub.isTrial) {
+    startDate = new Date();
+    if (lastSub.status === 'active') {
+      lastSub.status = 'expired';
+      await lastSub.save();
+    }
+  }
+
   const endDate = new Date(startDate);
 
   if (selectedPackage.billingCycle === 'yearly') {
@@ -30,8 +41,16 @@ const assignPackage = async (payload: { tenantId: string, packageId: string }): 
     endDate.setMonth(endDate.getMonth() + 1);
   }
 
-  // Deactivate any existing active subscriptions for this tenant
-  await Subscription.updateMany({ tenantId: payload.tenantId, status: 'active' }, { status: 'cancelled' });
+  // We preserve the existing active subscriptions so they can run their course.
+
+  // Extract inherited addons from last sub to carry them over
+  const inheritedAddons = lastSub?.purchasedAddons?.map(addon => ({
+    addonId: addon.addonId,
+    limit: addon.limit,
+    used: addon.used,
+    isActive: addon.isActive,
+    ...(addon.status !== undefined ? { status: addon.status } : {}),
+  })) || [];
 
   const subscription = await Subscription.create({
     tenantId: payload.tenantId,
@@ -39,29 +58,62 @@ const assignPackage = async (payload: { tenantId: string, packageId: string }): 
     startDate,
     endDate,
     status: 'active',
+    purchasedAddons: inheritedAddons,
   });
 
   return subscription;
 };
 
 const getTenantSubscription = async (tenantId: string): Promise<ISubscription | null> => {
-  // Sort by endDate DESC so the subscription with the furthest expiry is checked first.
-  // This prevents an older expired record from shadowing a valid active one.
-  let result = await Subscription.findOne(
-    { tenantId, status: { $in: ['active', 'pending'] } },
-    null,
-    { sort: { endDate: -1 } }
-  ).populate('packageId');
+  const now = new Date();
 
-  // Lazy expiry: if the active subscription has passed its endDate, mark it expired
-  if (result && result.status === 'active' && new Date(result.endDate).getTime() < Date.now()) {
-    result.status = 'expired';
-    await result.save();
-    // Return null so callers treat this as "no active subscription"
-    return null;
+  // Find all active or pending subscriptions, sorted by start date
+  const subs = await Subscription.find({ tenantId, status: { $in: ['active', 'pending'] } })
+    .populate('packageId')
+    .sort({ startDate: 1 });
+
+  let validSub = null;
+
+  for (const sub of subs) {
+    const start = new Date(sub.startDate).getTime();
+    const end = new Date(sub.endDate).getTime();
+    const nowTime = now.getTime();
+
+    if (end < nowTime) {
+      if (sub.status === 'active') {
+        // Lazy expire active subscriptions that have passed their end date
+        sub.status = 'expired';
+        await sub.save();
+      }
+    } else if (start <= nowTime && end >= nowTime) {
+      // If it's valid now but pending, activate it
+      if (sub.status === 'pending') {
+        sub.status = 'active';
+        await sub.save();
+      }
+      // If we haven't found a valid sub yet, use this one
+      if (!validSub) {
+        validSub = sub;
+      }
+    } else if (start > nowTime && sub.status === 'active') {
+      // If it's in the future and marked active, we might want to change it to pending? 
+      // Actually we can just leave it active, but we won't select it as the *current* valid sub.
+    }
   }
 
-  return result;
+  if (validSub) {
+    return validSub;
+  }
+
+  // If no currently valid subscription exists, return the closest future one (if any)
+  // This allows the UI to show upcoming renewals even if there's a temporary gap
+  const futureSub = await Subscription.findOne(
+    { tenantId, status: { $in: ['active', 'pending'] }, startDate: { $gt: now } },
+    null,
+    { sort: { startDate: 1 } }
+  ).populate('packageId');
+
+  return futureSub;
 };
 
 const requestPackage = async (tenantId: string, packageId: string): Promise<ISubscription> => {
@@ -79,8 +131,8 @@ const requestPackage = async (tenantId: string, packageId: string): Promise<ISub
   const subscription = await Subscription.create({
     tenantId,
     packageId,
-    startDate: new Date(), // Placeholder
-    endDate: new Date(), // Placeholder
+    startDate: new Date(),
+    endDate: new Date(),
     status: 'pending',
   });
 
@@ -106,7 +158,17 @@ const approveSubscription = async (subscriptionId: string): Promise<ISubscriptio
     { sort: { endDate: -1 } }
   );
 
-  const startDate = (lastSub && lastSub.endDate) ? new Date(lastSub.endDate) : new Date();
+  let startDate = (lastSub && lastSub.endDate) ? new Date(lastSub.endDate) : new Date();
+
+  // If the last subscription was a free trial, start the new paid one immediately
+  if (lastSub && lastSub.isTrial) {
+    startDate = new Date();
+    if (lastSub.status === 'active') {
+      lastSub.status = 'expired';
+      await lastSub.save();
+    }
+  }
+
   const endDate = new Date(startDate);
 
   if (selectedPackage.billingCycle === 'yearly') {
@@ -115,8 +177,7 @@ const approveSubscription = async (subscriptionId: string): Promise<ISubscriptio
     endDate.setMonth(endDate.getMonth() + 1);
   }
 
-  // Deactivate any existing active subscriptions for this tenant
-  await Subscription.updateMany({ tenantId: subscription.tenantId, status: 'active' }, { status: 'cancelled' });
+  // We preserve the existing active subscriptions so they can run their course.
 
   subscription.startDate = startDate;
   subscription.endDate = endDate;
@@ -212,6 +273,177 @@ const deleteSubscription = async (subscriptionId: string): Promise<void> => {
   await Subscription.deleteOne({ _id: subscriptionId });
 };
 
+const purchaseAddon = async (tenantId: string, payload: { addonId: string }): Promise<ISubscription> => {
+  const subscription = await Subscription.findOne({ tenantId, status: 'active' });
+  if (!subscription) {
+    throw new CustomError(404, 'Active subscription not found for this tenant');
+  }
+
+  if (subscription.isTrial) {
+    throw new CustomError(400, 'Addons cannot be purchased during a free trial. Please upgrade to a paid plan first.');
+  }
+
+  const addon = await Addon.findById(payload.addonId);
+  if (!addon || !addon.isActive) {
+    throw new CustomError(404, 'Addon not found or is inactive');
+  }
+
+  subscription.purchasedAddons = subscription.purchasedAddons || [];
+  
+  const existing = subscription.purchasedAddons.find(pa => pa.addonId.toString() === payload.addonId);
+  if (existing) {
+    if (existing.status === 'rejected') {
+      existing.status = 'pending';
+      existing.isActive = false;
+      existing.used = 0;
+      existing.limit = addon.defaultLimit;
+      
+      await subscription.save();
+      return subscription;
+    } else if (existing.status === 'active' && existing.used >= existing.limit && existing.limit > 0) {
+      existing.status = 'pending';
+      existing.isActive = false; // Temporarily disable until approved
+      
+      await subscription.save();
+      return subscription;
+    } else {
+      throw new CustomError(400, 'Addon already purchased');
+    }
+  }
+
+  subscription.purchasedAddons.push({
+    addonId: addon._id as any,
+    limit: addon.defaultLimit,
+    used: 0,
+    isActive: false,
+    status: 'pending',
+  });
+
+  await subscription.save();
+  return subscription;
+};
+
+const getAllAddonRequests = async (query: any): Promise<{ data: any[]; meta: any; stats: any }> => {
+  const { page, limit, skip } = paginationHelper(query?.page, query?.limit);
+  const { search, status, sortBy } = query || {};
+
+  const subscriptions = await Subscription.find({
+    'purchasedAddons': { $exists: true, $not: { $size: 0 } }
+  })
+    .populate('tenantId', 'name domain slug')
+    .populate('purchasedAddons.addonId')
+    .lean();
+    
+  let allAddons: any[] = [];
+  
+  subscriptions.forEach(sub => {
+    sub.purchasedAddons?.forEach((addon: any) => {
+      allAddons.push({
+        subscriptionId: sub._id,
+        tenant: sub.tenantId,
+        addonId: addon._id,
+        addonDetails: addon.addonId,
+        status: addon.status || (addon.isActive ? 'active' : 'pending'),
+        requestedAt: sub.updatedAt,
+      });
+    });
+  });
+
+  const stats = {
+    totalActive: allAddons.filter(a => a.status === 'active').length,
+    totalPending: allAddons.filter(a => a.status === 'pending').length,
+    totalRejected: allAddons.filter(a => a.status === 'rejected').length,
+    totalRevenue: allAddons.filter(a => a.status === 'active').reduce((sum, a) => sum + (a.addonDetails?.price || 0), 0)
+  };
+
+  if (status && status !== 'all') {
+    allAddons = allAddons.filter(a => a.status === status);
+  }
+
+  if (search) {
+    const searchLower = search.toLowerCase();
+    allAddons = allAddons.filter(a => 
+      a.tenant?.name?.toLowerCase().includes(searchLower) ||
+      a.tenant?.domain?.toLowerCase().includes(searchLower)
+    );
+  }
+
+  if (sortBy === 'oldest') {
+    allAddons.sort((a, b) => new Date(a.requestedAt).getTime() - new Date(b.requestedAt).getTime());
+  } else {
+    allAddons.sort((a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime());
+  }
+
+  const total = allAddons.length;
+  const paginatedData = allAddons.slice(skip, skip + limit);
+
+  return {
+    data: paginatedData,
+    meta: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    },
+    stats
+  };
+};
+
+const approveAddonRequest = async (subscriptionId: string, addonId: string) => {
+  const subscription = await Subscription.findById(subscriptionId);
+  if (!subscription) throw new CustomError(404, 'Subscription not found');
+
+  const addonIndex = subscription.purchasedAddons?.findIndex(a => a._id?.toString() === addonId);
+  if (addonIndex === undefined || addonIndex === -1) throw new CustomError(404, 'Addon request not found');
+
+  const addon = subscription.purchasedAddons![addonIndex];
+  if (!addon) throw new CustomError(404, 'Addon not found');
+
+  const addonDoc = await Addon.findById(addon.addonId);
+  if (!addonDoc) throw new CustomError(404, 'Addon details not found');
+
+  // If the addon was repurchased (limit exceeded), add the new limit
+  if (addon.used >= addon.limit && addon.limit > 0) {
+    addon.limit += addonDoc.defaultLimit;
+  }
+
+  addon.status = 'active';
+  addon.isActive = true;
+
+  await subscription.save();
+  return subscription;
+};
+
+const rejectAddonRequest = async (subscriptionId: string, addonId: string) => {
+  const subscription = await Subscription.findById(subscriptionId);
+  if (!subscription) throw new CustomError(404, 'Subscription not found');
+
+  const addonIndex = subscription.purchasedAddons?.findIndex(a => a._id?.toString() === addonId);
+  if (addonIndex === undefined || addonIndex === -1) throw new CustomError(404, 'Addon request not found');
+
+  const addon = subscription.purchasedAddons![addonIndex];
+  if (!addon) throw new CustomError(404, 'Addon not found');
+
+  addon.status = 'rejected';
+  addon.isActive = false;
+
+  await subscription.save();
+  return subscription;
+};
+
+const removeAddon = async (subscriptionId: string, addonId: string) => {
+  const subscription = await Subscription.findById(subscriptionId);
+  if (!subscription) throw new CustomError(404, 'Subscription not found');
+
+  const addonIndex = subscription.purchasedAddons?.findIndex(a => a._id?.toString() === addonId);
+  if (addonIndex === undefined || addonIndex === -1) throw new CustomError(404, 'Addon request not found');
+
+  subscription.purchasedAddons?.splice(addonIndex, 1);
+
+  await subscription.save();
+  return subscription;
+};
+
 export const SubscriptionService = {
   assignPackage,
   getTenantSubscription,
@@ -221,4 +453,9 @@ export const SubscriptionService = {
   getAllSubscriptions,
   updateSubscription,
   deleteSubscription,
+  purchaseAddon,
+  getAllAddonRequests,
+  approveAddonRequest,
+  rejectAddonRequest,
+  removeAddon,
 };
