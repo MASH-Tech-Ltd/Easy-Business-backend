@@ -28,7 +28,7 @@ const userSchema = new Schema<IUser>(
 userSchema.pre('save', async function () {
   if (!this.isModified('password')) return;
   if (this.password) {
-    this.password = await bcrypt.hash(this.password as string, config.bcrypt_salt_rounds);
+    this.password = await bcrypt.hash(this.password as string, config.security.bcryptSaltRounds);
   }
 });
 

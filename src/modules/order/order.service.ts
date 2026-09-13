@@ -35,6 +35,9 @@ const createOrder = async (payload: IOrder): Promise<IOrder> => {
     for (const item of payload.items as any[]) {
       const trustedPrice = priceMap.get(item.productId.toString());
       if (trustedPrice === undefined) {
+        console.error('DEBUG priceMap keys:', Array.from(priceMap.keys()));
+        console.error('DEBUG item.productId:', item.productId, typeof item.productId);
+        console.error('DEBUG payload.tenantId:', payload.tenantId);
         throw new Error(`Product not found or does not belong to this tenant: ${item.productId}`);
       }
       item.price = trustedPrice; // overwrite client-supplied price

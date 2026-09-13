@@ -5,14 +5,15 @@ import config from '../config';
 
 export const tenantMiddleware = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const host = req.hostname;
+    let rawHost = (req.headers['x-forwarded-host'] as string) || req.headers.host || req.hostname || '';
+    const host = rawHost.split(':')[0] || '';
     
     // Example: "abcstore.myplatform.com"
     // Extract subdomain
     let isCustomDomain = false;
     let slugOrDomain = '';
 
-    const baseDomain = config.base_domain || 'localhost'; // fallback for local
+    const baseDomain = config.app.baseDomain || 'localhost'; // fallback for local
 
     if (host.includes(baseDomain) && host !== baseDomain) {
       // It's a subdomain

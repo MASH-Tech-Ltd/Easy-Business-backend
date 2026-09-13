@@ -3,8 +3,8 @@ import { User } from '../modules/auth/auth.model';
 
 export const seedSuperAdmin = async () => {
   try {
-    const superAdminEmail = config.super_admin_email;
-    const superAdminPassword = config.super_admin_password;
+    const superAdminEmail = config.superAdmin.email;
+    const superAdminPassword = config.superAdmin.password;
 
     if (!superAdminEmail || !superAdminPassword) {
       console.warn('Super Admin credentials not provided in env. Skipping seeder.');

@@ -1,4 +1,4 @@
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { Request, Response, NextFunction } from 'express';
 
 // Global baseline rate limiter for all unauthenticated routes (e.g. login, public APIs)
@@ -21,9 +21,9 @@ export const roleBasedRateLimiter = rateLimit({
     if (role === 'customer' || role === 'store_admin') return 50;
     return 100;
   },
-  keyGenerator: (req: Request) => {
+  keyGenerator: (req: Request, res: Response) => {
     // Use user ID if available, otherwise fallback to IP
-    return req.user?.userId || req.ip || 'unknown';
+    return req.user?.userId || ipKeyGenerator(req.ip || '127.0.0.1');
   },
   message: (req: Request) => {
     const role = req.user?.role;

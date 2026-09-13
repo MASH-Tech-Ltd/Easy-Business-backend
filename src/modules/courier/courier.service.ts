@@ -13,28 +13,52 @@ const getCourierChargeByTenant = async (tenantId: string): Promise<ICourier> => 
     if (!tenantExists) {
       throw new CustomError(404, 'Tenant not found');
     }
-    courier = await Courier.create({ tenantId, insideDhaka: 60, outsideDhaka: 120 });
+    courier = await Courier.findOneAndUpdate(
+      { tenantId },
+      { $setOnInsert: { tenantId, insideDhaka: 60, outsideDhaka: 120 } },
+      { upsert: true, new: true }
+    );
   }
-  return courier;
+  
+  if (courier && courier.apiSecret) {
+    const doc = courier.toObject();
+    try {
+      const decrypted = decryptText(doc.apiSecret as string);
+      const visibleCount = 6;
+      if (decrypted.length > visibleCount) {
+        doc.apiSecret = '*'.repeat(16) + decrypted.slice(-visibleCount);
+      } else {
+        doc.apiSecret = '*'.repeat(16);
+      }
+    } catch (e) {
+      doc.apiSecret = '*'.repeat(16);
+    }
+    return doc as ICourier;
+  }
+  
+  return courier as ICourier;
 };
 
 const updateCourierCharge = async (tenantId: string, payload: Partial<ICourier>): Promise<ICourier | null> => {
   const result = await Courier.findOneAndUpdate(
     { tenantId },
-    payload,
+    { $set: payload },
     { new: true, upsert: true } // upsert ensures it creates if it doesn't exist during update
   );
   return result;
 };
 
 const saveCredentials = async (tenantId: string, payload: Partial<ICourier>): Promise<ICourier | null> => {
-  if (payload.apiSecret) {
+  if (payload.apiSecret && !payload.apiSecret.includes('***')) {
     payload.apiSecret = encryptText(payload.apiSecret);
+  } else {
+    // Do not overwrite existing secret if blank or masked
+    delete payload.apiSecret;
   }
   
   const result = await Courier.findOneAndUpdate(
     { tenantId },
-    payload,
+    { $set: payload },
     { new: true, upsert: true }
   );
   return result;

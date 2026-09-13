@@ -6,7 +6,7 @@ import { seedDemoStorefront } from './utils/seedStorefront';
 
 import { initSocket } from './socket';
 
-const PORT = config.port || 8000;
+const PORT = config.app.port || 8000;
 
 connectDatabase()
   .then(async () => {

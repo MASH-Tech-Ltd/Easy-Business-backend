@@ -45,6 +45,9 @@ export const forgotPasswordSchema = z.object({
 });
 
 export const resetPasswordSchema = z.object({
+  resetToken: z
+    .string({ error: 'Reset token is required' })
+    .min(1, 'Reset token is required'),
   otp: z
     .string({ error: 'OTP is required' })
     .min(1, 'OTP is required'),

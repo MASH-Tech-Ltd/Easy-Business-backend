@@ -5,6 +5,7 @@ export interface IPackage extends Document {
   price: number;
   billingCycle: 'monthly' | 'yearly';
   productLimit: number;
+  features?: string[];
   isActive: boolean;
   createdAt?: Date;
   updatedAt?: Date;

@@ -19,6 +19,7 @@ export interface IOrder extends Document {
   subTotal: number;
   shippingCharge: number;
   totalPrice: number;
+  isDeliveryChargePaid?: boolean;
   paymentStatus: 'unpaid' | 'paid';
   status: 'pending' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled';
   createdAt: Date;

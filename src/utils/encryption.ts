@@ -6,7 +6,7 @@ const IV_LENGTH = 16;
 
 // Derive a 32-byte key from JWT_ACCESS_SECRET (pad or truncate)
 const getEncryptionKey = (): Buffer => {
-  const secret = config.jwt_access_secret || 'default_secret_key';
+  const secret = config.jwt.accessSecret || 'default_secret_key';
   return crypto.createHash('sha256').update(String(secret)).digest();
 };
 

@@ -27,6 +27,7 @@ export interface IBannerSetting {
   };
   title?: string;
   subtitle?: string;
+  description?: string;
   buttonText?: string;
   buttonLink?: string;
 }
@@ -82,6 +83,7 @@ const bannerSchema = new Schema<IBannerSetting>({
   },
   title: { type: String, default: '' },
   subtitle: { type: String, default: '' },
+  description: { type: String, default: '' },
   buttonText: { type: String, default: '' },
   buttonLink: { type: String, default: '' },
 }, { _id: false });

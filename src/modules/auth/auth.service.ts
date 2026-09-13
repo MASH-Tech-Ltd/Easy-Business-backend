@@ -103,12 +103,12 @@ const login = async (payload: Partial<IUser>): Promise<{ accessToken: string, re
     tenantId: user.tenantId,
   };
 
-  const accessToken = jwt.sign(jwtPayload, config.jwt_access_secret, {
-    expiresIn: config.jwt_access_expires_in as any,
+  const accessToken = jwt.sign(jwtPayload, config.jwt.accessSecret, {
+    expiresIn: config.jwt.accessExpiresIn as any,
   });
 
-  const refreshToken = jwt.sign(jwtPayload, config.jwt_refresh_secret, {
-    expiresIn: config.jwt_refresh_expires_in as any,
+  const refreshToken = jwt.sign(jwtPayload, config.jwt.refreshSecret, {
+    expiresIn: config.jwt.refreshExpiresIn as any,
   });
 
   const userObj = user.toObject();
@@ -137,7 +137,7 @@ const forgotPassword = async (email: string) => {
     passwordResetExpires,
   });
 
-  const message = resetPasswordTemplate(otp, config.frontendUrl);
+  const message = resetPasswordTemplate(otp, config.app.frontendUrl);
 
   try {
     await sendEmail(user.email, 'Password Reset Request', message);
@@ -149,13 +149,25 @@ const forgotPassword = async (email: string) => {
     throw new CustomError(500, 'Email could not be sent');
   }
 
-  return { message: 'Email sent' };
+  const resetToken = jwt.sign({ _id: user._id }, config.jwt.resetSecret as string, {
+    expiresIn: config.jwt.resetExpiresIn as any,
+  });
+
+  return { message: 'Email sent', resetToken };
 };
 
-const resetPassword = async (otp: string, password: string) => {
+const resetPassword = async (resetToken: string, otp: string, password: string) => {
+  let decoded: any;
+  try {
+    decoded = jwt.verify(resetToken, config.jwt.resetSecret as string);
+  } catch (error) {
+    throw new CustomError(400, 'Invalid or expired reset token');
+  }
+
   const passwordResetToken = crypto.createHash('sha256').update(otp).digest('hex');
 
   const user = await User.findOne({
+    _id: decoded._id,
     passwordResetToken,
     passwordResetExpires: { $gt: Date.now() },
   });
@@ -180,7 +192,7 @@ const refreshToken = async (token: string) => {
 
   let decoded: any;
   try {
-    decoded = jwt.verify(token, config.jwt_refresh_secret as string);
+    decoded = jwt.verify(token, config.jwt.refreshSecret as string);
   } catch (error) {
     throw new CustomError(401, 'Invalid or expired refresh token');
   }
@@ -197,12 +209,12 @@ const refreshToken = async (token: string) => {
     tenantId: user.tenantId,
   };
 
-  const newAccessToken = jwt.sign(jwtPayload, config.jwt_access_secret, {
-    expiresIn: config.jwt_access_expires_in as any,
+  const newAccessToken = jwt.sign(jwtPayload, config.jwt.accessSecret, {
+    expiresIn: config.jwt.accessExpiresIn as any,
   });
 
-  const newRefreshToken = jwt.sign(jwtPayload, config.jwt_refresh_secret, {
-    expiresIn: config.jwt_refresh_expires_in as any,
+  const newRefreshToken = jwt.sign(jwtPayload, config.jwt.refreshSecret, {
+    expiresIn: config.jwt.refreshExpiresIn as any,
   });
 
   return {

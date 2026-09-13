@@ -13,7 +13,7 @@ const app: Application = express();
 
 // SECURITY FIX: Strict CORS allow-list — never trust unknown origins
 const allowedOrigins = [
-  config.frontendUrl,
+  config.app.frontendUrl,
   'http://localhost:3000',
   'http://localhost:3001',
   'http://localhost:3002',
@@ -62,7 +62,7 @@ app.use(cookieParser());
 app.use(helmet());
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true, limit: '5mb' }));
-app.use(morgan(config.env === 'development' ? 'dev' : 'short'));
+app.use(morgan(config.app.env === 'development' ? 'dev' : 'short'));
 app.use(globalRateLimiter);
 
 import { tenantMiddleware } from './middleware/tenant.middleware';

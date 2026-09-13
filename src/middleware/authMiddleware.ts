@@ -12,7 +12,7 @@ export const authMiddleware = (...requiredRoles: string[]) => {
         return res.status(401).json({ success: false, message: 'You are not authorized' });
       }
 
-      const verifiedUser = jwt.verify(token.replace('Bearer ', ''), config.jwt_access_secret) as any;
+      const verifiedUser = jwt.verify(token.replace('Bearer ', ''), config.jwt.accessSecret) as any;
 
       if (requiredRoles.length && !requiredRoles.includes(verifiedUser.role)) {
         return res.status(403).json({ success: false, message: 'Forbidden access' });

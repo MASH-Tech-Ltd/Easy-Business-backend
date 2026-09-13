@@ -4,14 +4,14 @@ import config from '../config';
 const transporter = nodemailer.createTransport({
   service: 'gmail', // Assuming gmail based on standard configs, otherwise use host/port
   auth: {
-    user: config.smtp_user,
-    pass: config.smtp_pass,
+    user: config.mail.user,
+    pass: config.mail.pass,
   },
 });
 
 export const sendEmail = async (to: string, subject: string, html: string) => {
   const mailOptions = {
-    from: `"MASH Easy" <${config.smtp_user}>`,
+    from: `"MASH Easy" <${config.mail.user}>`,
     to,
     subject,
     html,

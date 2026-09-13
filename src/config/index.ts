@@ -5,44 +5,96 @@ dotenv.config({ path: path.join(process.cwd(), '.env') });
 
 const isProduction = process.env.NODE_ENV === 'production';
 
-// SECURITY FIX: In production, crash fast if required secrets are missing or using weak defaults.
-// This prevents the app from running with trivially guessable secrets if .env is misconfigured.
-const requireSecret = (key: string, fallback: string): string => {
-  const value = process.env[key];
+// Block common fallback values and template tokens from running in production
+const FORBIDDEN_PROD_SECRETS = new Set([
+  'secret',
+  'superadmin123',
+  'admin123',
+  'super_secret_jwt_access_key_for_famous_electronics',
+  'super_secret_jwt_refresh_key_for_famous_electronics',
+  'super_secret_jwt_key_for_famous_electronics',
+  'insecure-dev-access-secret',
+  'insecure-dev-refresh-secret',
+  'insecure-dev-reset-pass-secret',
+  'insecure-dev-password',
+]);
+
+/**
+ * Validates and retrieves required secrets.
+ * Crashes early in production if missing or using insecure template defaults.
+ */
+const requireSecret = (key: string, devFallback: string): string => {
+  const value = process.env[key]?.trim();
+
   if (!value) {
     if (isProduction) {
-      console.error(`FATAL: Required environment variable '${key}' is not set in production. Shutting down.`);
+      console.error(`[FATAL] Missing required secret '${key}' in production environment.`);
       process.exit(1);
     }
-    console.warn(`WARN: '${key}' not set. Using insecure fallback — never use in production!`);
-    return fallback;
+    console.warn(`[WARN] '${key}' not defined. Using local insecure fallback.`);
+    return devFallback;
   }
-  // Guard against known weak/default values in production
-  if (isProduction && ['secret', 'super_secret_jwt_key_for_famous_electronics', 'superadmin123'].includes(value)) {
-    console.error(`FATAL: Environment variable '${key}' is using a weak default value in production. Shutting down.`);
+
+  if (isProduction && FORBIDDEN_PROD_SECRETS.has(value)) {
+    console.error(`[FATAL] Secret '${key}' is using an insecure default or template value in production.`);
     process.exit(1);
   }
+
   return value;
 };
 
-export default {
-  env: process.env.NODE_ENV || 'development',
-  port: process.env.PORT || 8000,
-  database_url: process.env.DATABASE_URL || 'mongodb://localhost:27017/electronics',
-  frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
-  jwt_access_secret: requireSecret('JWT_ACCESS_SECRET', 'insecure-dev-access-secret'),
-  jwt_access_expires_in: process.env.JWT_ACCESS_EXPIRES_IN || '1d',
-  jwt_refresh_secret: requireSecret('JWT_REFRESH_SECRET', 'insecure-dev-refresh-secret'),
-  jwt_refresh_expires_in: process.env.JWT_REFRESH_EXPIRES_IN || '30d',
-  bcrypt_salt_rounds: Number(process.env.BCRYPT_SALT_ROUNDS) || 12,
-  super_admin_email: process.env.SUPER_ADMIN_EMAIL || 'admin@famouselectronics.com',
-  super_admin_password: requireSecret('SUPER_ADMIN_PASSWORD', 'insecure-dev-password'),
-  base_domain: process.env.BASE_DOMAIN || 'localhost',
-  cloudinary: {
-    cloudName: process.env.CLOUDINARY_CLOUD_NAME,
-    apiKey: process.env.CLOUDINARY_API_KEY,
-    apiSecret: process.env.CLOUDINARY_API_SECRET,
+const config = {
+  // Application & Runtime
+  app: {
+    env: process.env.NODE_ENV || 'development',
+    port: Number(process.env.PORT) || 8000,
+    frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
+    baseDomain: process.env.BASE_DOMAIN || 'localhost',
   },
-  smtp_user: process.env.HOST_MAIL,
-  smtp_pass: process.env.APP_PASSWORD,
-};
+
+  // Database
+  database: {
+    url: process.env.DATABASE_URL || 'mongodb://localhost:27017/electronics',
+  },
+
+  // Security & Authentication
+  security: {
+    bcryptSaltRounds: Number(process.env.BCRYPT_SALT_ROUNDS) || 12,
+  },
+
+  jwt: {
+    accessSecret: requireSecret('JWT_ACCESS_SECRET', 'insecure-dev-access-secret'),
+    accessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '1d',
+    refreshSecret: requireSecret('JWT_REFRESH_SECRET', 'insecure-dev-refresh-secret'),
+    refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d',
+    resetSecret: requireSecret('RESET_PASS_TOKEN_SECRET', 'insecure-dev-reset-pass-secret'),
+    resetExpiresIn: process.env.RESET_PASS_TOKEN_EXPIRES_IN || '10m',
+  },
+
+  // Super Admin Bootstrap Credentials
+  superAdmin: {
+    email: process.env.SUPER_ADMIN_EMAIL || 'admin@famouselectronics.com',
+    password: requireSecret('SUPER_ADMIN_PASSWORD', 'insecure-dev-password'),
+  },
+
+  // Cloudinary Media Storage
+  cloudinary: {
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME || '',
+    apiKey: process.env.CLOUDINARY_API_KEY || '',
+    apiSecret: process.env.CLOUDINARY_API_SECRET || '',
+  },
+
+  // Storefront Integration
+  storefront: {
+    apiKey: process.env.STOREFRONT_API_KEY || '',
+  },
+
+  // Mailer (SMTP)
+  mail: {
+    user: process.env.HOST_MAIL || '',
+    pass: process.env.APP_PASSWORD || '',
+  },
+} as const;
+
+export type Config = typeof config;
+export default config;

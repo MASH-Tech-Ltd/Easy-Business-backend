@@ -21,6 +21,7 @@ const orderSchema = new Schema<IOrder>(
     subTotal: { type: Number, required: true },
     shippingCharge: { type: Number, default: 0 },
     totalPrice: { type: Number, required: true },
+    isDeliveryChargePaid: { type: Boolean, default: false },
     paymentStatus: {
       type: String,
       enum: ['unpaid', 'paid'],
