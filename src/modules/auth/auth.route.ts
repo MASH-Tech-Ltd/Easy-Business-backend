@@ -9,6 +9,7 @@ const router = Router();
 // Replaces req.body with sanitized data — extra fields are stripped.
 router.post('/register', validate(registerSchema), AuthController.register);
 router.post('/login', validate(loginSchema), AuthController.login);
+router.post('/logout', AuthController.logout);
 router.post('/forgot-password', validate(forgotPasswordSchema), AuthController.forgotPassword);
 router.post('/reset-password', validate(resetPasswordSchema), AuthController.resetPassword);
 router.post('/refresh-token', AuthController.refreshToken);

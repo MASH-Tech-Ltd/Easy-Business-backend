@@ -12,9 +12,19 @@ const login = asyncHandler(async (req: Request, res: Response) => {
   const result = await AuthService.login(req.body);
   const { refreshToken, ...others } = result;
 
-  res.cookie('refreshToken', refreshToken, {
+  // Clean up stale cookies
+  res.clearCookie('refreshToken');
+  res.clearCookie('accessToken');
+
+  res.cookie('_r_sess_tkn', refreshToken, {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
+  });
+
+  res.cookie('_x_sess_tkn', others.accessToken, {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    sameSite: 'lax',
   });
 
   ApiResponse.sendSuccess(res, 200, 'User logged in successfully', others);
@@ -31,10 +41,10 @@ const resetPassword = asyncHandler(async (req: Request, res: Response) => {
 });
 
 const refreshToken = asyncHandler(async (req: Request, res: Response) => {
-  const token = req.cookies.refreshToken;
+  const token = req.cookies._r_sess_tkn;
   const result = await AuthService.refreshToken(token);
 
-  res.cookie('refreshToken', result.refreshToken, {
+  res.cookie('_r_sess_tkn', result.refreshToken, {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
   });
@@ -44,10 +54,30 @@ const refreshToken = asyncHandler(async (req: Request, res: Response) => {
   });
 });
 
+const logout = asyncHandler(async (req: Request, res: Response) => {
+  // Clean up old stale cookies
+  res.clearCookie('refreshToken');
+  res.clearCookie('accessToken');
+  
+  res.clearCookie('_r_sess_tkn', {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+  });
+
+  res.clearCookie('_x_sess_tkn', {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    sameSite: 'lax',
+  });
+
+  ApiResponse.sendSuccess(res, 200, 'User logged out successfully', null);
+});
+
 export const AuthController = {
   register,
   login,
   forgotPassword,
   resetPassword,
   refreshToken,
+  logout,
 };

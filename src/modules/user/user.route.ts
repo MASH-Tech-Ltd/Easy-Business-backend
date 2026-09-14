@@ -8,7 +8,7 @@ const router = Router();
 // Merchant updating their own profile
 router.put(
   "/me",
-  authMiddleware("tenant_admin"),
+  authMiddleware("tenant_admin", "super_admin"),
   upload.single("avatar"),
   UserController.updateProfile
 );
