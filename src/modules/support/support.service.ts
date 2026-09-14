@@ -90,8 +90,140 @@ export const supportService = {
     return await SupportTicket.find({ tenantId }).sort({ updatedAt: -1 });
   },
 
-  async getAllTickets() {
-    return await SupportTicket.find().populate('tenantId', 'name domain slug').sort({ updatedAt: -1 });
+  async getAllTickets(search = '', page = 1, limit = 10, timeFilter = 'all') {
+    const query: any = {};
+    
+    // Apply time filter
+    if (timeFilter && timeFilter !== 'all') {
+      const now = new Date();
+      if (timeFilter === 'weekly') {
+        const lastWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        query.createdAt = { $gte: lastWeek };
+      } else if (timeFilter === 'monthly') {
+        const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+        query.createdAt = { $gte: lastMonth };
+      } else if (timeFilter === 'yearly') {
+        const lastYear = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+        query.createdAt = { $gte: lastYear };
+      }
+    }
+
+    if (search) {
+      const searchRegex = new RegExp(search, 'i');
+      
+      // Look up tenants matching the search string
+      const { Tenant } = require('../tenant/tenant.model');
+      const matchingTenants = await Tenant.find({
+        $or: [
+          { name: searchRegex },
+          { domain: searchRegex }
+        ]
+      }).select('_id');
+      
+      const tenantIds = matchingTenants.map(t => t._id);
+
+      query.$or = [
+        { ticketId: searchRegex },
+        { subject: searchRegex },
+        { tenantId: { $in: tenantIds } }
+      ];
+    }
+
+    const skip = (page - 1) * limit;
+
+    const [data, totalCount] = await Promise.all([
+      SupportTicket.find(query)
+        .populate('tenantId', 'name domain slug')
+        .sort({ updatedAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      SupportTicket.countDocuments(query)
+    ]);
+
+    return {
+      data,
+      pagination: {
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit),
+        currentPage: page,
+        limit
+      }
+    };
+  },
+
+  async getTicketStats(timeFilter = 'all') {
+    const matchQuery: any = {};
+    
+    // Apply time filter
+    if (timeFilter && timeFilter !== 'all') {
+      const now = new Date();
+      if (timeFilter === 'weekly') {
+        const lastWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        matchQuery.createdAt = { $gte: lastWeek };
+      } else if (timeFilter === 'monthly') {
+        const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+        matchQuery.createdAt = { $gte: lastMonth };
+      } else if (timeFilter === 'yearly') {
+        const lastYear = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+        matchQuery.createdAt = { $gte: lastYear };
+      }
+    }
+
+    const tickets = await SupportTicket.find(matchQuery).select('status createdAt');
+    
+    let solved = 0;
+    let pending = 0;
+    let open = 0;
+    let closed = 0;
+
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    
+    let thisMonthCount = 0;
+    let thisYearCount = 0;
+
+    tickets.forEach(t => {
+      if (t.status === 'RESOLVED') solved++;
+      else if (t.status === 'IN_PROGRESS' || t.status === 'PENDING') pending++;
+      else if (t.status === 'OPEN') open++;
+      else if (t.status === 'CLOSED') closed++;
+
+      const created = new Date(t.createdAt);
+      if (created.getFullYear() === currentYear) {
+        thisYearCount++;
+        if (created.getMonth() === currentMonth) {
+          thisMonthCount++;
+        }
+      }
+    });
+
+    return {
+      solved,
+      pending,
+      open,
+      closed,
+      total: tickets.length,
+      thisMonthCount,
+      thisYearCount
+    };
+  },
+
+  async updateTicketPriority(ticketId: string, priority: 'LOW' | 'MEDIUM' | 'HIGH') {
+    const ticket = await SupportTicket.findById(ticketId);
+    if (!ticket) return null;
+    
+    ticket.priority = priority;
+    await ticket.save();
+
+    // Optionally emit socket update for realtime
+    try {
+      const io = require('../../socket').getIO();
+      io.to(`ticket_${ticket.ticketId}`).emit('priority_changed', priority);
+      this.notifyListUpdate(ticket.messages[0]?.senderId?.toString());
+    } catch (err) {}
+
+    return ticket;
   },
 
   async getTicketDetails(ticketId: string, tenantId?: string) {

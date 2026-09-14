@@ -10,4 +10,11 @@ router.get('/logs', authMiddleware('super_admin'), SystemController.getLogs);
 router.get('/database', authMiddleware('super_admin'), SystemController.getDatabaseStats);
 router.get('/security', authMiddleware('super_admin'), SystemController.getSecurityStats);
 
+// New Security & Blocklist Routes
+router.get('/security/logs', authMiddleware('super_admin'), SystemController.getSecurityLogs);
+router.get('/security/blocked-ips', authMiddleware('super_admin'), SystemController.getBlockedIps);
+router.post('/security/block-ip', authMiddleware('super_admin'), SystemController.blockIp);
+router.delete('/security/blocked-ips/:ip', authMiddleware('super_admin'), SystemController.unblockIp);
+router.post('/security/sync', authMiddleware('super_admin'), SystemController.syncIpCache);
+
 export const SystemRoutes = router;

@@ -4,6 +4,10 @@ import { StorefrontController } from './storefront.controller';
 import { storefrontAuth } from '../../middlewares/storefrontAuth';
 
 const router = Router();
+import { globalRateLimiter } from '../../middleware/rateLimiter';
+
+// Apply rate limiting to all public storefront routes
+router.use(globalRateLimiter);
 
 // Secure routes with API key
 router.use(storefrontAuth);

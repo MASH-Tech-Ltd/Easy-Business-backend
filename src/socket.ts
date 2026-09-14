@@ -1,6 +1,7 @@
 import { Server, Socket } from "socket.io";
 import http from "http";
 import config from "./config";
+import { User } from "./modules/auth/auth.model";
 
 let io: Server | null = null;
 
@@ -29,7 +30,7 @@ export const initSocket = (httpServer: http.Server): Server => {
   });
 
   io.on("connection", (socket: Socket) => {
-    console.log(`Socket connected: ${socket.id}`);
+    // console.log(`Socket connected: ${socket.id}`);
 
     // Join a room for a specific ticket
     socket.on("join_ticket", (ticketId: string) => {
@@ -42,9 +43,20 @@ export const initSocket = (httpServer: http.Server): Server => {
       console.log(`Socket ${socket.id} left ticket_${ticketId}`);
     });
 
-    socket.on("join_user_room", (userId: string) => {
+    socket.on("join_user_room", async (userId: string) => {
       socket.join(`user_${userId}`);
-      console.log(`Socket ${socket.id} joined user_${userId}`);
+      try {
+        const user = await User.findById(userId).select('email role');
+        if (user) {
+          const roleIcons: Record<string, string> = { super_admin: '👑', tenant_admin: '🏢', customer: '👤', store_admin: '🏪' };
+          const icon = roleIcons[user.role] || '👤';
+          console.log(`Socket ${socket.id} joined user: ${user.email} ${icon} (${user.role})`);
+        } else {
+          console.log(`Socket ${socket.id} joined user_${userId} (user not found)`);
+        }
+      } catch (error) {
+        console.log(`Socket ${socket.id} joined user_${userId}`);
+      }
     });
 
     socket.on("leave_user_room", (userId: string) => {

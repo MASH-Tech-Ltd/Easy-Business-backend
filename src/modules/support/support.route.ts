@@ -6,6 +6,8 @@ import {
   getTicketDetails, 
   replyToTicket, 
   updateTicketStatus,
+  updateTicketPriority,
+  getTicketStats,
   deleteTicket
 } from './support.controller';
 import { authMiddleware } from '../../middleware/authMiddleware';
@@ -20,7 +22,9 @@ router.post('/ticket/:id/reply', authMiddleware('tenant_admin', 'super_admin'), 
 
 // Admin routes
 router.get('/all-tickets', authMiddleware('super_admin'), getAllTickets);
+router.get('/ticket-stats', authMiddleware('super_admin'), getTicketStats);
 router.patch('/ticket/:id/status', authMiddleware('super_admin', 'tenant_admin'), updateTicketStatus);
+router.patch('/ticket/:id/priority', authMiddleware('super_admin'), updateTicketPriority);
 router.delete('/ticket/:id', authMiddleware('super_admin', 'tenant_admin'), deleteTicket);
 
 export const SupportRoutes = router;

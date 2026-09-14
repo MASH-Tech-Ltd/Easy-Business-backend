@@ -1,8 +1,32 @@
 import { Request, Response } from 'express';
 import { Order } from '../order/order.model';
 import { Customer } from '../customer/customer.model';
+import { StoreVisit } from './storeVisit.model';
 import ApiResponse from '../../utils/apiResponse';
 import { asyncHandler } from '../../utils/asyncHandler';
+
+const recordVisit = asyncHandler(async (req: Request, res: Response) => {
+  const { tenantId, sessionId } = req.body;
+  if (!tenantId || !sessionId) {
+    return ApiResponse.sendError(res, 400, 'Missing required fields');
+  }
+
+  // We consider a visit unique per tenant per session ID per 24 hours
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+
+  const existingVisit = await StoreVisit.findOne({
+    tenantId,
+    sessionId,
+    createdAt: { $gte: startOfDay }
+  });
+
+  if (!existingVisit) {
+    await StoreVisit.create({ tenantId, sessionId });
+  }
+
+  ApiResponse.sendSuccess(res, 200, 'Visit recorded');
+});
 
 const getDashboardStats = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = (req as any).user.tenantId;
@@ -23,6 +47,14 @@ const getDashboardStats = asyncHandler(async (req: Request, res: Response) => {
     { $group: { _id: null, totalRevenue: { $sum: '$totalPrice' } } }
   ]);
   const totalRevenue = revenueResult.length > 0 ? revenueResult[0].totalRevenue : 0;
+
+  // Get total unique visits in this timeframe
+  const totalVisits = await StoreVisit.countDocuments({ tenantId, createdAt: { $gte: startDate } });
+  let conversionRate = 0;
+  if (totalVisits > 0) {
+    conversionRate = parseFloat(((totalOrders / totalVisits) * 100).toFixed(2));
+    if (conversionRate > 100) conversionRate = 100; // Cap at 100%
+  }
 
   // Compute chart data dynamically
   const orders = await Order.find({ tenantId, createdAt: { $gte: startDate } }).sort({ createdAt: 1 });
@@ -56,7 +88,8 @@ const getDashboardStats = asyncHandler(async (req: Request, res: Response) => {
     totalCustomers,
     totalRevenue,
     chartData,
-    conversionRate: 3.2 // Static for now, could be calculated based on site visits if tracked
+    conversionRate,
+    totalVisits
   });
 });
 
@@ -84,7 +117,8 @@ const getDashboardSummary = asyncHandler(async (req: Request, res: Response) => 
     totalProds,
     draftProds,
     topProducts,
-    allCats
+    allCats,
+    totalVisits
   ] = await Promise.all([
     Tenant.findById(tenantId).select('name slug'),
     Order.countDocuments({ tenantId, createdAt: { $gte: startDate } }),
@@ -98,10 +132,17 @@ const getDashboardSummary = asyncHandler(async (req: Request, res: Response) => 
     Product.countDocuments({ tenantId }),
     Product.countDocuments({ tenantId, status: 'DRAFT' }),
     Product.find({ tenantId }).sort({ salesCount: -1 }).limit(4).lean(),
-    Category.find({ tenantId }).select('status')
+    Category.find({ tenantId }).select('status'),
+    StoreVisit.countDocuments({ tenantId, createdAt: { $gte: startDate } })
   ]);
 
   const totalRevenue = revenueResult.length > 0 ? revenueResult[0].totalRevenue : 0;
+  
+  let conversionRate = 0;
+  if (totalVisits > 0) {
+    conversionRate = parseFloat(((totalOrders / totalVisits) * 100).toFixed(2));
+    if (conversionRate > 100) conversionRate = 100;
+  }
 
   // Calculate category stats
   const categoryStats = {
@@ -123,7 +164,8 @@ const getDashboardSummary = asyncHandler(async (req: Request, res: Response) => 
       totalRevenue,
       totalOrders,
       totalCustomers,
-      conversionRate: 3.2 // static for now
+      conversionRate,
+      totalVisits
     },
     recentOrders,
     subscription,
@@ -148,8 +190,10 @@ const getSuperAdminStats = asyncHandler(async (req: Request, res: Response) => {
     return acc + (sub.packageId?.price || 0);
   }, 0);
 
-  const loadAvg = os.loadavg()[0];
-  const systemLoad = Math.min(Math.round(loadAvg * 10), 100);
+  // Since os.loadavg() is often 0 on Windows, we'll use memory usage for a realistic cross-platform load metric
+  const totalMem = os.totalmem();
+  const freeMem = os.freemem();
+  const systemLoad = Math.round(((totalMem - freeMem) / totalMem) * 100);
 
   // Revenue chart data (mocked historically, based on current MRR for now)
   const chartData = [
@@ -172,6 +216,7 @@ const getSuperAdminStats = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const AnalyticsController = {
+  recordVisit,
   getDashboardStats,
   getSuperAdminStats,
   getDashboardSummary,

@@ -30,8 +30,39 @@ export const getMerchantTickets = async (req: Request, res: Response) => {
 
 export const getAllTickets = async (req: Request, res: Response) => {
   try {
-    const tickets = await supportService.getAllTickets();
-    res.status(200).json({ success: true, data: tickets });
+    const { search, page, limit, timeFilter } = req.query;
+    const result = await supportService.getAllTickets(
+      search as string,
+      parseInt(page as string) || 1,
+      parseInt(limit as string) || 10,
+      timeFilter as string
+    );
+    res.status(200).json({ success: true, data: result.data, pagination: result.pagination });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const getTicketStats = async (req: Request, res: Response) => {
+  try {
+    const { timeFilter } = req.query;
+    const stats = await supportService.getTicketStats(timeFilter as string);
+    res.status(200).json({ success: true, data: stats });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const updateTicketPriority = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { priority } = req.body;
+
+    const ticket = await supportService.updateTicketPriority(id as string, priority);
+    if (!ticket) {
+      return res.status(404).json({ success: false, message: 'Ticket not found' });
+    }
+    res.status(200).json({ success: true, data: ticket });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }
