@@ -5,6 +5,25 @@ import { Package } from '../package/package.model';
 import { Tenant } from '../tenant/tenant.model';
 import CustomError from '../../helpers/CustomError';
 import { paginationHelper } from '../../helpers/paginationHelper';
+import { notificationService } from '../notification/notification.service';
+import { User } from '../auth/auth.model';
+
+
+const notifySubscriptionUpdate = async (tenantId?: string) => {
+  try {
+    const io = require('../../socket').getIO();
+    const superAdmins = await User.find({ role: 'super_admin' });
+    for (const admin of superAdmins) {
+      io.to('user_' + admin._id.toString()).emit('refresh_subscriptions');
+    }
+    if (tenantId) {
+      const tenant = await Tenant.findById(tenantId);
+      if (tenant && tenant.ownerId) {
+        io.to('user_' + tenant.ownerId.toString()).emit('refresh_subscriptions');
+      }
+    }
+  } catch (error) {}
+};
 
 const assignPackage = async (payload: { tenantId: string, packageId: string }): Promise<ISubscription> => {
   const selectedPackage = await Package.findById(payload.packageId);
@@ -61,6 +80,7 @@ const assignPackage = async (payload: { tenantId: string, packageId: string }): 
     purchasedAddons: inheritedAddons,
   });
 
+  await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
   return subscription;
 };
 
@@ -127,7 +147,6 @@ const requestPackage = async (tenantId: string, packageId: string): Promise<ISub
     throw new CustomError(400, 'You already have a pending subscription request');
   }
 
-  // Create a pending subscription
   const subscription = await Subscription.create({
     tenantId,
     packageId,
@@ -136,6 +155,31 @@ const requestPackage = async (tenantId: string, packageId: string): Promise<ISub
     status: 'pending',
   });
 
+  const tenant = await Tenant.findById(tenantId);
+  if (tenant && tenant.ownerId) {
+    await notificationService.createNotification(
+      tenant.ownerId,
+      'SUBSCRIPTION_PENDING',
+      'Subscription Request Pending',
+      `Your request for ${selectedPackage.name} has been received and is pending approval.`,
+      subscription._id,
+      tenantId
+    );
+
+    const superAdmins = await User.find({ role: 'super_admin' });
+    for (const admin of superAdmins) {
+      await notificationService.createNotification(
+        admin._id,
+        'SUBSCRIPTION_REQUESTED',
+        'New Subscription Request',
+        `Tenant ${tenant.name || tenant.domain || 'unknown'} has requested a subscription to ${selectedPackage.name}.`,
+        subscription._id,
+        tenantId
+      );
+    }
+  }
+
+  await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
   return subscription;
 };
 
@@ -184,6 +228,19 @@ const approveSubscription = async (subscriptionId: string): Promise<ISubscriptio
   subscription.status = 'active';
   await subscription.save();
 
+  const tenant = await Tenant.findById(subscription.tenantId);
+  if (tenant && tenant.ownerId) {
+    await notificationService.createNotification(
+      tenant.ownerId,
+      'SUBSCRIPTION_APPROVED',
+      'Subscription Approved',
+      `Your subscription to ${selectedPackage.name} has been approved and is now active.`,
+      subscription._id,
+      subscription.tenantId
+    );
+  }
+
+  await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
   return subscription;
 };
 
@@ -199,6 +256,19 @@ const rejectSubscription = async (subscriptionId: string): Promise<ISubscription
   subscription.status = 'cancelled';
   await subscription.save();
 
+  const tenant = await Tenant.findById(subscription.tenantId);
+  if (tenant && tenant.ownerId) {
+    await notificationService.createNotification(
+      tenant.ownerId,
+      'SUBSCRIPTION_REJECTED',
+      'Subscription Rejected',
+      `Your recent subscription request has been rejected. Please contact support.`,
+      subscription._id,
+      subscription.tenantId
+    );
+  }
+
+  await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
   return subscription;
 };
 
@@ -262,6 +332,7 @@ const updateSubscription = async (subscriptionId: string, payload: Partial<ISubs
   if (payload.status) subscription.status = payload.status;
   
   await subscription.save();
+  await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
   return subscription;
 };
 
@@ -271,6 +342,7 @@ const deleteSubscription = async (subscriptionId: string): Promise<void> => {
     throw new CustomError(404, 'Subscription not found');
   }
   await Subscription.deleteOne({ _id: subscriptionId });
+  await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
 };
 
 const purchaseAddon = async (tenantId: string, payload: { addonId: string }): Promise<ISubscription> => {
@@ -320,6 +392,32 @@ const purchaseAddon = async (tenantId: string, payload: { addonId: string }): Pr
   });
 
   await subscription.save();
+
+  const tenant = await Tenant.findById(tenantId);
+  if (tenant && tenant.ownerId) {
+    await notificationService.createNotification(
+      tenant.ownerId,
+      'ADDON_REQUESTED',
+      'Addon Requested',
+      `Your request for ${addon.name} has been received and is pending approval.`,
+      addon._id,
+      tenantId
+    );
+
+    const superAdmins = await User.find({ role: 'super_admin' });
+    for (const admin of superAdmins) {
+      await notificationService.createNotification(
+        admin._id,
+        'ADDON_REQUESTED',
+        'New Addon Request',
+        `Tenant ${tenant.name || tenant.domain || 'unknown'} has requested the addon ${addon.name}.`,
+        addon._id,
+        tenantId
+      );
+    }
+  }
+
+  await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
   return subscription;
 };
 
@@ -411,6 +509,20 @@ const approveAddonRequest = async (subscriptionId: string, addonId: string) => {
   addon.isActive = true;
 
   await subscription.save();
+
+  const tenant = await Tenant.findById(subscription.tenantId);
+  if (tenant && tenant.ownerId) {
+    await notificationService.createNotification(
+      tenant.ownerId,
+      'ADDON_APPROVED',
+      'Addon Approved',
+      `Your request for ${addonDoc.name} has been approved.`,
+      addon._id,
+      subscription.tenantId
+    );
+  }
+
+  await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
   return subscription;
 };
 
@@ -428,6 +540,20 @@ const rejectAddonRequest = async (subscriptionId: string, addonId: string) => {
   addon.isActive = false;
 
   await subscription.save();
+
+  const tenant = await Tenant.findById(subscription.tenantId);
+  if (tenant && tenant.ownerId) {
+    await notificationService.createNotification(
+      tenant.ownerId,
+      'ADDON_REJECTED',
+      'Addon Rejected',
+      `Your request for an addon has been rejected.`,
+      addon._id,
+      subscription.tenantId
+    );
+  }
+
+  await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
   return subscription;
 };
 
@@ -441,6 +567,7 @@ const removeAddon = async (subscriptionId: string, addonId: string) => {
   subscription.purchasedAddons?.splice(addonIndex, 1);
 
   await subscription.save();
+  await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
   return subscription;
 };
 

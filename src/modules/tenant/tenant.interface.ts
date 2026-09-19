@@ -2,6 +2,7 @@ import { Document, Types } from 'mongoose';
 
 export interface ITenant extends Document {
   name: string;
+  tenetId: string;
   domain: string;
   slug: string;
   customDomain?: string;
@@ -14,4 +15,5 @@ export interface ITenant extends Document {
   description?: string;
   theme?: Record<string, any>;
   settings?: Record<string, any>;
+  showDemoSeed?: boolean;
 }

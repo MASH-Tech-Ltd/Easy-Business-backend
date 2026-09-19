@@ -16,6 +16,7 @@ const tenantSchema = new Schema<ITenant>(
     description: { type: String },
     theme: { type: Schema.Types.Mixed },
     settings: { type: Schema.Types.Mixed },
+    showDemoSeed: { type: Boolean, default: true },
   },
   {
     timestamps: true,

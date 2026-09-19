@@ -12,6 +12,24 @@ import { Category } from "../category/category.model";
 import { Product } from "../product/product.model";
 import mongoose from "mongoose";
 
+
+const notifyTenantUpdate = async (tenantId?: string) => {
+  try {
+    const io = require('../../socket').getIO();
+    const { User } = require('../auth/auth.model');
+    const superAdmins = await User.find({ role: 'super_admin' });
+    for (const admin of superAdmins) {
+      io.to('user_' + admin._id.toString()).emit('refresh_tenants');
+    }
+    if (tenantId) {
+      const tenant = await Tenant.findById(tenantId);
+      if (tenant && tenant.ownerId) {
+        io.to('user_' + tenant.ownerId.toString()).emit('account_status_changed');
+      }
+    }
+  } catch (error) {}
+};
+
 const createTenant = async (payload: any): Promise<ITenant> => {
   const session = await mongoose.startSession();
   session.startTransaction();

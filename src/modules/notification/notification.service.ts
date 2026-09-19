@@ -30,8 +30,35 @@ export const notificationService = {
     return notification;
   },
 
-  async getUserNotifications(userId: string) {
-    return Notification.find({ recipientId: userId }).sort({ createdAt: -1 }).limit(50);
+  async getUserNotifications(userId: string, query: any = {}) {
+    const { page = 1, limit = 50, search, type, isRead, sortBy = 'newest' } = query;
+    const filter: any = { recipientId: userId };
+    
+    if (type && type !== 'all') filter.type = type;
+    if (isRead !== undefined && isRead !== 'all') filter.read = isRead === 'true';
+    if (search) {
+      filter.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { message: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    const sortParams: any = { createdAt: sortBy === 'oldest' ? 1 : -1 };
+    const skip = (Number(page) - 1) * Number(limit);
+    
+    const [notifications, total, types] = await Promise.all([
+      Notification.find(filter).sort(sortParams).skip(skip).limit(Number(limit)),
+      Notification.countDocuments(filter),
+      Notification.distinct('type', { recipientId: userId })
+    ]);
+    
+    return {
+      notifications,
+      total,
+      page: Number(page),
+      totalPages: Math.ceil(total / Number(limit)),
+      availableTypes: types
+    };
   },
 
   // SECURITY FIX (IDOR): Scope update to the owner — prevents marking other users' notifications as read

@@ -3,6 +3,14 @@ import { Package } from './package.model';
 import CustomError from '../../helpers/CustomError';
 import { paginationHelper } from '../../helpers/paginationHelper';
 
+
+const notifyPackageUpdate = async () => {
+  try {
+    const io = require('../../socket').getIO();
+    io.emit('refresh_packages');
+  } catch (error) {}
+};
+
 const createPackage = async (payload: Partial<IPackage>): Promise<IPackage> => {
   const result = await Package.create(payload);
   return result;

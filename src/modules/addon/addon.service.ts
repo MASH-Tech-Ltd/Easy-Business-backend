@@ -2,6 +2,14 @@ import { IAddon } from './addon.interface';
 import { Addon } from './addon.model';
 import CustomError from '../../helpers/CustomError';
 
+
+const notifyPackageUpdate = async () => {
+  try {
+    const io = require('../../socket').getIO();
+    io.emit('refresh_packages');
+  } catch (error) {}
+};
+
 const createAddon = async (payload: IAddon): Promise<IAddon> => {
   const isExist = await Addon.findOne({ slug: payload.slug });
   if (isExist) {
@@ -23,6 +31,7 @@ const updateAddon = async (id: string, payload: Partial<IAddon>): Promise<IAddon
   if (!addon) {
     throw new CustomError(404, 'Addon not found');
   }
+  await notifyPackageUpdate();
   return addon;
 };
 
