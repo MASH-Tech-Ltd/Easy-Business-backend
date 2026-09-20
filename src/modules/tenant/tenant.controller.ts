@@ -54,7 +54,7 @@ const updateTenant = asyncHandler(async (req: Request, res: Response) => {
 
 const getTenantMetrics = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
-  const result = await TenantService.getTenantMetrics(id as string);
+  const result = await TenantService.getTenantMetrics(id as string, req.query);
   ApiResponse.sendSuccess(res, 200, 'Tenant metrics retrieved successfully', result);
 });
 

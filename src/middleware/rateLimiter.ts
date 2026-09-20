@@ -1,4 +1,4 @@
-import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import rateLimit from 'express-rate-limit';
 import { Request, Response, NextFunction } from 'express';
 import { SecurityLog, BlockedIp } from '../modules/system/security.model';
 import { getRequestedFrom } from './security.middleware';
@@ -64,12 +64,12 @@ export const roleBasedRateLimiter = rateLimit({
     const role = req.user?.role;
     if (role === 'super_admin') return 1000;
     if (role === 'tenant_admin') return 300;
-    if (role === 'customer' || role === 'store_admin') return 50;
+    if (role === 'customer' || role === 'store_admin') return 100;
     return 100;
   },
   keyGenerator: (req: Request, res: Response) => {
     // Use user ID if available, otherwise fallback to IP
-    return req.user?.userId || ipKeyGenerator(req.ip || '127.0.0.1');
+    return req.user?.userId || req.ip || req.socket.remoteAddress || '127.0.0.1';
   },
   message: (req: Request) => {
     const role = req.user?.role;

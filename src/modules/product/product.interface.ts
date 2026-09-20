@@ -39,3 +39,13 @@ export interface IProduct extends Document {
   stock?: number;
   salesCount?: number;
 }
+
+export const ALLOWED_SORT_FIELDS = [
+  'createdAt',
+  'updatedAt',
+  'title',
+  'discountedPrice',
+  'originalPrice',
+  'stock',
+  'salesCount'
+];
