@@ -8,7 +8,10 @@ const packageSchema = new Schema<IPackage>(
     billingCycle: { type: String, enum: ['monthly', 'yearly'], required: true },
     productLimit: { type: Number, required: true },
     features: [{ type: String }],
+    tagline: { type: String },
+    description: { type: String },
     isActive: { type: Boolean, default: true },
+    isPopular: { type: Boolean, default: false },
   },
   {
     timestamps: true,

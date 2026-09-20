@@ -12,6 +12,12 @@ const notifyPackageUpdate = async () => {
 };
 
 const createPackage = async (payload: Partial<IPackage>): Promise<IPackage> => {
+  if (payload.isPopular && payload.billingCycle) {
+    await Package.updateMany(
+      { billingCycle: payload.billingCycle, isPopular: true },
+      { isPopular: false }
+    );
+  }
   const result = await Package.create(payload);
   return result;
 };
@@ -34,10 +40,20 @@ const getAllPackages = async (page?: string | number, limit?: string | number): 
 };
 
 const updatePackage = async (id: string, payload: Partial<IPackage>): Promise<IPackage | null> => {
-  const result = await Package.findByIdAndUpdate(id, payload, { new: true });
-  if (!result) {
+  const targetPackage = await Package.findById(id);
+  if (!targetPackage) {
     throw new CustomError(404, 'Package not found');
   }
+
+  if (payload.isPopular) {
+    const billingCycle = payload.billingCycle || targetPackage.billingCycle;
+    await Package.updateMany(
+      { billingCycle, _id: { $ne: id }, isPopular: true },
+      { isPopular: false }
+    );
+  }
+
+  const result = await Package.findByIdAndUpdate(id, payload, { new: true });
   return result;
 };
 
