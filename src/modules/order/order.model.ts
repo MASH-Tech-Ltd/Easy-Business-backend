@@ -32,6 +32,9 @@ const orderSchema = new Schema<IOrder>(
       enum: ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'],
       default: 'pending',
     },
+    courierProvider: { type: String },
+    consignmentId: { type: String },
+    trackingUrl: { type: String },
   },
   {
     timestamps: true,

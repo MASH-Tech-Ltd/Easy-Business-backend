@@ -22,6 +22,9 @@ export interface IOrder extends Document {
   isDeliveryChargePaid?: boolean;
   paymentStatus: 'unpaid' | 'paid';
   status: 'pending' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled';
+  courierProvider?: string;
+  consignmentId?: string;
+  trackingUrl?: string;
   createdAt: Date;
   updatedAt: Date;
 }

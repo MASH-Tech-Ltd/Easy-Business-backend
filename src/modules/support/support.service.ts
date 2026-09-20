@@ -120,7 +120,7 @@ export const supportService = {
         ]
       }).select('_id');
       
-      const tenantIds = matchingTenants.map(t => t._id);
+      const tenantIds = matchingTenants.map((t: any) => t._id);
 
       query.$or = [
         { ticketId: searchRegex },
@@ -185,7 +185,7 @@ export const supportService = {
 
     tickets.forEach(t => {
       if (t.status === 'RESOLVED') solved++;
-      else if (t.status === 'IN_PROGRESS' || t.status === 'PENDING') pending++;
+      else if (t.status === 'IN_PROGRESS') pending++;
       else if (t.status === 'OPEN') open++;
       else if (t.status === 'CLOSED') closed++;
 

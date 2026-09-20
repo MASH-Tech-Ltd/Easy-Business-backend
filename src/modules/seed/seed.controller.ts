@@ -31,7 +31,8 @@ function generateSeedData(lang: "en" | "bn") {
     tenantId: Types.ObjectId,
   ) => {
     // Variables for seeding quantities - change these to adjust seed amounts
-    const PRODUCTS_PER_CATEGORY = 1000;
+    // const PRODUCTS_PER_CATEGORY = 1000;
+    const PRODUCTS_PER_CATEGORY = 60;
     const MAX_TOTAL_PRODUCTS = 50000;
     const BATCH_SIZE = 5000;
 

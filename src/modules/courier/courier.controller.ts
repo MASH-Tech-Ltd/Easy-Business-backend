@@ -32,10 +32,28 @@ const getAllCredentials = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 200, 'All courier credentials retrieved', result);
 });
 
+const checkAddonLimit = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = (req as any).user?.tenantId;
+  const result = await CourierService.checkCourierAddonLimit(tenantId);
+  ApiResponse.sendSuccess(res, 200, 'Courier Add-on check passed', result);
+});
+
+const forwardOrder = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = (req as any).user?.tenantId;
+  const { orderId, providerId } = req.body;
+  if (!orderId || !providerId) {
+    return ApiResponse.sendError(res, 400, 'Order ID and Provider ID are required');
+  }
+  const result = await CourierService.forwardOrder(orderId, tenantId, providerId);
+  ApiResponse.sendSuccess(res, 200, 'Order forwarded successfully', result);
+});
+
 export const CourierController = {
   getMyCourierCharge,
   getStorefrontCourierCharge,
   updateCourierCharge,
   saveCredentials,
   getAllCredentials,
+  checkAddonLimit,
+  forwardOrder,
 };
