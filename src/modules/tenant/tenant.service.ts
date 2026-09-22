@@ -268,7 +268,7 @@ const getTenantMetrics = async (tenantId: string, query?: any) => {
 
   const configuredCouriers = courierConfigs.filter(c => c.provider).map(c => c.provider);
   
-  const pipeline = {
+  const pipeline: Record<string, number> = {
     pending: 0,
     confirmed: 0,
     shipped: 0,

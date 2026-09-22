@@ -68,8 +68,8 @@ export const roleBasedRateLimiter = rateLimit({
     return 100;
   },
   keyGenerator: (req: Request, res: Response) => {
-    // Use user ID if available, otherwise fallback to IP
-    return req.user?.userId || req.ip || req.socket.remoteAddress || '127.0.0.1';
+    // Cast req, res to any to fix TS errors while still satisfying express-rate-limit's check for ipKeyGenerator
+    return req.user?.userId || ipKeyGenerator(req as any, res as any);
   },
   message: (req: Request) => {
     const role = req.user?.role;
