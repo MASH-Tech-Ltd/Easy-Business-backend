@@ -49,6 +49,7 @@ const config = {
     env: process.env.NODE_ENV || 'development',
     port: Number(process.env.PORT) || 8000,
     frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
+    allowedOrigins: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()) : [],
     baseDomain: process.env.BASE_DOMAIN || 'localhost',
   },
 

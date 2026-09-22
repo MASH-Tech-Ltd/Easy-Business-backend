@@ -19,7 +19,8 @@ export const initSocket = (httpServer: http.Server): Server => {
     "http://localhost:4173",
     "http://127.0.0.1:3000",
     "http://127.0.0.1:3001",
-    "http://127.0.0.1:5173"
+    "http://127.0.0.1:5173",
+    ...config.app.allowedOrigins
   ];
 
   io = new Server(httpServer, {
