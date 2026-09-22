@@ -13,6 +13,22 @@ export const tenantMiddleware = async (req: Request, res: Response, next: NextFu
     let isCustomDomain = false;
     let slugOrDomain = '';
 
+    // Exclude the main frontend and allowed origin domains from tenant checks
+    const allowedUrls = [
+      config.app.frontendUrl,
+      ...(config.app.allowedOrigins || [])
+    ];
+    
+    const excludedDomains = allowedUrls.map(url => {
+      try { return new URL(url).host; } catch (e) { return url; }
+    });
+    excludedDomains.push('localhost', '127.0.0.1');
+    
+    // If the host is in our allowed origins OR is the base domain itself, bypass tenant lookup
+    if (excludedDomains.includes(host) || host === config.app.baseDomain || host === `backapi.${config.app.baseDomain}`) {
+      return next();
+    }
+
     const baseDomain = config.app.baseDomain || 'localhost'; // fallback for local
 
     if (host.includes(baseDomain) && host !== baseDomain) {
