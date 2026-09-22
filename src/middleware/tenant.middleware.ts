@@ -45,6 +45,19 @@ export const tenantMiddleware = async (req: Request, res: Response, next: NextFu
       return next(); 
     }
 
+    // Convert to lowercase to prevent 'Astha' vs 'astha' mismatch
+    slugOrDomain = slugOrDomain.toLowerCase();
+
+    // Verification Log as requested
+    if (process.env.NODE_ENV === 'development') {
+      console.log("=== BACKEND TENANT PARSING VERIFICATION ===");
+      console.log("Original Host:", rawHost);
+      console.log("Parsed Host:", host);
+      console.log("Is Custom Domain:", isCustomDomain);
+      console.log("Database Lookup Key (slug/domain):", slugOrDomain);
+      console.log("===========================================");
+    }
+
     let tenant;
     if (isCustomDomain) {
       tenant = await Tenant.findOne({ customDomain: slugOrDomain, status: 'active' });
@@ -53,6 +66,7 @@ export const tenantMiddleware = async (req: Request, res: Response, next: NextFu
     }
 
     if (!tenant) {
+      console.log(`[TenantMiddleware] Store not found for slug/domain: ${slugOrDomain}`);
       return ApiResponse.sendError(res, 404, 'Store not found or suspended');
     }
 
