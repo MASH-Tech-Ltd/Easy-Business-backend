@@ -37,11 +37,14 @@ const createTenant = async (payload: any): Promise<ITenant> => {
 
   try {
     // 1. Create the tenant
+    const baseSlug = payload.subdomain || payload.tenantName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const uniqueSlug = `${baseSlug}-${Math.floor(1000 + Math.random() * 9000)}`;
+
     const tenantPayload: any = {
       name: payload.tenantName,
       logo: payload.logo,
       status: 'active',
-      slug: payload.subdomain || payload.tenantName.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+      slug: uniqueSlug,
     };
 
     if (payload.domain && payload.domain.trim() !== '') {
@@ -197,6 +200,9 @@ const updateMyStore = async (tenantId: string, payload: any) => {
 const addCustomDomain = async (tenantId: string, customDomain: string) => {
   if (!customDomain) {
     throw new CustomError(400, 'Custom domain is required');
+  }
+  if (customDomain.startsWith('www.')) {
+    customDomain = customDomain.replace(/^www\./, '');
   }
 
   // Ensure Cloudflare config exists
