@@ -75,8 +75,43 @@ app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 app.use(morgan(config.app.env === "development" ? "dev" : "short"));
 // app.use(globalRateLimiter);
 
+// Development environment hostname logger
+if (config.app.env === "development") {
+  app.use((req: Request, res: Response, next) => {
+    console.log(`[DEV] Incoming Hostname: ${req.hostname}`);
+    next();
+  });
+}
+
 // Routes
 app.use("/api/v1", tenantMiddleware, routes);
+
+// Cloudflare HTTP Validation (ACME Challenge) endpoint
+app.get("/.well-known/acme-challenge/:token", async (req: Request, res: Response) => {
+  const token = req.params.token;
+  try {
+    // Search across all tenants for a matching token in the sslValidationRecords
+    const tenants = await Tenant.find({
+      "sslValidationRecords.http_url": { $regex: token }
+    });
+
+    for (const tenant of tenants) {
+      const record = tenant.sslValidationRecords?.find(
+        (r: any) => r.http_url && r.http_url.includes(token)
+      );
+      if (record && record.http_body) {
+        // Must return plain text
+        res.setHeader('Content-Type', 'text/plain');
+        return res.status(200).send(record.http_body);
+      }
+    }
+
+    res.status(404).send("Token not found");
+  } catch (error) {
+    console.error("ACME challenge error:", error);
+    res.status(500).send("Internal server error");
+  }
+});
 
 // Health check endpoint
 app.get("/ping", (req: Request, res: Response) => {
