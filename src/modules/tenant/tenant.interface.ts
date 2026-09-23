@@ -9,6 +9,8 @@ export interface ITenant extends Document {
   logo?: string;
   ownerId?: Types.ObjectId;
   status: 'active' | 'suspended' | 'pending';
+  domainStatus?: 'pending' | 'active' | 'failed';
+  sslValidationRecords?: any[];
   contactEmail?: string;
   contactPhone?: string;
   contactAddress?: string;

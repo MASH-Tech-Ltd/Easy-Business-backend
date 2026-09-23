@@ -14,6 +14,7 @@ router.get('/info', TenantController.getStoreInfoByDomain);
 // Protected dashboard routes
 router.get('/my-store', authMiddleware('tenant_admin'), TenantController.getMyStore);
 router.patch('/update-store', authMiddleware('tenant_admin'), upload.single('logo'), TenantController.updateMyStore);
+router.post('/custom-domain', authMiddleware('tenant_admin'), TenantController.addCustomDomain);
 
 // Super Admin routes
 router.post('/create-tenant', authMiddleware('super_admin'), validateRequest(createTenantValidation), TenantController.createTenant);

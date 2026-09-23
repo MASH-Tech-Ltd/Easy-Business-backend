@@ -11,7 +11,8 @@ import { FraudCheck } from "../fraudCheck/fraudCheck.model";
 import { Category } from "../category/category.model";
 import { Product } from "../product/product.model";
 import mongoose from "mongoose";
-
+import axios from "axios";
+import config from "../../config";
 
 const notifyTenantUpdate = async (tenantId?: string) => {
   try {
@@ -162,6 +163,64 @@ const updateMyStore = async (tenantId: string, payload: any) => {
     throw new CustomError(404, 'Store not found');
   }
   return updatedStore;
+};
+
+const addCustomDomain = async (tenantId: string, customDomain: string) => {
+  if (!customDomain) {
+    throw new CustomError(400, 'Custom domain is required');
+  }
+
+  // Ensure Cloudflare config exists
+  if (!config.cloudflare.zoneId || !config.cloudflare.apiToken) {
+    throw new CustomError(500, 'Cloudflare configuration is missing on the server');
+  }
+
+  try {
+    // Cloudflare API call to add custom hostname
+    const cfResponse = await axios.post(
+      `https://api.cloudflare.com/client/v4/zones/${config.cloudflare.zoneId}/custom_hostnames`,
+      {
+        hostname: customDomain,
+        ssl: {
+          method: 'txt',
+          type: 'dv',
+          settings: {
+            http2: 'on',
+            tls_1_3: 'on'
+          }
+        }
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${config.cloudflare.apiToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const cfData = cfResponse.data.result;
+    const validationRecords = cfData?.ssl?.validation_records || [];
+
+    // Database-e domain ebong validation records save korun
+    const updatedStore = await Tenant.findByIdAndUpdate(tenantId, {
+      customDomain: customDomain,
+      domainStatus: 'pending',
+      sslValidationRecords: validationRecords
+    }, { new: true });
+
+    if (!updatedStore) {
+      throw new CustomError(404, 'Store not found');
+    }
+
+    return {
+      store: updatedStore,
+      records: validationRecords
+    };
+  } catch (error: any) {
+    console.error('Cloudflare Error:', error.response?.data || error.message);
+    const errorMessage = error.response?.data?.errors?.[0]?.message || 'Failed to add custom domain via Cloudflare';
+    throw new CustomError(500, errorMessage);
+  }
 };
 
 const getStoreInfoByDomain = async (domain: string) => {
@@ -374,6 +433,7 @@ export const TenantService = {
   getAllTenants,
   getMyStore,
   updateMyStore,
+  addCustomDomain,
   getStoreInfoByDomain,
   updateTenant,
   getTenantMetrics,

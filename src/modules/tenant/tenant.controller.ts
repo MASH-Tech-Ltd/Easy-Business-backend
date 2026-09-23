@@ -37,6 +37,13 @@ const updateMyStore = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 200, 'Store updated successfully', result);
 });
 
+const addCustomDomain = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = (req as any).user.tenantId;
+  const { customDomain } = req.body;
+  const result = await TenantService.addCustomDomain(tenantId, customDomain);
+  ApiResponse.sendSuccess(res, 200, 'Custom domain added successfully. Please verify DNS.', result);
+});
+
 const getStoreInfoByDomain = asyncHandler(async (req: Request, res: Response) => {
   const { domain } = req.query;
   if (!domain || typeof domain !== 'string') {
@@ -69,6 +76,7 @@ export const TenantController = {
   getAllTenants,
   getMyStore,
   updateMyStore,
+  addCustomDomain,
   getStoreInfoByDomain,
   updateTenant,
   getTenantMetrics,

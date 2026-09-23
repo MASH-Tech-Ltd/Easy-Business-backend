@@ -95,6 +95,12 @@ const config = {
     user: process.env.HOST_MAIL || '',
     pass: process.env.APP_PASSWORD || '',
   },
+
+  // Cloudflare
+  cloudflare: {
+    zoneId: process.env.CLOUDFLARE_ZONE_ID || '',
+    apiToken: process.env.CLOUDFLARE_API_TOKEN || '',
+  },
 } as const;
 
 export type Config = typeof config;
