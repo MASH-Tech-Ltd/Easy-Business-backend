@@ -154,6 +154,35 @@ const getMyStore = async (tenantId: string) => {
   if (!store) {
     throw new CustomError(404, 'Store not found');
   }
+
+  // Auto-check Cloudflare status if domain is pending
+  if (store.domainStatus === 'pending' && store.customDomain) {
+    try {
+      if (config.cloudflare.zoneId && config.cloudflare.apiToken) {
+        const getRes = await axios.get(
+          `https://api.cloudflare.com/client/v4/zones/${config.cloudflare.zoneId}/custom_hostnames?hostname=${store.customDomain}`,
+          {
+            headers: {
+              Authorization: `Bearer ${config.cloudflare.apiToken}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+        
+        const cfData = getRes.data.result[0];
+        if (cfData) {
+          const newStatus = cfData.status === 'active' ? 'active' : 'pending';
+          if (newStatus !== store.domainStatus) {
+            store.domainStatus = newStatus;
+            await store.save();
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to auto-check domain status in background', err);
+    }
+  }
+
   return store;
 };
 
@@ -199,7 +228,14 @@ const addCustomDomain = async (tenantId: string, customDomain: string) => {
     );
 
     const cfData = cfResponse.data.result;
-    const validationRecords = cfData?.ssl?.validation_records || [];
+    const validationRecords = [...(cfData?.ssl?.validation_records || [])];
+    
+    if (cfData?.ownership_verification) {
+      validationRecords.push({
+        txt_name: cfData.ownership_verification.name,
+        txt_value: cfData.ownership_verification.value
+      });
+    }
 
     // Database-e domain ebong validation records save korun
     const updatedStore = await Tenant.findByIdAndUpdate(tenantId, {
@@ -217,8 +253,56 @@ const addCustomDomain = async (tenantId: string, customDomain: string) => {
       records: validationRecords
     };
   } catch (error: any) {
-    console.error('Cloudflare Error:', error.response?.data || error.message);
+    const errorCode = error.response?.data?.errors?.[0]?.code;
     const errorMessage = error.response?.data?.errors?.[0]?.message || 'Failed to add custom domain via Cloudflare';
+
+    // 81057 is Cloudflare's Duplicate Custom Hostname error code
+    if (errorCode === 81057 || errorMessage.toLowerCase().includes('duplicate')) {
+      try {
+        // Fetch existing custom hostname details to check if it's active now
+        const getRes = await axios.get(
+          `https://api.cloudflare.com/client/v4/zones/${config.cloudflare.zoneId}/custom_hostnames?hostname=${customDomain}`,
+          {
+            headers: {
+              Authorization: `Bearer ${config.cloudflare.apiToken}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+        
+        const cfData = getRes.data.result[0];
+        if (cfData) {
+          const validationRecords = [...(cfData?.ssl?.validation_records || [])];
+          
+          if (cfData?.ownership_verification) {
+            validationRecords.push({
+              txt_name: cfData.ownership_verification.name,
+              txt_value: cfData.ownership_verification.value
+            });
+          }
+          // Cloudflare statuses: 'active', 'pending', 'moved', 'deleted'
+          const domainStatus = cfData.status === 'active' ? 'active' : 'pending';
+
+          const updatedStore = await Tenant.findByIdAndUpdate(tenantId, {
+            customDomain: customDomain,
+            domainStatus: domainStatus,
+            sslValidationRecords: validationRecords
+          }, { new: true });
+
+          if (!updatedStore) throw new CustomError(404, 'Store not found');
+
+          return {
+            store: updatedStore,
+            records: validationRecords
+          };
+        }
+      } catch (err) {
+        console.error('Failed to fetch existing hostname details', err);
+      }
+      throw new CustomError(400, 'Domain verification is already in progress. Please check your DNS records and wait a few minutes.');
+    }
+
+    console.error('Cloudflare Error:', error.response?.data || error.message);
     throw new CustomError(500, errorMessage);
   }
 };
