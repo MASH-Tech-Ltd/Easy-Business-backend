@@ -211,7 +211,7 @@ const addCustomDomain = async (tenantId: string, customDomain: string) => {
       {
         hostname: customDomain,
         ssl: {
-          method: 'txt',
+          method: 'http',
           type: 'dv',
           settings: {
             http2: 'on',
@@ -293,7 +293,9 @@ const addCustomDomain = async (tenantId: string, customDomain: string) => {
 
           return {
             store: updatedStore,
-            records: validationRecords
+            records: validationRecords,
+            isRetry: true,
+            status: domainStatus
           };
         }
       } catch (err) {

@@ -41,7 +41,17 @@ const addCustomDomain = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = (req as any).user.tenantId;
   const { customDomain } = req.body;
   const result = await TenantService.addCustomDomain(tenantId, customDomain);
-  ApiResponse.sendSuccess(res, 200, 'Custom domain added successfully. Please verify DNS.', result);
+  
+  let message = 'Custom domain added successfully. Please verify DNS.';
+  if ((result as any).isRetry) {
+    if ((result as any).status === 'active') {
+      message = 'Domain verified and active successfully!';
+    } else {
+      message = 'Refresh successful. Still verifying DNS records...';
+    }
+  }
+  
+  ApiResponse.sendSuccess(res, 200, message, result);
 });
 
 const getStoreInfoByDomain = asyncHandler(async (req: Request, res: Response) => {
