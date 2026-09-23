@@ -1,4 +1,4 @@
-import { connectDatabase } from './src/database/db';
+﻿import { connectDatabase } from './src/database/db';
 import { Package } from './src/modules/package/package.model';
 
 const basicFeatures = [
@@ -7,7 +7,7 @@ const basicFeatures = [
   "Product, Category & Order Management",
   "Customer Management",
   "Cash on Delivery (COD)",
-  "MashEasy Subdomain & Custom Domain Support",
+  "MASH ECO Subdomain & Custom Domain Support",
   "All Available Store Themes",
   "Basic Dashboard & Mobile-Friendly Store",
   "Support: Standard Ticket Support (Submit a ticket and our team will review and respond accordingly).",
@@ -20,7 +20,7 @@ const standardFeatures = [
   "Product, Category & Order Management",
   "Customer Management",
   "Cash on Delivery (COD)",
-  "MashEasy Subdomain & Custom Domain Support",
+  "MASH ECO Subdomain & Custom Domain Support",
   "All Available Store Themes",
   "Basic Dashboard & Mobile-Friendly Store",
   "Support: Priority Support (Get direct messaging access alongside standard tickets, handled with priority).",
@@ -33,7 +33,7 @@ const premiumFeatures = [
   "Product, Category & Order Management",
   "Customer Management",
   "Cash on Delivery (COD)",
-  "MashEasy Subdomain & Custom Domain Support",
+  "MASH ECO Subdomain & Custom Domain Support",
   "All Available Store Themes",
   "Basic Dashboard & Mobile-Friendly Store",
   "Support: Swift Priority Support (Fastest turnaround via direct messaging and priority ticketing for critical issues).",

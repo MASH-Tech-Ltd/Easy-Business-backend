@@ -1,4 +1,4 @@
-import { Tenant } from '../modules/tenant/tenant.model';
+﻿import { Tenant } from '../modules/tenant/tenant.model';
 import { Category } from '../modules/category/category.model';
 import { Product } from '../modules/product/product.model';
 import { Theme } from '../modules/theme/theme.model';
@@ -17,7 +17,7 @@ export const seedDemoStorefront = async () => {
 
     // 1. Create Tenant
     const tenant = new Tenant({
-      name: 'Demo MashEasy Store',
+      name: 'Demo MASH ECO Store',
       slug,
       status: 'active',
       contactEmail: 'hello@demostore.com'

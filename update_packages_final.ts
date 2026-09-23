@@ -1,4 +1,4 @@
-import { connectDatabase } from './src/database/db';
+﻿import { connectDatabase } from './src/database/db';
 import { Package } from './src/modules/package/package.model';
 
 const starterFeatures = [
@@ -8,7 +8,7 @@ const starterFeatures = [
   "- Product, Category & Order Management",
   "- Customer Management",
   "- Cash on Delivery (COD)",
-  "- MashEasy Subdomain & Custom Domain Support",
+  "- MASH ECO Subdomain & Custom Domain Support",
   "- All Available Store Themes",
   "- Basic Dashboard & Mobile-Friendly Store",
   "- Regular System Updates",

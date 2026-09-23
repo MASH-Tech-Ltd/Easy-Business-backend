@@ -1,4 +1,4 @@
-import nodemailer from 'nodemailer';
+﻿import nodemailer from 'nodemailer';
 import config from '../config';
 
 const transporter = nodemailer.createTransport({
@@ -11,7 +11,7 @@ const transporter = nodemailer.createTransport({
 
 export const sendEmail = async (to: string, subject: string, html: string) => {
   const mailOptions = {
-    from: `"MASH Easy" <${config.mail.user}>`,
+    from: `"MASH ECO" <${config.mail.user}>`,
     to,
     subject,
     html,

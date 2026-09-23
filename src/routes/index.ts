@@ -1,4 +1,4 @@
-import { Router } from 'express';
+﻿import { Router } from 'express';
 import { AuthRoutes } from '../modules/auth/auth.route';
 import { ProductRoutes } from '../modules/product/product.route';
 import { TenantRoutes } from '../modules/tenant/tenant.route';
@@ -114,7 +114,7 @@ const moduleRoutes = [
 moduleRoutes.forEach((route) => router.use(route.path, route.route));
 
 router.get('/', (req, res) => {
-  res.json({ message: 'Welcome to MashEasy Multitenant API' });
+  res.json({ message: 'Welcome to MASH ECO Multitenant API' });
 });
 
 export default router;
