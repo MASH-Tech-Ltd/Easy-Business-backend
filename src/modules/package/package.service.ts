@@ -39,6 +39,17 @@ const getAllPackages = async (page?: string | number, limit?: string | number): 
   };
 };
 
+/**
+ * Public endpoint — no auth required.
+ * Returns only active packages sorted by price, for the landing page pricing section.
+ */
+const getPublicPackages = async (): Promise<IPackage[]> => {
+  const result = await Package.find({ isActive: true })
+    .sort({ billingCycle: 1, price: 1 })
+    .select('name price billingCycle productLimit features tagline description isPopular');
+  return result;
+};
+
 const updatePackage = async (id: string, payload: Partial<IPackage>): Promise<IPackage | null> => {
   const targetPackage = await Package.findById(id);
   if (!targetPackage) {
@@ -68,6 +79,7 @@ const deletePackage = async (id: string): Promise<IPackage | null> => {
 export const PackageService = {
   createPackage,
   getAllPackages,
+  getPublicPackages,
   updatePackage,
   deletePackage
 };

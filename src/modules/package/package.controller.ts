@@ -15,6 +15,11 @@ const getAllPackages = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 200, 'Packages retrieved successfully', data, meta);
 });
 
+const getPublicPackages = asyncHandler(async (_req: Request, res: Response) => {
+  const result = await PackageService.getPublicPackages();
+  ApiResponse.sendSuccess(res, 200, 'Public packages retrieved successfully', result);
+});
+
 const updatePackage = asyncHandler(async (req: Request, res: Response) => {
   const result = await PackageService.updatePackage(req.params.id as string, req.body);
   ApiResponse.sendSuccess(res, 200, 'Package updated successfully', result);
@@ -28,6 +33,7 @@ const deletePackage = asyncHandler(async (req: Request, res: Response) => {
 export const PackageController = {
   createPackage,
   getAllPackages,
+  getPublicPackages,
   updatePackage,
   deletePackage
 };
