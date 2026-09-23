@@ -324,9 +324,20 @@ const getSuperAdminStats = asyncHandler(async (req: Request, res: Response) => {
   });
 });
 
+const getPublicStats = asyncHandler(async (req: Request, res: Response) => {
+  const { Tenant } = require("../tenant/tenant.model");
+  const totalTenants = await Tenant.countDocuments();
+  // To avoid showing 0 or very small numbers early on, we could add a base offset, but we will show the exact real number as requested.
+  
+  ApiResponse.sendSuccess(res, 200, "Public stats retrieved", {
+    totalTenants
+  });
+});
+
 export const AnalyticsController = {
   recordVisit,
   getDashboardStats,
   getSuperAdminStats,
   getDashboardSummary,
+  getPublicStats,
 };

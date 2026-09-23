@@ -92,8 +92,11 @@ const config = {
 
   // Mailer (SMTP)
   mail: {
-    user: process.env.HOST_MAIL || '',
-    pass: process.env.APP_PASSWORD || '',
+    host: process.env.BREVO_SMTP_HOST || 'smtp-relay.brevo.com',
+    port: Number(process.env.BREVO_SMTP_PORT) || 587,
+    user: process.env.BREVO_SMTP_USER || '',
+    pass: process.env.BREVO_SMTP_PASS || '',
+    from: process.env.BREVO_SMTP_FROM || 'contact@famouselectronics.com',
   },
 
   // Cloudflare

@@ -41,10 +41,12 @@ app.use(
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
-      // Allow multitenant subdomains (e.g. tenantSlug.localhost:3000)
+      // Allow multitenant subdomains and all production subdomains
       if (
         origin.endsWith(".localhost:3000") ||
-        origin.endsWith(".localhost:3001")
+        origin.endsWith(".localhost:3001") ||
+        origin.endsWith(".masheco.com") ||
+        origin === "https://masheco.com"
       ) {
         return callback(null, true);
       }
