@@ -237,6 +237,13 @@ const addCustomDomain = async (tenantId: string, customDomain: string) => {
       });
     }
 
+    if (cfData?.ownership_verification_http) {
+      validationRecords.push({
+        http_url: cfData.ownership_verification_http.http_url,
+        http_body: cfData.ownership_verification_http.http_body
+      });
+    }
+
     // Database-e domain ebong validation records save korun
     const updatedStore = await Tenant.findByIdAndUpdate(tenantId, {
       customDomain: customDomain,
@@ -278,6 +285,13 @@ const addCustomDomain = async (tenantId: string, customDomain: string) => {
             validationRecords.push({
               txt_name: cfData.ownership_verification.name,
               txt_value: cfData.ownership_verification.value
+            });
+          }
+
+          if (cfData?.ownership_verification_http) {
+            validationRecords.push({
+              http_url: cfData.ownership_verification_http.http_url,
+              http_body: cfData.ownership_verification_http.http_body
             });
           }
           // Cloudflare statuses: 'active', 'pending', 'moved', 'deleted'

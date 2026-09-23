@@ -86,13 +86,50 @@ if (config.app.env === "development") {
 // Routes
 app.use("/api/v1", tenantMiddleware, routes);
 
+// Cloudflare Custom Hostname Ownership HTTP Validation
+app.get("/.well-known/cf-custom-hostname-challenge/:uuid", async (req: Request, res: Response) => {
+  const uuid = req.params.uuid;
+
+  if (!uuid || typeof uuid !== 'string') {
+    return res.status(400).send("UUID is missing or invalid");
+  }
+
+  try {
+    const safeUuid = uuid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const tenants = await Tenant.find({
+      "sslValidationRecords.http_url": { $regex: safeUuid }
+    });
+
+    for (const tenant of tenants) {
+      const record = tenant.sslValidationRecords?.find(
+        (r: any) => r.http_url && r.http_url.includes(uuid)
+      );
+      if (record && record.http_body) {
+        res.setHeader('Content-Type', 'text/plain');
+        return res.status(200).send(record.http_body);
+      }
+    }
+
+    res.status(404).send("UUID not found");
+  } catch (error) {
+    console.error("CF custom hostname challenge error:", error);
+    res.status(500).send("Internal server error");
+  }
+});
+
 // Cloudflare HTTP Validation (ACME Challenge) endpoint
 app.get("/.well-known/acme-challenge/:token", async (req: Request, res: Response) => {
   const token = req.params.token;
+
+  if (!token || typeof token !== 'string') {
+    return res.status(400).send("Token is missing or invalid");
+  }
+
   try {
-    // Search across all tenants for a matching token in the sslValidationRecords
+    // Dynamic Search across all tenants for a matching token in the sslValidationRecords
+    const safeToken = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const tenants = await Tenant.find({
-      "sslValidationRecords.http_url": { $regex: token }
+      "sslValidationRecords.http_url": { $regex: safeToken }
     });
 
     for (const tenant of tenants) {
