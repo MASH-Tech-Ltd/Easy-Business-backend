@@ -11,18 +11,25 @@ import { paginationHelper } from "../../helpers/paginationHelper";
 
 import CustomError from "../../helpers/CustomError";
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// Build a robust $or query that matches tenant by slug OR customDomain,
+// handling both 'www.domain.com' and 'domain.com' regardless of how it was stored in DB.
+const normalizeTenantQuery = (slugOrDomain: string) => {
+  const bare = slugOrDomain.replace(/^www\./, '').toLowerCase();
+  const withWww = `www.${bare}`;
+  return {
+    $or: [
+      { slug: bare },
+      { customDomain: bare },
+      { customDomain: withWww },
+    ],
+  };
+};
 
-// Utility to resolve tenantId from slug
+// Utility to resolve tenantId from slug or domain
 const resolveTenant = async (slugOrDomain: string) => {
-  if (slugOrDomain.startsWith("www.")) {
-    slugOrDomain = slugOrDomain.replace(/^www\./, "");
-  }
-  const tenant = await Tenant.findOne({
-    $or: [{ slug: slugOrDomain }, { customDomain: slugOrDomain }],
-    status: "active",
-  });
-  if (!tenant) throw new CustomError(404, "Tenant not found");
+  const query = normalizeTenantQuery(slugOrDomain);
+  const tenant = await Tenant.findOne({ ...query, status: 'active' });
+  if (!tenant) throw new CustomError(404, 'Tenant not found');
   return tenant._id as Types.ObjectId;
 };
 
@@ -78,14 +85,9 @@ const checkStoreSubscription = async (tenantId: Types.ObjectId) => {
 // ── Controllers ───────────────────────────────────────────────────────────────
 
 const getStatus = asyncHandler(async (req: Request, res: Response) => {
-  let tenantSlug = req.params.tenantSlug as string;
-  if (tenantSlug.startsWith("www.")) {
-    tenantSlug = tenantSlug.replace(/^www\./, "");
-  }
-  const tenant = await Tenant.findOne({
-    $or: [{ slug: tenantSlug }, { customDomain: tenantSlug }],
-    status: "active",
-  });
+  const tenantSlug = req.params.tenantSlug as string;
+  const query = normalizeTenantQuery(tenantSlug);
+  const tenant = await Tenant.findOne({ ...query, status: 'active' });
   if (!tenant) {
     return res.status(404).json({
       success: false,
@@ -374,14 +376,10 @@ const getBrands = asyncHandler(async (req: Request, res: Response) => {
 });
 
 const getInfo = asyncHandler(async (req: Request, res: Response) => {
-  let tenantSlug = req.params.tenantSlug as string;
-  if (tenantSlug.startsWith("www.")) {
-    tenantSlug = tenantSlug.replace(/^www\./, "");
-  }
-  const tenant = await Tenant.findOne({
-    $or: [{ slug: tenantSlug }, { customDomain: tenantSlug }],
-    status: "active",
-  }).select("name logo slug customDomain settings description");
+  const tenantSlug = req.params.tenantSlug as string;
+  const query = normalizeTenantQuery(tenantSlug);
+  const tenant = await Tenant.findOne({ ...query, status: 'active' })
+    .select('name logo slug customDomain settings description');
   if (!tenant) {
     // We MUST return 200 here. Next.js ISR ignores 404s and will keep the stale cache!
     return res
