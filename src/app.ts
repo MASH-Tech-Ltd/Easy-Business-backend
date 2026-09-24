@@ -97,7 +97,20 @@ app.use(morgan(config.app.env === "development" ? "dev" : "short"));
 // Production-only strict security layers
 if (config.app.env === "production") {
   app.use(globalRateLimiter);
-  app.use(mongoSanitize()); // Prevent NoSQL Injection
+  
+  // Custom Mongo Sanitize wrapper to avoid "Cannot set property query" TypeError
+  // because req.query is a getter in some environments and cannot be reassigned directly.
+  app.use((req, res, next) => {
+    try {
+      if (req.body) mongoSanitize.sanitize(req.body);
+      if (req.params) mongoSanitize.sanitize(req.params);
+      if (req.query) mongoSanitize.sanitize(req.query);
+    } catch (e) {
+      console.warn("MongoSanitize error:", e);
+    }
+    next();
+  });
+  
   app.use(hpp()); // Prevent HTTP Parameter Pollution
 }
 
