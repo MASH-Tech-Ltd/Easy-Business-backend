@@ -3,11 +3,25 @@ import { ThemeService } from './theme.service';
 import ApiResponse from '../../utils/apiResponse';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { uploadCloudinary, deleteCloudinary } from '../../helpers/cloudinary';
+import CustomError from '../../helpers/CustomError';
 
 const updateTheme = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = (req as any).user.tenantId;
   const payload = typeof req.body.data === 'string' ? JSON.parse(req.body.data) : req.body;
   
+  if (payload.banner) {
+    const b = payload.banner;
+    const existingTheme = await ThemeService.getTheme(tenantId);
+    const hasBannerImage = !!req.file || !!b.image?.secure_url || !!existingTheme?.banner?.image?.secure_url;
+    const hasBannerContent = !!b.title || !!b.subtitle || !!b.description || !!b.buttonText || !!b.buttonLink || hasBannerImage;
+
+    if (hasBannerContent) {
+      if (!b.title || !b.subtitle || !b.description || !b.buttonText || !b.buttonLink || !hasBannerImage) {
+        throw new CustomError(400, 'All banner fields (title, subtitle, description, button text, button link, and image) must be provided.');
+      }
+    }
+  }
+
   if (req.file) {
     // Check for existing image to delete
     const existingTheme = await ThemeService.getTheme(tenantId);
