@@ -17,4 +17,7 @@ router.post('/security/block-ip', authMiddleware('super_admin'), SystemControlle
 router.delete('/security/blocked-ips/:ip', authMiddleware('super_admin'), SystemController.unblockIp);
 router.post('/security/sync', authMiddleware('super_admin'), SystemController.syncIpCache);
 
+router.get('/security/visitor-logs', authMiddleware('super_admin'), SystemController.getVisitorLogs);
+router.post('/security/visitor-logs', SystemController.createVisitorLog);
+
 export const SystemRoutes = router;

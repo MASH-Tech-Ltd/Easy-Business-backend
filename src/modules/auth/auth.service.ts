@@ -88,6 +88,8 @@ const login = async (payload: Partial<IUser>): Promise<{ accessToken: string, re
   const user = await User.findOne({ email: email as string }).select('+password');
   
   if (!user || !user.password) {
+    // Run a dummy compare to mitigate timing attacks (prevent user enumeration)
+    await bcrypt.compare(password as string, '$2b$12$dummyhashthatis29charslo');
     throw new CustomError(401, 'Invalid email or password');
   }
 
@@ -96,11 +98,14 @@ const login = async (payload: Partial<IUser>): Promise<{ accessToken: string, re
     throw new CustomError(401, 'Invalid email or password');
   }
 
+  const familyId = crypto.randomBytes(8).toString('hex');
+
   const jwtPayload = {
     _id: user._id,
     email: user.email,
     role: user.role,
     tenantId: user.tenantId,
+    familyId,
   };
 
   const accessToken = jwt.sign(jwtPayload, config.jwt.accessSecret, {
@@ -114,6 +119,18 @@ const login = async (payload: Partial<IUser>): Promise<{ accessToken: string, re
   const userObj = user.toObject();
   delete userObj.password;
 
+  await User.updateOne(
+    { _id: user._id },
+    {
+      $push: {
+        refreshTokens: {
+          $each: [{ token: refreshToken, familyId }],
+          $slice: -2 // Allow up to 2 concurrent devices
+        }
+      }
+    }
+  );
+
   return {
     accessToken,
     refreshToken,
@@ -122,7 +139,8 @@ const login = async (payload: Partial<IUser>): Promise<{ accessToken: string, re
 };
 
 const forgotPassword = async (email: string) => {
-  const user = await User.findOne({ email });
+  // Prevent super_admin accounts from being reset via the public forgot password endpoint
+  const user = await User.findOne({ email, role: { $ne: 'super_admin' } });
   if (!user) {
     throw new CustomError(404, 'User not found');
   }
@@ -202,11 +220,27 @@ const refreshToken = async (token: string) => {
     throw new CustomError(401, 'User not found');
   }
 
+  const tokenExists = user.refreshTokens && user.refreshTokens.some(rt => rt.token === token);
+  
+  if (!tokenExists) {
+    // SECURITY FIX: Refresh Token Reuse Detection
+    // The token is valid (verified by jwt.verify) but not in the DB's active list.
+    // This indicates an old, already consumed token is being reused.
+    // We isolate and revoke ONLY the compromised device's sessions using its familyId.
+    if (decoded.familyId) {
+      await User.updateOne({ _id: user._id }, { $pull: { refreshTokens: { familyId: decoded.familyId } } });
+    } else {
+      await User.updateOne({ _id: user._id }, { $set: { refreshTokens: [] } });
+    }
+    throw new CustomError(401, 'Security alert: Token reuse detected. Your session on this device has been revoked. Please log in again.');
+  }
+
   const jwtPayload = {
     _id: user._id,
     email: user.email,
     role: user.role,
     tenantId: user.tenantId,
+    familyId: decoded.familyId || crypto.randomBytes(8).toString('hex'),
   };
 
   const newAccessToken = jwt.sign(jwtPayload, config.jwt.accessSecret, {
@@ -217,10 +251,112 @@ const refreshToken = async (token: string) => {
     expiresIn: config.jwt.refreshExpiresIn as any,
   });
 
+  await User.updateOne(
+    { _id: user._id },
+    { $pull: { refreshTokens: { token } } }
+  );
+  
+  await User.updateOne(
+    { _id: user._id },
+    {
+      $push: {
+        refreshTokens: {
+          $each: [{ token: newRefreshToken, familyId: jwtPayload.familyId }],
+          $slice: -2 // Allow up to 2 concurrent devices
+        }
+      }
+    }
+  );
+
   return {
     accessToken: newAccessToken,
     refreshToken: newRefreshToken,
+    user,
   };
+};
+
+const requestChangePassword = async (userId: string, oldPassword: string) => {
+  const user = await User.findById(userId).select('+password');
+  if (!user || !user.password) {
+    throw new CustomError(404, 'User not found');
+  }
+
+  const isPasswordMatch = await bcrypt.compare(oldPassword, user.password);
+  if (!isPasswordMatch) {
+    throw new CustomError(401, 'Incorrect old password');
+  }
+
+  const otp = otpGenerator.generate(6, { upperCaseAlphabets: false, specialChars: false, lowerCaseAlphabets: false });
+  const passwordResetToken = crypto.createHash('sha256').update(otp).digest('hex');
+  const passwordResetExpires = new Date(Date.now() + 10 * 60 * 1000);
+
+  await User.findByIdAndUpdate(user._id, {
+    passwordResetToken,
+    passwordResetExpires,
+  });
+
+  const message = `<p>Your OTP to change your password is: <strong>${otp}</strong></p><p>This is valid for 10 minutes.</p>`;
+
+  try {
+    await sendEmail(user.email, 'Password Change Request', message);
+  } catch (error) {
+    await User.findByIdAndUpdate(user._id, {
+      passwordResetToken: undefined,
+      passwordResetExpires: undefined,
+    });
+    throw new CustomError(500, 'Email could not be sent');
+  }
+
+  const resetToken = jwt.sign({ _id: user._id }, config.jwt.resetSecret as string, {
+    expiresIn: config.jwt.resetExpiresIn as any,
+  });
+
+  return { message: 'OTP sent to email', resetToken };
+};
+
+const verifyChangePassword = async (resetToken: string, otp: string, newPassword: string) => {
+  let decoded: any;
+  try {
+    decoded = jwt.verify(resetToken, config.jwt.resetSecret as string);
+  } catch (error) {
+    throw new CustomError(400, 'Invalid or expired reset token');
+  }
+
+  const passwordResetToken = crypto.createHash('sha256').update(otp).digest('hex');
+
+  const user = await User.findOne({
+    _id: decoded._id,
+    passwordResetToken,
+    passwordResetExpires: { $gt: Date.now() },
+  });
+
+  if (!user) {
+    throw new CustomError(400, 'Invalid or expired OTP');
+  }
+
+  user.password = newPassword;
+  user.passwordResetToken = undefined;
+  user.passwordResetExpires = undefined;
+
+  await user.save(); // pre save hook hashes password
+
+  return { message: 'Password changed successfully' };
+};
+
+const logout = async (token: string) => {
+  if (!token) return;
+  try {
+    const decoded: any = jwt.verify(token, config.jwt.refreshSecret as string);
+    const user = await User.findById(decoded._id);
+    if (user) {
+      await User.updateOne(
+        { _id: user._id },
+        { $pull: { refreshTokens: { token } } }
+      );
+    }
+  } catch (error) {
+    // ignore invalid token errors on logout
+  }
 };
 
 export const AuthService = {
@@ -229,4 +365,7 @@ export const AuthService = {
   forgotPassword,
   resetPassword,
   refreshToken,
+  requestChangePassword,
+  verifyChangePassword,
+  logout,
 };

@@ -37,6 +37,13 @@ const updateMyStore = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 200, 'Store updated successfully', result);
 });
 
+const updateSlug = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = (req as any).user.tenantId;
+  const { slug } = req.body;
+  const result = await TenantService.updateSlug(tenantId, slug);
+  ApiResponse.sendSuccess(res, 200, 'Subdomain updated successfully', result);
+});
+
 const addCustomDomain = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = (req as any).user.tenantId;
   const { customDomain } = req.body;
@@ -86,6 +93,7 @@ export const TenantController = {
   getAllTenants,
   getMyStore,
   updateMyStore,
+  updateSlug,
   addCustomDomain,
   getStoreInfoByDomain,
   updateTenant,

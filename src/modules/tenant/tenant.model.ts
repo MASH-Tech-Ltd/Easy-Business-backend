@@ -19,6 +19,7 @@ const tenantSchema = new Schema<ITenant>(
     theme: { type: Schema.Types.Mixed },
     settings: { type: Schema.Types.Mixed },
     showDemoSeed: { type: Boolean, default: true },
+    slugChanges: [{ type: Date }],
   },
   {
     timestamps: true,

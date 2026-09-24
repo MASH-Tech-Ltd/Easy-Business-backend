@@ -11,6 +11,7 @@ export const createPackageValidation = z.object({
     description: z.string().optional(),
     isActive: z.boolean().optional(),
     isPopular: z.boolean().optional(),
+    isRecommended: z.boolean().optional(),
   }),
 });
 
@@ -25,5 +26,6 @@ export const updatePackageValidation = z.object({
     description: z.string().optional(),
     isActive: z.boolean().optional(),
     isPopular: z.boolean().optional(),
+    isRecommended: z.boolean().optional(),
   }),
 });

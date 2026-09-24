@@ -1,4 +1,4 @@
-﻿import { Router } from 'express';
+import { Router } from 'express';
 import { AuthRoutes } from '../modules/auth/auth.route';
 import { ProductRoutes } from '../modules/product/product.route';
 import { TenantRoutes } from '../modules/tenant/tenant.route';
@@ -21,6 +21,7 @@ import { SupportRoutes } from '../modules/support/support.route';
 import { NotificationRoutes } from '../modules/notification/notification.route';
 import { SeedRoutes } from '../modules/seed/seed.route';
 import { CheckoutLeadRoutes } from '../modules/checkoutLead/checkoutLead.route';
+import { ContactInquiryRoutes } from '../modules/contactInquiry/contactInquiry.route';
 
 const router = Router();
 
@@ -108,6 +109,10 @@ const moduleRoutes = [
   {
     path: '/checkout-leads',
     route: CheckoutLeadRoutes,
+  },
+  {
+    path: '/contact-inquiries',
+    route: ContactInquiryRoutes,
   },
 ];
 

@@ -14,8 +14,13 @@ export const globalRateLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// In-memory cache for warnings (two-strike rule)
+// In-memory cache for warnings (10-strike rule)
 const warningCache: Map<string, number> = new Map();
+
+// Clear warning cache every 24 hours to prevent memory leaks from inactive IPs
+setInterval(() => {
+  warningCache.clear();
+}, 2 * 60 * 60 * 1000);
 
 // Custom Rate Limiter Factory
 export const customRateLimit = (windowMs: number, max: number, messageText: string) => {
@@ -38,16 +43,18 @@ export const customRateLimit = (windowMs: number, max: number, messageText: stri
           userAgent: req.headers['user-agent'] || 'Unknown'
         });
 
-        // Two-strike rule: First time warn, second time block
-        if (warningCache.has(ip)) {
+        // 10-strike rule: First 9 times warn, 10th time block
+        const strikes = (warningCache.get(ip) || 0) + 1;
+        if (strikes >= 10) {
           await BlockedIp.create({
             ipAddress: ip,
-            reason: '[AUTO-BLOCKED] Repeated Rate Limit Violations (2 strikes)',
-            type: 'auto'
+            reason: '[AUTO-BLOCKED] Repeated Rate Limit Violations (10 strikes)',
+            type: 'auto',
+            userAgent: req.headers['user-agent'] || 'Unknown'
           });
           warningCache.delete(ip);
         } else {
-          warningCache.set(ip, Date.now());
+          warningCache.set(ip, strikes);
         }
       } catch (err) {}
 
@@ -63,18 +70,18 @@ export const roleBasedRateLimiter = rateLimit({
   max: (req: Request) => {
     const role = req.user?.role;
     if (role === 'super_admin') return 1000;
-    if (role === 'tenant_admin') return 300;
-    if (role === 'customer' || role === 'store_admin') return 100;
-    return 100;
+    if (role === 'tenant_admin') return 500;
+    if (role === 'customer' || role === 'store_admin') return 250;
+    return 200;
   },
   keyGenerator: (req: Request, res: Response) => {
     // Cast req, res to any to fix TS errors while still satisfying express-rate-limit's check for ipKeyGenerator
     return req.user?.userId || ipKeyGenerator(req as any, res as any);
   },
-  message: (req: Request) => {
+  message: (req: Request, res: Response) => {
     const role = req.user?.role;
-    const maxRequests = role === 'super_admin' ? 1000 : role === 'tenant_admin' ? 300 : (role === 'customer' || role === 'store_admin') ? 50 : 100;
-    return { success: false, message: `Rate limit exceeded for your role (${role || 'guest'}). Limit is ${maxRequests} requests per 15 minutes.` };
+    const maxRequests = role === 'super_admin' ? 1000 : role === 'tenant_admin' ? 500 : (role === 'customer' || role === 'store_admin') ? 250 : 200;
+    return { success: false, message: `Rate limit exceeded for your role.` };
   },
   standardHeaders: true,
   legacyHeaders: false,
@@ -92,16 +99,18 @@ export const roleBasedRateLimiter = rateLimit({
         userAgent: req.headers['user-agent'] || 'Unknown'
       });
 
-      // Two-strike rule: First time warn, second time block
-      if (warningCache.has(ip)) {
+      // 10-strike rule: First 9 times warn, 10th time block
+      const strikes = (warningCache.get(ip) || 0) + 1;
+      if (strikes >= 20) {
         await BlockedIp.create({
           ipAddress: ip,
-          reason: '[AUTO-BLOCKED] Repeated Role Rate Limit Violations (2 strikes)',
-          type: 'auto'
+          reason: '[AUTO-BLOCKED] Repeated Role Rate Limit Violations (10 strikes)',
+          type: 'auto',
+          userAgent: req.headers['user-agent'] || 'Unknown'
         });
         warningCache.delete(ip);
       } else {
-        warningCache.set(ip, Date.now());
+        warningCache.set(ip, strikes);
       }
     } catch (err) {}
 

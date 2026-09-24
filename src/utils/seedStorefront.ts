@@ -1,4 +1,4 @@
-﻿import { Tenant } from '../modules/tenant/tenant.model';
+import { Tenant } from '../modules/tenant/tenant.model';
 import { Category } from '../modules/category/category.model';
 import { Product } from '../modules/product/product.model';
 import { Theme } from '../modules/theme/theme.model';

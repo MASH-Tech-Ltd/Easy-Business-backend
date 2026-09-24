@@ -10,6 +10,7 @@ export interface IPackage extends Document {
   description?: string;
   isActive: boolean;
   isPopular?: boolean;
+  isRecommended?: boolean;
   createdAt?: Date;
   updatedAt?: Date;
 }

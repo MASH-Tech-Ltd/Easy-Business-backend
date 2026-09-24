@@ -7,7 +7,9 @@ import routes from "./routes/index";
 import { globalErrorHandler } from "./helpers/globalErrorHandler";
 import { notFound } from "./middleware/notFound";
 import { tenantMiddleware } from "./middleware/tenant.middleware";
-// import { globalRateLimiter } from "./middleware/rateLimiter";
+import { globalRateLimiter } from "./middleware/rateLimiter";
+import hpp from "hpp";
+import mongoSanitize from "express-mongo-sanitize";
 import config from "./config/index";
 import { Tenant } from "./modules/tenant/tenant.model";
 
@@ -15,10 +17,6 @@ const app: Application = express();
 app.set("trust proxy", 1);
 
 import { ipBlocklistMiddleware, attackDetectionMiddleware } from './middleware/security.middleware';
-// Apply IP blocklist and attack detection before processing anything else
-app.use(ipBlocklistMiddleware);
-app.use(express.json({ limit: "5mb" })); // Need body parser for attack detection
-app.use(attackDetectionMiddleware);
 
 // SECURITY FIX: Strict CORS allow-list — never trust unknown origins
 const allowedOrigins = [
@@ -30,6 +28,9 @@ const allowedOrigins = [
   "http://localhost:5174",
   ...config.app.allowedOrigins,
 ];
+
+const customDomainCache = new Map<string, { exists: boolean; timestamp: number }>();
+const CORS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 app.use(
   cors({
@@ -55,12 +56,23 @@ app.use(
         // Handle custom domains dynamically
         // Remove protocol for DB lookup if stored without it
         const host = new URL(origin).host;
+        
+        const cached = customDomainCache.get(host);
+        const now = Date.now();
+        if (cached && (now - cached.timestamp < CORS_CACHE_TTL)) {
+          if (cached.exists) return callback(null, true);
+          return callback(new Error(`CORS: Origin '${origin}' not allowed`), false);
+        }
+
         const tenant = await Tenant.findOne({
           $or: [{ domain: host }, { customDomain: host }],
         });
 
         if (tenant) {
+          customDomainCache.set(host, { exists: true, timestamp: now });
           return callback(null, true);
+        } else {
+          customDomainCache.set(host, { exists: false, timestamp: now });
         }
       } catch (err) {
         return callback(new Error("CORS: Error checking custom domain"), false);
@@ -71,11 +83,23 @@ app.use(
     credentials: true,
   }),
 );
+
+
+// Apply IP blocklist and attack detection before processing anything else
+app.use(ipBlocklistMiddleware);
+app.use(express.json({ limit: "10mb" })); // Need body parser for attack detection
+app.use(attackDetectionMiddleware);
 app.use(cookieParser());
 app.use(helmet());
-app.use(express.urlencoded({ extended: true, limit: "5mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.use(morgan(config.app.env === "development" ? "dev" : "short"));
-// app.use(globalRateLimiter);
+
+// Production-only strict security layers
+if (config.app.env === "production") {
+  app.use(globalRateLimiter);
+  app.use(mongoSanitize()); // Prevent NoSQL Injection
+  app.use(hpp()); // Prevent HTTP Parameter Pollution
+}
 
 // Development environment hostname logger
 if (config.app.env === "development") {

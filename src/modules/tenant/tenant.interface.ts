@@ -18,4 +18,5 @@ export interface ITenant extends Document {
   theme?: Record<string, any>;
   settings?: Record<string, any>;
   showDemoSeed?: boolean;
+  slugChanges?: Date[];
 }

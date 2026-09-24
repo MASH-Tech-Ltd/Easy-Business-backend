@@ -16,12 +16,16 @@ const login = asyncHandler(async (req: Request, res: Response) => {
   res.clearCookie('refreshToken');
   res.clearCookie('accessToken');
 
-  res.cookie('_r_sess_tkn', refreshToken, {
+  const isSuperAdmin = others.user.role === 'super_admin';
+  const rCookieName = isSuperAdmin ? '_super_r_tkn' : '_merchant_r_tkn';
+  const xCookieName = isSuperAdmin ? '_super_x_tkn' : '_merchant_x_tkn';
+
+  res.cookie(rCookieName, refreshToken, {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
   });
 
-  res.cookie('_x_sess_tkn', others.accessToken, {
+  res.cookie(xCookieName, others.accessToken, {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
     sameSite: 'lax',
@@ -41,10 +45,13 @@ const resetPassword = asyncHandler(async (req: Request, res: Response) => {
 });
 
 const refreshToken = asyncHandler(async (req: Request, res: Response) => {
-  const token = req.cookies._r_sess_tkn;
+  const token = req.cookies._super_r_tkn || req.cookies._merchant_r_tkn || req.cookies._r_sess_tkn;
   const result = await AuthService.refreshToken(token);
 
-  res.cookie('_r_sess_tkn', result.refreshToken, {
+  const isSuperAdmin = result.user.role === 'super_admin';
+  const rCookieName = isSuperAdmin ? '_super_r_tkn' : '_merchant_r_tkn';
+
+  res.cookie(rCookieName, result.refreshToken, {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
   });
@@ -55,22 +62,37 @@ const refreshToken = asyncHandler(async (req: Request, res: Response) => {
 });
 
 const logout = asyncHandler(async (req: Request, res: Response) => {
-  // Clean up old stale cookies
-  res.clearCookie('refreshToken');
-  res.clearCookie('accessToken');
-  
-  res.clearCookie('_r_sess_tkn', {
-    secure: process.env.NODE_ENV === 'production',
-    httpOnly: true,
-  });
+  const token = req.cookies._super_r_tkn || req.cookies._merchant_r_tkn || req.cookies._r_sess_tkn || req.cookies.refreshToken;
+  if (token) {
+    await AuthService.logout(token);
+  }
 
-  res.clearCookie('_x_sess_tkn', {
-    secure: process.env.NODE_ENV === 'production',
-    httpOnly: true,
-    sameSite: 'lax',
+  // Clean up old stale cookies and all possible role cookies
+  const cookiesToClear = [
+    'refreshToken', 'accessToken', '_r_sess_tkn', '_x_sess_tkn',
+    '_super_r_tkn', '_merchant_r_tkn', '_super_x_tkn', '_merchant_x_tkn'
+  ];
+
+  cookiesToClear.forEach(cookie => {
+    res.clearCookie(cookie, {
+      secure: process.env.NODE_ENV === 'production',
+      httpOnly: true,
+      sameSite: 'lax',
+    });
   });
 
   ApiResponse.sendSuccess(res, 200, 'User logged out successfully', null);
+});
+
+const requestChangePassword = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?._id as string;
+  const result = await AuthService.requestChangePassword(userId, req.body.oldPassword);
+  ApiResponse.sendSuccess(res, 200, 'OTP sent to email', result);
+});
+
+const verifyChangePassword = asyncHandler(async (req: Request, res: Response) => {
+  const result = await AuthService.verifyChangePassword(req.body.resetToken, req.body.otp, req.body.newPassword);
+  ApiResponse.sendSuccess(res, 200, 'Password changed successfully', result);
 });
 
 export const AuthController = {
@@ -80,4 +102,6 @@ export const AuthController = {
   resetPassword,
   refreshToken,
   logout,
+  requestChangePassword,
+  verifyChangePassword,
 };

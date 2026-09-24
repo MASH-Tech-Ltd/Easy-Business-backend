@@ -3,42 +3,46 @@ import { Request, Response, NextFunction } from 'express';
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
+const passwordValidation = z
+  .string({ message: 'Password is required' })
+  .min(8, 'Password must be at least 8 characters')
+  .max(128, 'Password must be at most 128 characters')
+  .regex(
+    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/,
+    'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'
+  );
+
 export const registerSchema = z.object({
   name: z
-    .string({ error: 'Name is required' })
+    .string({ message: 'Name is required' })
     .trim()
     .min(2, 'Name must be at least 2 characters')
     .max(100, 'Name must be at most 100 characters'),
   email: z
-    .string({ error: 'Email is required' })
+    .string({ message: 'Email is required' })
     .trim()
     .toLowerCase()
     .email('Please provide a valid email address'),
-  password: z
-    .string({ error: 'Password is required' })
-    .min(8, 'Password must be at least 8 characters')
-    .max(128, 'Password must be at most 128 characters'),
+  password: passwordValidation,
   phone: z
     .string()
     .trim()
-    .max(20, 'Phone number too long')
+    .max(29, 'Phone number too long')
     .optional(),
 });
 
 export const loginSchema = z.object({
   email: z
-    .string({ error: 'Email is required' })
+    .string({ message: 'Email is required' })
     .trim()
     .toLowerCase()
     .email('Please provide a valid email address'),
-  password: z
-    .string({ error: 'Password is required' })
-    .min(1, 'Password is required'),
+  password: passwordValidation,
 });
 
 export const forgotPasswordSchema = z.object({
   email: z
-    .string({ error: 'Email is required' })
+    .string({ message: 'Email is required' })
     .trim()
     .toLowerCase()
     .email('Please provide a valid email address'),
@@ -46,15 +50,12 @@ export const forgotPasswordSchema = z.object({
 
 export const resetPasswordSchema = z.object({
   resetToken: z
-    .string({ error: 'Reset token is required' })
+    .string({ message: 'Reset token is required' })
     .min(1, 'Reset token is required'),
   otp: z
-    .string({ error: 'OTP is required' })
+    .string({ message: 'OTP is required' })
     .min(1, 'OTP is required'),
-  password: z
-    .string({ error: 'Password is required' })
-    .min(8, 'Password must be at least 8 characters')
-    .max(28, 'Password must be at most 28 characters'),
+  password: passwordValidation,
 });
 
 // ── Middleware factories ──────────────────────────────────────────────────────

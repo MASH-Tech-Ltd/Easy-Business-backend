@@ -197,6 +197,45 @@ const updateMyStore = async (tenantId: string, payload: any) => {
   return updatedStore;
 };
 
+const updateSlug = async (tenantId: string, newSlug: string) => {
+  if (!newSlug) throw new CustomError(400, 'New subdomain name is required');
+  
+  // Convert to valid slug
+  const formattedSlug = newSlug.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+
+  if (formattedSlug.length < 3) throw new CustomError(400, 'Subdomain must be at least 3 characters long');
+
+  const tenant = await Tenant.findById(tenantId);
+  if (!tenant) throw new CustomError(404, 'Store not found');
+
+  if (tenant.slug === formattedSlug) {
+    throw new CustomError(400, 'This is already your active subdomain');
+  }
+
+  const existing = await Tenant.findOne({ slug: formattedSlug });
+  if (existing) {
+    throw new CustomError(400, 'This subdomain name already exists. Please choose another one.');
+  }
+
+  const now = new Date();
+  const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  
+  if (!tenant.slugChanges) tenant.slugChanges = [];
+  
+  // Filter only changes within the last 24 hours
+  tenant.slugChanges = tenant.slugChanges.filter(date => new Date(date) > oneDayAgo);
+  
+  if (tenant.slugChanges.length >= 2) {
+    throw new CustomError(400, 'You can only change your subdomain 2 times per day.');
+  }
+
+  tenant.slugChanges.push(now);
+  tenant.slug = formattedSlug;
+  await tenant.save();
+
+  return tenant;
+};
+
 const addCustomDomain = async (tenantId: string, customDomain: string) => {
   if (!customDomain) {
     throw new CustomError(400, 'Custom domain is required');
@@ -539,6 +578,7 @@ export const TenantService = {
   getAllTenants,
   getMyStore,
   updateMyStore,
+  updateSlug,
   addCustomDomain,
   getStoreInfoByDomain,
   updateTenant,

@@ -18,7 +18,11 @@ const userSchema = new Schema<IUser>(
       secure_url: { type: String }
     },
     passwordResetToken: { type: String },
-    passwordResetExpires: { type: Date }
+    passwordResetExpires: { type: Date },
+    refreshTokens: [{ 
+      token: { type: String },
+      familyId: { type: String }
+    }]
   },
   {
     timestamps: true,

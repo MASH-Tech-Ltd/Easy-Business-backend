@@ -4,6 +4,7 @@ import { Customer } from "../customer/customer.model";
 import { StoreVisit } from "./storeVisit.model";
 import ApiResponse from "../../utils/apiResponse";
 import { asyncHandler } from "../../utils/asyncHandler";
+const mongoose = require("mongoose");
 
 const recordVisit = asyncHandler(async (req: Request, res: Response) => {
   const { tenantId, sessionId } = req.body;
@@ -44,13 +45,12 @@ const getDashboardStats = asyncHandler(async (req: Request, res: Response) => {
   // Total customers can just be all-time for the tenant, or created in timeframe
   const totalCustomers = await Customer.countDocuments({ tenantId });
 
-  const mongoose = require("mongoose");
   const revenueResult = await Order.aggregate([
     {
       $match: {
         tenantId: new mongoose.Types.ObjectId(tenantId),
         createdAt: { $gte: startDate },
-        status: { $regex: new RegExp("^delivered$", "i") },
+        status: "delivered",
       },
     },
     { $group: { _id: null, totalRevenue: { $sum: "$totalPrice" } } },
@@ -80,6 +80,27 @@ const getDashboardStats = asyncHandler(async (req: Request, res: Response) => {
     { name: string; revenue: number; orders: number }
   > = {};
 
+  // Pre-fill dates to ensure continuous chart lines even on days with 0 sales
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    let dateStr;
+    if (days <= 30) {
+      dateStr = d.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+      });
+    } else {
+      dateStr = d.toLocaleDateString("en-US", {
+        month: "short",
+        year: "numeric",
+      });
+    }
+    if (!chartDataMap[dateStr]) {
+      chartDataMap[dateStr] = { name: dateStr, revenue: 0, orders: 0 };
+    }
+  }
+
   orders.forEach((order) => {
     let dateStr;
     if (days <= 30) {
@@ -108,6 +129,112 @@ const getDashboardStats = asyncHandler(async (req: Request, res: Response) => {
 
   const chartData = Object.values(chartDataMap);
 
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const todayRevenueResult = await Order.aggregate([
+    {
+      $match: {
+        tenantId: new mongoose.Types.ObjectId(tenantId),
+        createdAt: { $gte: startOfToday },
+        status: "delivered",
+      },
+    },
+    { $group: { _id: null, totalRevenue: { $sum: "$totalPrice" } } },
+  ]);
+  const todaySales =
+    todayRevenueResult.length > 0 ? todayRevenueResult[0].totalRevenue : 0;
+
+  const { Product } = require("../product/product.model");
+  const { Category } = require("../category/category.model");
+
+  const topProducts = await Product.find({ tenantId })
+    .sort({ salesCount: -1 })
+    .limit(5)
+    .select("title name salesCount discountedPrice price images image")
+    .lean();
+
+  const salesByCategoryAgg = await Product.aggregate([
+    { $match: { tenantId: new mongoose.Types.ObjectId(tenantId) } },
+    { $group: { _id: "$categoryId", sales: { $sum: "$salesCount" } } },
+  ]);
+
+  const categoryIds = salesByCategoryAgg.map((s: any) => s._id);
+  const categories = await Category.find({ _id: { $in: categoryIds } }).lean();
+  const salesByCategory = salesByCategoryAgg
+    .map((s: any) => {
+      const cat = categories.find(
+        (c: any) => c._id.toString() === s._id?.toString(),
+      );
+      return {
+        name: cat ? cat.name : "Uncategorized",
+        value: s.sales,
+      };
+    })
+    .filter((s: any) => s.value > 0);
+
+  // If no sales yet, provide dummy data for category pie chart to show something
+  const finalSalesByCategory =
+    salesByCategory.length > 0
+      ? salesByCategory
+      : [{ name: "No Sales", value: 1 }];
+
+  // Fetch recent orders
+  const recentOrders = await Order.find({ tenantId })
+    .sort({ createdAt: -1 })
+    .limit(5)
+    .lean();
+
+  // Order Status Breakdown
+  const orderStatusAgg = await Order.aggregate([
+    {
+      $match: {
+        tenantId: new mongoose.Types.ObjectId(tenantId),
+        createdAt: { $gte: startDate },
+      },
+    },
+    { $group: { _id: "$status", count: { $sum: 1 } } },
+  ]);
+
+  const allStatuses = [
+    "pending",
+    "confirmed",
+    "shipped",
+    "delivered",
+    "cancelled",
+  ];
+  const orderStatusBreakdown = allStatuses.map((status) => {
+    const found = orderStatusAgg.find(
+      (s) => (s._id || "pending").toLowerCase() === status,
+    );
+    return { name: status, value: found ? found.count : 0 };
+  });
+
+  // Average Order Value (based on delivered orders since revenue is based on delivered)
+  const deliveredStatusObj = orderStatusAgg.find(s => (s._id || "pending").toLowerCase() === "delivered");
+  const deliveredOrdersCount = deliveredStatusObj ? deliveredStatusObj.count : 0;
+  const averageOrderValue = deliveredOrdersCount > 0 ? totalRevenue / deliveredOrdersCount : 0;
+
+  // Top Customers
+  const topCustomers = await Order.aggregate([
+    {
+      $match: {
+        tenantId: new mongoose.Types.ObjectId(tenantId),
+        createdAt: { $gte: startDate },
+        status: "delivered",
+      },
+    },
+    {
+      $group: {
+        _id: "$customerPhone",
+        name: { $first: "$customerName" },
+        totalSpent: { $sum: "$totalPrice" },
+        ordersCount: { $sum: 1 },
+      },
+    },
+    { $sort: { totalSpent: -1 } },
+    { $limit: 5 },
+  ]);
+
   ApiResponse.sendSuccess(res, 200, "Dashboard stats retrieved", {
     totalOrders,
     totalCustomers,
@@ -115,6 +242,13 @@ const getDashboardStats = asyncHandler(async (req: Request, res: Response) => {
     chartData,
     conversionRate,
     totalVisits,
+    todaySales,
+    topProducts,
+    salesByCategory: finalSalesByCategory,
+    recentOrders,
+    orderStatusBreakdown,
+    averageOrderValue,
+    topCustomers,
   });
 });
 
@@ -221,26 +355,28 @@ const getSuperAdminStats = asyncHandler(async (req: Request, res: Response) => {
   const os = require("os");
 
   const totalTenants = await Tenant.countDocuments();
-  
+
   // Fetch ALL subscriptions for history and sales calculations
   const allSubscriptions = await Subscription.find({})
     .populate("packageId")
     .populate("tenantId", "name")
     .populate("purchasedAddons.addonId", "name price");
 
-  const activeSubscriptions = allSubscriptions.filter((sub: any) => sub.status === "active");
+  const activeSubscriptions = allSubscriptions.filter(
+    (sub: any) => sub.status === "active",
+  );
 
   const activePackages = activeSubscriptions.length;
   const monthlyMRR = activeSubscriptions.reduce((acc: number, sub: any) => {
     let addonTotal = 0;
     if (sub.purchasedAddons && sub.purchasedAddons.length > 0) {
       sub.purchasedAddons.forEach((pa: any) => {
-        if (pa.status === 'active' && pa.addonId) {
+        if (pa.status === "active" && pa.addonId) {
           addonTotal += pa.addonId.price || 0;
         }
       });
     }
-    const pkgPrice = sub.isTrial ? 0 : (sub.packageId?.price || 0);
+    const pkgPrice = sub.isTrial ? 0 : sub.packageId?.price || 0;
     return acc + pkgPrice + addonTotal;
   }, 0);
 
@@ -253,47 +389,55 @@ const getSuperAdminStats = asyncHandler(async (req: Request, res: Response) => {
   let yearlySales = 0;
   let totalSales = 0;
 
-  const transactions = allSubscriptions.map((sub: any) => {
-    let addonPrice = 0;
-    let addonNames: string[] = [];
+  const transactions = allSubscriptions
+    .map((sub: any) => {
+      let addonPrice = 0;
+      let addonNames: string[] = [];
 
-    if (sub.purchasedAddons && sub.purchasedAddons.length > 0) {
-      sub.purchasedAddons.forEach((pa: any) => {
-        if (pa.status === 'active' && pa.addonId) {
-          addonPrice += pa.addonId.price || 0;
-          addonNames.push(pa.addonId.name);
-        }
-      });
-    }
-
-    let packagePrice = 0;
-    // Assume revenue is generated only if not a trial and status is active or expired
-    if (!sub.isTrial && (sub.status === 'active' || sub.status === 'expired')) {
-      packagePrice = sub.packageId?.price || 0;
-    }
-
-    const price = packagePrice + addonPrice;
-    const subDate = new Date(sub.createdAt);
-    
-    totalSales += price;
-    
-    if (subDate.getFullYear() === currentYear) {
-      yearlySales += price;
-      if (subDate.getMonth() === currentMonth) {
-        monthlySales += price;
+      if (sub.purchasedAddons && sub.purchasedAddons.length > 0) {
+        sub.purchasedAddons.forEach((pa: any) => {
+          if (pa.status === "active" && pa.addonId) {
+            addonPrice += pa.addonId.price || 0;
+            addonNames.push(pa.addonId.name);
+          }
+        });
       }
-    }
 
-    return {
-      id: sub._id,
-      tenantName: sub.tenantId?.name || "Unknown",
-      packageName: sub.packageId?.name || "Free tier",
-      addons: addonNames.join(", "),
-      amount: price,
-      status: sub.status,
-      date: sub.createdAt
-    };
-  }).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      let packagePrice = 0;
+      // Assume revenue is generated only if not a trial and status is active or expired
+      if (
+        !sub.isTrial &&
+        (sub.status === "active" || sub.status === "expired")
+      ) {
+        packagePrice = sub.packageId?.price || 0;
+      }
+
+      const price = packagePrice + addonPrice;
+      const subDate = new Date(sub.createdAt);
+
+      totalSales += price;
+
+      if (subDate.getFullYear() === currentYear) {
+        yearlySales += price;
+        if (subDate.getMonth() === currentMonth) {
+          monthlySales += price;
+        }
+      }
+
+      return {
+        id: sub._id,
+        tenantName: sub.tenantId?.name || "Unknown",
+        packageName: sub.packageId?.name || "Free tier",
+        addons: addonNames.join(", "),
+        amount: price,
+        status: sub.status,
+        date: sub.createdAt,
+      };
+    })
+    .sort(
+      (a: any, b: any) =>
+        new Date(b.date).getTime() - new Date(a.date).getTime(),
+    );
 
   // Since os.loadavg() is often 0 on Windows, we'll use memory usage for a realistic cross-platform load metric
   const totalMem = os.totalmem();
@@ -328,9 +472,9 @@ const getPublicStats = asyncHandler(async (req: Request, res: Response) => {
   const { Tenant } = require("../tenant/tenant.model");
   const totalTenants = await Tenant.countDocuments();
   // To avoid showing 0 or very small numbers early on, we could add a base offset, but we will show the exact real number as requested.
-  
+
   ApiResponse.sendSuccess(res, 200, "Public stats retrieved", {
-    totalTenants
+    totalTenants,
   });
 });
 

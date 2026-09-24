@@ -4,7 +4,7 @@ import { asyncHandler } from '../../utils/asyncHandler';
 import os from 'os';
 import mongoose from 'mongoose';
 import v8 from 'v8';
-import { SecurityLog, BlockedIp } from './security.model';
+import { SecurityLog, BlockedIp, VisitorLog } from './security.model';
 
 const getHealthStats = asyncHandler(async (req: Request, res: Response) => {
   const osUptime = os.uptime();
@@ -55,12 +55,12 @@ const getHealthStats = asyncHandler(async (req: Request, res: Response) => {
     arch: os.arch(),
     nodeVersion: process.version,
     loadAvg: os.platform() === 'win32' ? 'N/A' : `${(loadAvg[0] ?? 0).toFixed(2)}, ${(loadAvg[1] ?? 0).toFixed(2)}, ${(loadAvg[2] ?? 0).toFixed(2)}`,
-    hostname: os.hostname(),
+    hostname: '********',
     heapUsed: `${(heap.heapUsed / 1024 / 1024).toFixed(2)} MB`,
     processRss: `${(heap.rss / 1024 / 1024).toFixed(2)} MB`,
     v8HeapLimit: `${(v8.getHeapStatistics().heap_size_limit / 1024 / 1024).toFixed(2)} MB`,
     processPid: process.pid,
-    ipAddress: ipAddress,
+    ipAddress: '***.***.***.***',
     externalMem: `${(heap.external / 1024 / 1024).toFixed(2)} MB`,
     arrayBuffers: `${(heap.arrayBuffers / 1024 / 1024).toFixed(2)} MB`,
     env: process.env.NODE_ENV || 'development'
@@ -164,6 +164,41 @@ const syncIpCache = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 200, 'IP Cache synced across instances', null);
 });
 
+const getVisitorLogs = asyncHandler(async (req: Request, res: Response) => {
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 10;
+  
+  const logs = await VisitorLog.find()
+    .sort({ accessedAt: -1 })
+    .skip((page - 1) * limit)
+    .limit(limit);
+    
+  const total = await VisitorLog.countDocuments();
+  
+  ApiResponse.sendSuccess(res, 200, 'Visitor logs retrieved', { logs, total, page, limit });
+});
+
+const createVisitorLog = asyncHandler(async (req: Request, res: Response) => {
+  const { role, storeName, ownerName } = req.body;
+  
+  if (!role || !['Merchant', 'Customer'].includes(role)) {
+    return ApiResponse.sendError(res, 400, 'Valid role is required (Merchant or Customer)');
+  }
+
+  const ipAddress = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || 'Unknown';
+  const userAgent = req.headers['user-agent'] || 'Unknown';
+
+  const visitorLog = await VisitorLog.create({
+    role,
+    storeName,
+    ownerName,
+    ipAddress,
+    userAgent
+  });
+
+  ApiResponse.sendSuccess(res, 201, 'Visitor log recorded', visitorLog);
+});
+
 export const SystemController = {
   getHealthStats,
   getLogs,
@@ -173,5 +208,7 @@ export const SystemController = {
   getBlockedIps,
   blockIp,
   unblockIp,
-  syncIpCache
+  syncIpCache,
+  getVisitorLogs,
+  createVisitorLog
 };

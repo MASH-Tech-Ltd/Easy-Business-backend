@@ -38,6 +38,17 @@ export const ipBlocklistMiddleware = async (req: Request, res: Response, next: N
 
 // In-memory cache for warnings (two-strike rule)
 const warningCache: Map<string, number> = new Map();
+const WARNING_TTL = 1 * 60 * 60 * 1000; // 24 hours
+
+// Cleanup stale warnings every hour to prevent memory leaks
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, time] of warningCache.entries()) {
+    if (now - time > WARNING_TTL) {
+      warningCache.delete(ip);
+    }
+  }
+}, 60 * 60 * 1000);
 
 // Helper to determine exact source app based on Origin/Referer
 export const getRequestedFrom = (req: Request): string => {
@@ -50,12 +61,16 @@ export const getRequestedFrom = (req: Request): string => {
 
 export const attackDetectionMiddleware = async (req: Request, res: Response, next: NextFunction) => {
   const ip = req.ip || req.socket.remoteAddress || '127.0.0.1';
-  const payloadStr = JSON.stringify(req.body || {}) + JSON.stringify(req.query || {});
+  const payloadStr = JSON.stringify(req.body || {}) + JSON.stringify(req.query || {}) + req.originalUrl;
   
-  // Basic heuristic for malicious payload (XSS tags, MongoDB specific operators that shouldn't be passed raw)
-  const isSuspicious = /(<script>|<\/script>|\$where|\$regex|\$ne|\$gt)/i.test(payloadStr);
+  // Basic heuristic for malicious payload (XSS tags, inline JS).
+  // Removed MongoDB specific operators ($gt, $ne) from string matching to avoid false positives on legitimate text.
+  const isSuspicious = /(<script>|<\/script>|javascript:)/i.test(payloadStr);
+  
+  // Critical files and path traversal attempts (Immediate 1-strike ban)
+  const isCriticalAttack = /(\.env|config\.json|passwd|shadow|\.\.\/|\.\.\\|%2e%2e)/i.test(payloadStr);
 
-  if (isSuspicious) {
+  if (isCriticalAttack || isSuspicious) {
     try {
       const requestedFrom = getRequestedFrom(req);
       
@@ -63,23 +78,28 @@ export const attackDetectionMiddleware = async (req: Request, res: Response, nex
         incidentType: 'ATTACK_DETECTED',
         endpoint: req.originalUrl,
         ipAddress: ip,
-        reason: 'Suspicious payload matching known XSS/NoSQLi signatures',
+        reason: isCriticalAttack ? 'Immediate Block: Attempted to access sensitive system files or path traversal' : 'Suspicious payload matching known XSS/NoSQLi signatures',
         requestedFrom,
         userAgent: req.headers['user-agent'] || 'Unknown'
       });
       
-      // Two-strike rule: First time warn, second time block
-      if (warningCache.has(ip)) {
+      const now = Date.now();
+      const lastWarning = warningCache.get(ip);
+      const hasValidWarning = lastWarning && (now - lastWarning < WARNING_TTL);
+
+      // If it's a critical attack (trying to read .env), block immediately. Otherwise, use two-strike rule.
+      if (isCriticalAttack || hasValidWarning) {
         await BlockedIp.create({
           ipAddress: ip,
-          reason: '[AUTO-BLOCKED] Repeated Malicious Activity (2 strikes)',
-          type: 'auto'
+          reason: isCriticalAttack ? '[AUTO-BLOCKED] Critical Attack: File Traversal / System File Access' : '[AUTO-BLOCKED] Repeated Malicious Activity (2 strikes)',
+          type: 'auto',
+          userAgent: req.headers['user-agent'] || 'Unknown'
         });
         blockedIpsCache.add(ip);
         warningCache.delete(ip);
-        return res.status(403).json({ success: false, message: 'IP address blocked due to repeated malicious activity.' });
+        return res.status(403).json({ success: false, message: 'IP address permanently blocked due to malicious activity.' });
       } else {
-        warningCache.set(ip, Date.now());
+        warningCache.set(ip, now);
         return res.status(403).json({ success: false, message: 'Malicious payload detected. This incident has been logged. Further attempts will result in an IP ban.' });
       }
     } catch (err) {}

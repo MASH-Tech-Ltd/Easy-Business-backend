@@ -46,7 +46,7 @@ const getAllPackages = async (page?: string | number, limit?: string | number): 
 const getPublicPackages = async (): Promise<IPackage[]> => {
   const result = await Package.find({ isActive: true })
     .sort({ billingCycle: 1, price: 1 })
-    .select('name price billingCycle productLimit features tagline description isPopular');
+    .select('name price billingCycle productLimit features tagline description isPopular isRecommended');
   return result;
 };
 

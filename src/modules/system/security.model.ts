@@ -30,6 +30,7 @@ export interface IBlockedIp extends Document {
   blockedAt: Date;
   expiresAt?: Date;
   type: 'manual' | 'auto';
+  userAgent?: string;
 }
 
 const blockedIpSchema = new Schema<IBlockedIp>({
@@ -37,7 +38,28 @@ const blockedIpSchema = new Schema<IBlockedIp>({
   reason: { type: String, required: true },
   blockedAt: { type: Date, default: Date.now },
   expiresAt: { type: Date },
-  type: { type: String, enum: ['manual', 'auto'], default: 'manual' }
+  type: { type: String, enum: ['manual', 'auto'], default: 'manual' },
+  userAgent: { type: String }
 });
 
 export const BlockedIp = mongoose.model<IBlockedIp>('BlockedIp', blockedIpSchema);
+
+export interface IVisitorLog extends Document {
+  role: 'Merchant' | 'Customer';
+  ipAddress: string;
+  userAgent: string;
+  storeName?: string;
+  ownerName?: string;
+  accessedAt: Date;
+}
+
+const visitorLogSchema = new Schema<IVisitorLog>({
+  role: { type: String, enum: ['Merchant', 'Customer'], required: true },
+  ipAddress: { type: String, required: true },
+  userAgent: { type: String, required: true },
+  storeName: { type: String },
+  ownerName: { type: String },
+  accessedAt: { type: Date, default: Date.now }
+});
+
+export const VisitorLog = mongoose.model<IVisitorLog>('VisitorLog', visitorLogSchema);

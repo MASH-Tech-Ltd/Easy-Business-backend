@@ -7,16 +7,17 @@ export const seedSuperAdmin = async () => {
     const superAdminPassword = config.superAdmin.password;
 
     if (!superAdminEmail || !superAdminPassword) {
-      console.warn('Super Admin credentials not provided in env. Skipping seeder.');
+      console.warn('Authority Person credentials not provided. Skipping process...');
       return;
     }
 
-    // Check if the super admin already exists
-    const existingSuperAdmin = await User.findOne({ email: superAdminEmail });
+    // Only select _id to avoid hydrating the full document. 
+    // This prevents Mongoose from crashing if there are old legacy string tokens in the DB.
+    const existingSuperAdmin = await User.findOne({ email: superAdminEmail }).select('_id');
 
     if (!existingSuperAdmin) {
       const superAdmin = new User({
-        name: 'Super Admin',
+        name: 'Authority Person',
         email: superAdminEmail,
         password: superAdminPassword,
         role: 'super_admin',
@@ -24,16 +25,13 @@ export const seedSuperAdmin = async () => {
       });
 
       await superAdmin.save();
-      console.log('✅ Super Admin seeded successfully from environment variables.');
+      console.log('✅ Authority Person seeded successfully.');
     } else {
-      // If the super admin exists, we can optionally update their password to match the env file
-      // if we want the .env file to be the single source of truth for the password.
-      // We need to compare and update if they want to 'update the password'
-      existingSuperAdmin.password = superAdminPassword;
-      await existingSuperAdmin.save();
-      console.log('✅ Super Admin credentials verified/updated from environment variables.');
+      // The user requested to "skip if admin email exist".
+      // We will no longer force-update the password on every server restart.
+      console.log('✅ Authority Person already exists. Skipping process.');
     }
   } catch (error) {
-    console.error('❌ Failed to seed Super Admin:', error);
+    console.error('❌ Failed to seed Authority Person:', error);
   }
 };

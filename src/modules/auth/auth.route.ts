@@ -17,11 +17,15 @@ const loginLimit = customRateLimit(15 * 60 * 1000, 5, 'Too many login attempts, 
 const forgotLimit = customRateLimit(60 * 60 * 1000, 5, 'Too many reset requests, try again after 1 hour.');
 const registerLimit = customRateLimit(60 * 60 * 1000, 5, 'Too many registration attempts, try again after 1 hour.');
 
+import { authMiddleware } from '../../middleware/authMiddleware';
+
 router.post('/register', registerLimit, validate(registerSchema), AuthController.register);
 router.post('/login', loginLimit, validate(loginSchema), AuthController.login);
 router.post('/logout', AuthController.logout);
 router.post('/forgot-password', forgotLimit, validate(forgotPasswordSchema), AuthController.forgotPassword);
 router.post('/reset-password', validate(resetPasswordSchema), AuthController.resetPassword);
 router.post('/refresh-token', AuthController.refreshToken);
+router.post('/change-password-request', authMiddleware('super_admin', 'tenant_admin'), AuthController.requestChangePassword);
+router.post('/change-password-verify', authMiddleware('super_admin', 'tenant_admin'), AuthController.verifyChangePassword);
 
 export const AuthRoutes = router;
