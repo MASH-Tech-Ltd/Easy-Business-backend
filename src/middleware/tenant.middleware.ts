@@ -64,10 +64,10 @@ export const tenantMiddleware = async (
     // Convert to lowercase to prevent 'Astha' vs 'astha' mismatch
     slugOrDomain = slugOrDomain.toLowerCase();
 
-    // Strip "www." if it exists
-    if (slugOrDomain.startsWith('www.')) {
-      slugOrDomain = slugOrDomain.replace(/^www\./, '');
-    }
+    // // Strip "www." if it exists
+    // if (slugOrDomain.startsWith('www.')) {
+    //   slugOrDomain = slugOrDomain.replace(/^www\./, '');
+    // }
     // Verification Log as requested
     if (process.env.NODE_ENV === "development") {
       console.log("=== BACKEND TENANT PARSING VERIFICATION ===");
@@ -78,14 +78,20 @@ export const tenantMiddleware = async (
       console.log("===========================================");
     }
 
+    const bare = slugOrDomain.replace(/^www\./, '');
+    const withWww = `www.${bare}`;
+
     let tenant;
     if (isCustomDomain) {
       tenant = await Tenant.findOne({
-        customDomain: slugOrDomain,
+        $or: [
+          { customDomain: bare },
+          { customDomain: withWww }
+        ],
         status: "active",
       });
     } else {
-      tenant = await Tenant.findOne({ slug: slugOrDomain, status: "active" });
+      tenant = await Tenant.findOne({ slug: bare, status: "active" });
     }
 
     if (!tenant) {

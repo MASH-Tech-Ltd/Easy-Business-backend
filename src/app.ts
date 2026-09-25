@@ -64,8 +64,15 @@ app.use(
           return callback(new Error(`CORS: Origin '${origin}' not allowed`), false);
         }
 
+        const bareHost = host.replace(/^www\./, '');
+        const withWwwHost = `www.${bareHost}`;
+
         const tenant = await Tenant.findOne({
-          $or: [{ domain: host }, { customDomain: host }],
+          $or: [
+            { domain: bareHost },
+            { customDomain: bareHost },
+            { customDomain: withWwwHost }
+          ],
         });
 
         if (tenant) {
