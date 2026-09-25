@@ -13,7 +13,7 @@ const updateProfile = async (id: string, payload: Partial<IUser>): Promise<IUser
       (safePayload as any)[field] = payload[field];
     }
   }
-  const result = await User.findByIdAndUpdate(id, safePayload, { new: true });
+  const result = await User.findByIdAndUpdate(id, safePayload, { returnDocument: 'after' });
   return result;
 };
 
@@ -44,7 +44,7 @@ const updateUser = async (id: string, payload: Partial<IUser>): Promise<IUser | 
       (safePayload as any)[field] = payload[field];
     }
   }
-  const result = await User.findByIdAndUpdate(id, safePayload, { new: true });
+  const result = await User.findByIdAndUpdate(id, safePayload, { returnDocument: 'after' });
   return result;
 };
 

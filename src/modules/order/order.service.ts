@@ -192,7 +192,7 @@ const updateOrder = async (id: string, payload: Partial<IOrder>, tenantId: strin
   }
 
   // Perform the update
-  const result = await Order.findOneAndUpdate({ _id: id, tenantId }, payload, { new: true });
+  const result = await Order.findOneAndUpdate({ _id: id, tenantId }, payload, { returnDocument: 'after' });
 
   // 2. Apply new stock if the order is now completed AND (it was previously not completed OR the items changed)
   if (result && isNewCompleted && (!isOldCompleted || itemsChanged)) {

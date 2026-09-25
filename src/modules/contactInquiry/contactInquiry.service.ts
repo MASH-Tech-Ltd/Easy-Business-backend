@@ -30,7 +30,7 @@ const updateInquiryStatus = async (id: string, status: 'pending' | 'resolved') =
   const inquiry = await ContactInquiry.findByIdAndUpdate(
     id,
     { status },
-    { new: true }
+    { returnDocument: 'after' }
   );
   return inquiry;
 };

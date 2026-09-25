@@ -27,7 +27,7 @@ const getAddonById = async (id: string): Promise<IAddon | null> => {
 };
 
 const updateAddon = async (id: string, payload: Partial<IAddon>): Promise<IAddon> => {
-  const addon = await Addon.findByIdAndUpdate(id, payload, { new: true });
+  const addon = await Addon.findByIdAndUpdate(id, payload, { returnDocument: 'after' });
   if (!addon) {
     throw new CustomError(404, 'Addon not found');
   }

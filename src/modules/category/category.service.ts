@@ -50,7 +50,7 @@ const getSingleCategory = async (id: string, tenantId: string): Promise<ICategor
 };
 
 const updateCategory = async (id: string, tenantId: string, payload: Partial<ICategory>): Promise<ICategory | null> => {
-  const result = await Category.findOneAndUpdate({ _id: id, tenantId }, payload, { new: true });
+  const result = await Category.findOneAndUpdate({ _id: id, tenantId }, payload, { returnDocument: 'after' });
   return result;
 };
 

@@ -5,7 +5,7 @@ const updateTheme = async (tenantId: string, payload: Partial<ITheme>) => {
   const result = await Theme.findOneAndUpdate(
     { tenantId },
     { ...payload },
-    { new: true, upsert: true }
+    { returnDocument: 'after', upsert: true }
   );
   return result;
 };

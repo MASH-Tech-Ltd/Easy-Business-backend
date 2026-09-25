@@ -148,7 +148,7 @@ const updateProduct = async (id: string, tenantId: string, payload: Partial<IPro
   const result = await Product.findOneAndUpdate(
     { _id: id, tenantId: new Types.ObjectId(tenantId) },
     payload,
-    { new: true }
+    { returnDocument: 'after' }
   );
   if (!result) {
     throw new CustomError(404, 'Product not found or you do not have permission to update it');

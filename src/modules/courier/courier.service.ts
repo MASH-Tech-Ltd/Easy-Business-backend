@@ -22,7 +22,7 @@ const getCourierChargeByTenant = async (tenantId: string): Promise<ICourier> => 
     courier = await Courier.findOneAndUpdate(
       { tenantId },
       { $setOnInsert: { tenantId, insideDhaka: 60, outsideDhaka: 120 } },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
   }
   
@@ -49,7 +49,7 @@ const updateCourierCharge = async (tenantId: string, payload: Partial<ICourier>)
   const result = await Courier.findOneAndUpdate(
     { tenantId },
     { $set: payload },
-    { new: true, upsert: true } // upsert ensures it creates if it doesn't exist during update
+    { returnDocument: 'after', upsert: true } // upsert ensures it creates if it doesn't exist during update
   );
   return result;
 };
@@ -65,7 +65,7 @@ const saveCredentials = async (tenantId: string, payload: Partial<ICourier>): Pr
   const result = await Courier.findOneAndUpdate(
     { tenantId },
     { $set: payload },
-    { new: true, upsert: true }
+    { returnDocument: 'after', upsert: true }
   );
   return result;
 };

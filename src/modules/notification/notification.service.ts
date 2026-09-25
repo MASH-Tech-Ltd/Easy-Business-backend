@@ -66,7 +66,7 @@ export const notificationService = {
     return Notification.findOneAndUpdate(
       { _id: notificationId, recipientId: userId },
       { read: true },
-      { new: true }
+      { returnDocument: 'after' }
     );
   },
 

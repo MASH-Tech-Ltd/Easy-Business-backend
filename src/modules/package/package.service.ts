@@ -64,7 +64,7 @@ const updatePackage = async (id: string, payload: Partial<IPackage>): Promise<IP
     );
   }
 
-  const result = await Package.findByIdAndUpdate(id, payload, { new: true });
+  const result = await Package.findByIdAndUpdate(id, payload, { returnDocument: 'after' });
   return result;
 };
 
