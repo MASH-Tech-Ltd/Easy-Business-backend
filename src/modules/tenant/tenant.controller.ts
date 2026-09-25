@@ -33,6 +33,11 @@ const updateMyStore = asyncHandler(async (req: Request, res: Response) => {
     delete req.body.checkoutNote;
   }
   
+  if (req.body.manualPaymentMethods !== undefined) {
+    req.body['settings.manualPaymentMethods'] = req.body.manualPaymentMethods;
+    delete req.body.manualPaymentMethods;
+  }
+  
   const result = await TenantService.updateMyStore(tenantId, req.body);
   ApiResponse.sendSuccess(res, 200, 'Store updated successfully', result);
 });
