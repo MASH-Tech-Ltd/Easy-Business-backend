@@ -190,7 +190,7 @@ const getMyStore = async (tenantId: string) => {
 };
 
 const updateMyStore = async (tenantId: string, payload: any) => {
-  const updatedStore = await Tenant.findByIdAndUpdate(tenantId, payload, { new: true });
+  const updatedStore = await Tenant.findByIdAndUpdate(tenantId, payload, { new: true, strict: false });
   if (!updatedStore) {
     throw new CustomError(404, 'Store not found');
   }
@@ -395,7 +395,7 @@ const updateTenant = async (id: string, payload: Partial<ITenant>) => {
     updateQuery.$unset = unsetQuery;
   }
 
-  const updatedTenant = await Tenant.findByIdAndUpdate(id, updateQuery, { new: true });
+  const updatedTenant = await Tenant.findByIdAndUpdate(id, updateQuery, { new: true, strict: false });
   if (!updatedTenant) {
     throw new CustomError(404, 'Tenant not found');
   }
