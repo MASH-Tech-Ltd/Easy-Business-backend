@@ -66,16 +66,23 @@ function generateSeedData(lang: "en" | "bn") {
         const data = (p as any)[lang];
 
         const randomModel = Math.floor(Math.random() * 9000) + 1000;
-        const newTitle = `${data.title} - M${randomModel}`;
+        const categoryBnName = abstractCategories.find(c => c.id === p.cat)?.bn || "পণ্য";
+        const newTitle = lang === "en" ? `${data.title} - M${randomModel}` : `${p.brand} ${categoryBnName} - মডেল M${randomModel}`;
         const priceVariance = Math.random() * 0.2 + 0.9;
         const originalPrice = Math.floor(p.price * priceVariance);
         const discountedPrice = Math.floor(originalPrice * 0.9);
 
+        const shortDescEn = `${data.desc}. This premium product offers unparalleled performance and reliability. Designed to meet your everyday needs with excellence.`;
+        const shortDescBn = `${data.desc}. এই প্রিমিয়াম পণ্যটি অতুলনীয় পারফরম্যান্স এবং নির্ভরযোগ্যতা প্রদান করে। এটি আপনার দৈনন্দিন চাহিদা মেটানোর জন্য চমৎকারভাবে ডিজাইন করা হয়েছে।`;
+        
+        const descEn = `<h3>${newTitle}</h3><p>${data.desc}</p><p>Experience the ultimate in quality with this premium product by <strong>${p.brand}</strong>. Designed with meticulous attention to detail and built to last, it stands out in both performance and aesthetics.</p><ul><li>Constructed from high-quality, durable materials</li><li>Optimized for maximum efficiency and longevity</li><li>Backed by our comprehensive satisfaction guarantee</li></ul><p>Upgrade your lifestyle today with the ${newTitle}.</p>`;
+        const descBn = `<h3>${newTitle}</h3><p>${data.desc}</p><p><strong>${p.brand}</strong> এর এই প্রিমিয়াম পণ্যের মাধ্যমে সেরা মানের অভিজ্ঞতা উপভোগ করুন। অত্যন্ত নিখুঁতভাবে ডিজাইন করা এবং দীর্ঘস্থায়ী হওয়ার জন্য তৈরি করা এই পণ্যটি পারফরম্যান্স এবং সৌন্দর্যের দিক থেকে অনন্য।</p><ul><li>উন্নত মানের, টেকসই উপকরণ দিয়ে তৈরি</li><li>সর্বোচ্চ দক্ষতা এবং দীর্ঘস্থায়িত্বের জন্য তৈরি</li><li>আমাদের ১০০% সন্তুষ্টি গ্যারান্টি দ্বারা সমর্থিত</li></ul><p>আজই ${newTitle} এর মাধ্যমে আপনার জীবনযাত্রাকে আপগ্রেড করুন।</p>`;
+
         if (catMap[catId]) {
           batch.push({
             title: newTitle,
-            shortDescription: `${data.desc}. This premium product offers unparalleled performance and reliability. Designed to meet your everyday needs with excellence.`,
-            description: `<h3>${newTitle}</h3><p>${data.desc}</p><p>Experience the ultimate in quality with this premium product by <strong>${p.brand}</strong>. Designed with meticulous attention to detail and built to last, it stands out in both performance and aesthetics.</p><ul><li>Constructed from high-quality, durable materials</li><li>Optimized for maximum efficiency and longevity</li><li>Backed by our comprehensive satisfaction guarantee</li></ul><p>Upgrade your lifestyle today with the ${newTitle}.</p>`,
+            shortDescription: lang === "en" ? shortDescEn : shortDescBn,
+            description: lang === "en" ? descEn : descBn,
             images: [
               img(p.img),
               img(p2 ? p2.img : p.img),
@@ -107,11 +114,11 @@ function generateSeedData(lang: "en" | "bn") {
                 entries: [
                   { name: lang === "en" ? "Brand" : "ব্র্যান্ড", value: p.brand },
                   { name: lang === "en" ? "Model" : "মডেল", value: `M${randomModel}` },
-                  { name: lang === "en" ? "Warranty" : "ওয়ারেন্টি", value: "1 Year" },
-                  { name: lang === "en" ? "Condition" : "অবস্থা", value: "Brand New" },
+                  { name: lang === "en" ? "Warranty" : "ওয়ারেন্টি", value: lang === "en" ? "1 Year" : "১ বছর" },
+                  { name: lang === "en" ? "Condition" : "অবস্থা", value: lang === "en" ? "Brand New" : "সম্পূর্ণ নতুন" },
                   { name: lang === "en" ? "Weight" : "ওজন", value: `${(Math.random() * 2 + 0.1).toFixed(2)} kg` },
-                  { name: lang === "en" ? "Origin" : "উৎস", value: "Imported" },
-                  { name: lang === "en" ? "Material" : "উপাদান", value: "Premium Grade" }
+                  { name: lang === "en" ? "Origin" : "উৎস", value: lang === "en" ? "Imported" : "আমদানিকৃত" },
+                  { name: lang === "en" ? "Material" : "উপাদান", value: lang === "en" ? "Premium Grade" : "প্রিমিয়াম গ্রেড" }
                 ],
               },
             ],

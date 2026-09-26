@@ -47,11 +47,11 @@ const productSchema = new Schema<IProduct>(
 );
 
 function generateSlug(title: string, suffix?: string): string {
-  // Remove special characters, keep spaces to replace with hyphens, and ensure no consecutive hyphens
-  let slug = title.toLowerCase().trim().replace(/[^a-z0-9\s-]/g, '').replace(/[\s-]+/g, '-');
+  // Support Unicode letters \p{L}, combining marks \p{M} (like Bengali vowels), and numbers \p{N}
+  let slug = title.toLowerCase().trim().replace(/[^\p{L}\p{M}\p{N}\s-]/gu, '').replace(/[\s-]+/g, '-');
   
   if (suffix) {
-    const cleanSuffix = suffix.toLowerCase().trim().replace(/[^a-z0-9\s-]/g, '').replace(/[\s-]+/g, '-');
+    const cleanSuffix = suffix.toLowerCase().trim().replace(/[^\p{L}\p{M}\p{N}\s-]/gu, '').replace(/[\s-]+/g, '-');
     slug = `${slug}-${cleanSuffix}`;
   }
   

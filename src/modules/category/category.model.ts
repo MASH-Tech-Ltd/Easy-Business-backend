@@ -19,7 +19,9 @@ const categorySchema = new Schema<ICategory>(
 );
 
 function generateSlug(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Math.random().toString(36).substring(2, 8);
+  // Support Unicode letters \p{L}, combining marks \p{M} (like Bengali vowels), and numbers \p{N}
+  const base = name.toLowerCase().trim().replace(/[^\p{L}\p{M}\p{N}\s-]/gu, '').replace(/[\s-]+/g, '-');
+  return base + '-' + Math.random().toString(36).substring(2, 8);
 }
 
 categorySchema.pre('validate', function() {

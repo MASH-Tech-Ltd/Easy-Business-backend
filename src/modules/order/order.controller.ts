@@ -39,10 +39,15 @@ const deleteOrder = asyncHandler(async (req: Request, res: Response) => {
 const trackOrder = asyncHandler(async (req: Request, res: Response) => {
   const tenantIdFromMiddleware = (req as any).tenantId;
   const tenantIdFromQuery = req.query.tenantId as string;
+  const phone = req.query.phone as string;
   const tenantId = tenantIdFromMiddleware || tenantIdFromQuery;
   
   if (!tenantId) {
     return ApiResponse.sendError(res, 400, 'Tenant context could not be resolved');
+  }
+
+  if (!phone) {
+    return ApiResponse.sendError(res, 400, 'Phone number is required to track order');
   }
 
   const { id } = req.params;
@@ -50,6 +55,11 @@ const trackOrder = asyncHandler(async (req: Request, res: Response) => {
   if (!result) {
     return ApiResponse.sendError(res, 404, 'Order not found');
   }
+
+  if (result.customerPhone !== phone) {
+    return ApiResponse.sendError(res, 403, 'Phone number does not match this order');
+  }
+
   ApiResponse.sendSuccess(res, 200, 'Order found', result);
 });
 
