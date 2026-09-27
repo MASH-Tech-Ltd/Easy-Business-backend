@@ -19,5 +19,6 @@ router.post('/security/sync', authMiddleware('super_admin'), SystemController.sy
 
 router.get('/security/visitor-logs', authMiddleware('super_admin'), SystemController.getVisitorLogs);
 router.post('/security/visitor-logs', SystemController.createVisitorLog);
+router.delete('/security/visitor-logs', authMiddleware('super_admin'), SystemController.clearVisitorLogs);
 
 export const SystemRoutes = router;

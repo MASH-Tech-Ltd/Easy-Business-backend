@@ -2,6 +2,9 @@ import { Request, Response } from "express";
 import { Order } from "../order/order.model";
 import { Customer } from "../customer/customer.model";
 import { StoreVisit } from "./storeVisit.model";
+import { VisitorLog } from "../system/security.model";
+import { Tenant } from "../tenant/tenant.model";
+import { getClientIp, isCloudflareProxyIp } from "../../utils/ipHelper";
 import ApiResponse from "../../utils/apiResponse";
 import { asyncHandler } from "../../utils/asyncHandler";
 const mongoose = require("mongoose");
@@ -24,6 +27,30 @@ const recordVisit = asyncHandler(async (req: Request, res: Response) => {
 
   if (!existingVisit) {
     await StoreVisit.create({ tenantId, sessionId });
+  }
+
+  // Record a Customer VisitorLog for the Super Admin Dashboard Security view
+  const ip = getClientIp(req);
+  const userAgent = req.headers['user-agent'] || 'Unknown';
+  const userAgentLower = userAgent.toLowerCase();
+
+  if (!isCloudflareProxyIp(ip) && !userAgentLower.includes('bot') && !userAgentLower.includes('crawler')) {
+    try {
+      const tenant = await Tenant.findById(tenantId).select('name slug customDomain domain ownerName').lean();
+      if (tenant) {
+        const storeName = tenant.name || tenant.customDomain || tenant.domain || `${tenant.slug}.masheco.com`;
+        
+        VisitorLog.create({
+          role: 'Customer',
+          ipAddress: ip,
+          userAgent,
+          storeName,
+          ownerName: (tenant as any).ownerName || tenant.name || 'Storefront Visitor'
+        }).catch(err => {
+          console.error('Failed to create Customer VisitorLog in recordVisit:', err);
+        });
+      }
+    } catch (err) {}
   }
 
   ApiResponse.sendSuccess(res, 200, "Visit recorded");

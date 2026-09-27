@@ -294,6 +294,11 @@ const createVisitorLog = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 201, 'Visitor log recorded', visitorLog);
 });
 
+const clearVisitorLogs = asyncHandler(async (req: Request, res: Response) => {
+  await VisitorLog.deleteMany({});
+  ApiResponse.sendSuccess(res, 200, 'All visitor logs cleared successfully', null);
+});
+
 export const SystemController = {
   getHealthStats,
   getLogs,
@@ -305,5 +310,6 @@ export const SystemController = {
   unblockIp,
   syncIpCache,
   getVisitorLogs,
-  createVisitorLog
+  createVisitorLog,
+  clearVisitorLogs
 };
