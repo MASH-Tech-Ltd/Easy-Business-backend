@@ -1,5 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+const THIRTY_DAYS_IN_SECONDS = 30 * 24 * 60 * 60; // 30 days (2,592,000 seconds)
+
 export interface ISecurityLog extends Document {
   incidentType: string;
   endpoint: string;
@@ -19,7 +21,7 @@ const securityLogSchema = new Schema<ISecurityLog>({
   requestedFrom: { type: String, default: 'Web' },
   user: { type: String, default: 'Anonymous / Guest' },
   userAgent: { type: String },
-  date: { type: Date, default: Date.now }
+  date: { type: Date, default: Date.now, expires: THIRTY_DAYS_IN_SECONDS }
 });
 
 export const SecurityLog = mongoose.model<ISecurityLog>('SecurityLog', securityLogSchema);
@@ -59,7 +61,8 @@ const visitorLogSchema = new Schema<IVisitorLog>({
   userAgent: { type: String, default: 'Unknown' },
   storeName: { type: String },
   ownerName: { type: String },
-  accessedAt: { type: Date, default: Date.now }
+  accessedAt: { type: Date, default: Date.now, expires: THIRTY_DAYS_IN_SECONDS }
 });
 
 export const VisitorLog = mongoose.model<IVisitorLog>('VisitorLog', visitorLogSchema);
+

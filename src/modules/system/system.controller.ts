@@ -108,13 +108,26 @@ const getSecurityStats = asyncHandler(async (req: Request, res: Response) => {
 const getSecurityLogs = asyncHandler(async (req: Request, res: Response) => {
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 10;
+  const search = (req.query.search as string) || '';
   
-  const logs = await SecurityLog.find()
+  const query: any = {};
+  if (search.trim()) {
+    query.$or = [
+      { ipAddress: { $regex: search.trim(), $options: 'i' } },
+      { reason: { $regex: search.trim(), $options: 'i' } },
+      { incidentType: { $regex: search.trim(), $options: 'i' } },
+      { endpoint: { $regex: search.trim(), $options: 'i' } },
+      { requestedFrom: { $regex: search.trim(), $options: 'i' } },
+      { user: { $regex: search.trim(), $options: 'i' } },
+    ];
+  }
+
+  const logs = await SecurityLog.find(query)
     .sort({ date: -1 })
     .skip((page - 1) * limit)
     .limit(limit);
     
-  const total = await SecurityLog.countDocuments();
+  const total = await SecurityLog.countDocuments(query);
   
   ApiResponse.sendSuccess(res, 200, 'Security logs retrieved', { logs, total, page, limit });
 });
@@ -122,6 +135,7 @@ const getSecurityLogs = asyncHandler(async (req: Request, res: Response) => {
 const getBlockedIps = asyncHandler(async (req: Request, res: Response) => {
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 10;
+  const search = (req.query.search as string) || '';
   
   // Clean up any stale auto-blocked Cloudflare IPs dynamically
   const allBlocked = await BlockedIp.find({ type: 'auto' });
@@ -130,12 +144,20 @@ const getBlockedIps = asyncHandler(async (req: Request, res: Response) => {
     await BlockedIp.deleteMany({ _id: { $in: cloudflareIpIds } });
   }
 
-  const ips = await BlockedIp.find()
+  const query: any = {};
+  if (search.trim()) {
+    query.$or = [
+      { ipAddress: { $regex: search.trim(), $options: 'i' } },
+      { reason: { $regex: search.trim(), $options: 'i' } },
+    ];
+  }
+
+  const ips = await BlockedIp.find(query)
     .sort({ blockedAt: -1 })
     .skip((page - 1) * limit)
     .limit(limit);
     
-  const total = await BlockedIp.countDocuments();
+  const total = await BlockedIp.countDocuments(query);
   
   ApiResponse.sendSuccess(res, 200, 'Blocked IPs retrieved', { ips, total, page, limit });
 });
@@ -167,24 +189,62 @@ const unblockIp = asyncHandler(async (req: Request, res: Response) => {
 });
 
 const syncIpCache = asyncHandler(async (req: Request, res: Response) => {
+  // 1. Purge legacy auto-blocked Cloudflare proxy IPs
   const allBlocked = await BlockedIp.find({ type: 'auto' });
   const cloudflareIpIds = allBlocked.filter(b => isCloudflareProxyIp(b.ipAddress)).map(b => b._id);
   if (cloudflareIpIds.length > 0) {
     await BlockedIp.deleteMany({ _id: { $in: cloudflareIpIds } });
   }
-  ApiResponse.sendSuccess(res, 200, `IP Cache synced across instances. Purged ${cloudflareIpIds.length} Cloudflare proxy IPs.`, null);
+
+  // 2. Purge legacy Security Logs recorded under Cloudflare proxy node IPs
+  const allSecurityLogs = await SecurityLog.find();
+  const cloudflareLogIds = allSecurityLogs.filter(l => isCloudflareProxyIp(l.ipAddress)).map(l => l._id);
+  if (cloudflareLogIds.length > 0) {
+    await SecurityLog.deleteMany({ _id: { $in: cloudflareLogIds } });
+  }
+
+  // 3. Purge legacy Visitor Logs recorded under Cloudflare proxy node IPs
+  const allVisitorLogs = await VisitorLog.find();
+  const cloudflareVisitorLogIds = allVisitorLogs.filter(v => isCloudflareProxyIp(v.ipAddress)).map(v => v._id);
+  if (cloudflareVisitorLogIds.length > 0) {
+    await VisitorLog.deleteMany({ _id: { $in: cloudflareVisitorLogIds } });
+  }
+
+  // 4. Purge logs older than 30 days
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const expiredSecurityLogs = await SecurityLog.deleteMany({ date: { $lt: thirtyDaysAgo } });
+  const expiredVisitorLogs = await VisitorLog.deleteMany({ accessedAt: { $lt: thirtyDaysAgo } });
+
+  ApiResponse.sendSuccess(
+    res,
+    200,
+    `IP Cache synced. Purged ${cloudflareIpIds.length} proxy IPs, ${cloudflareLogIds.length} proxy security logs, and ${expiredSecurityLogs.deletedCount + expiredVisitorLogs.deletedCount} logs older than 30 days.`,
+    null
+  );
 });
 
 const getVisitorLogs = asyncHandler(async (req: Request, res: Response) => {
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 10;
+  const search = (req.query.search as string) || '';
+
+  const query: any = {};
+  if (search.trim()) {
+    query.$or = [
+      { ipAddress: { $regex: search.trim(), $options: 'i' } },
+      { storeName: { $regex: search.trim(), $options: 'i' } },
+      { ownerName: { $regex: search.trim(), $options: 'i' } },
+      { role: { $regex: search.trim(), $options: 'i' } },
+      { userAgent: { $regex: search.trim(), $options: 'i' } },
+    ];
+  }
   
-  const logs = await VisitorLog.find()
+  const logs = await VisitorLog.find(query)
     .sort({ accessedAt: -1 })
     .skip((page - 1) * limit)
     .limit(limit);
     
-  const total = await VisitorLog.countDocuments();
+  const total = await VisitorLog.countDocuments(query);
   
   ApiResponse.sendSuccess(res, 200, 'Visitor logs retrieved', { logs, total, page, limit });
 });

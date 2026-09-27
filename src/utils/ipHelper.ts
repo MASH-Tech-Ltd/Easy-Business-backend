@@ -13,10 +13,26 @@ const cleanIp = (ip: string): string => {
 };
 
 /**
- * Checks whether an IP address belongs to known Cloudflare IPv4 proxy ranges.
+ * Checks whether an IP address belongs to known Cloudflare IPv4 or IPv6 proxy ranges.
  */
 export const isCloudflareProxyIp = (ip: string): boolean => {
-  const cleaned = cleanIp(ip);
+  const cleaned = cleanIp(ip).toLowerCase();
+
+  // Check Cloudflare IPv6 proxy ranges (2606:4700::/32, 2a06:98c0::/29, 2405:b500::/32, 2405:8100::/32, 2c0f:f248::/32, 2a02:4700::)
+  if (cleaned.includes(':')) {
+    if (
+      cleaned.startsWith('2606:4700:') ||
+      cleaned.startsWith('2a06:98c0:') ||
+      cleaned.startsWith('2405:b500:') ||
+      cleaned.startsWith('2405:8100:') ||
+      cleaned.startsWith('2c0f:f248:') ||
+      cleaned.startsWith('2a02:4700:')
+    ) {
+      return true;
+    }
+    return false;
+  }
+
   const parts = cleaned.split('.').map(Number);
   if (parts.length !== 4) return false;
 
@@ -60,12 +76,12 @@ export const isCloudflareProxyIp = (ip: string): boolean => {
 
 /**
  * Retrieves the REAL end-user client IP address from incoming Express request headers.
- * Prioritizes Cloudflare header `cf-connecting-ip`, followed by `x-forwarded-for` (first IP),
+ * Prioritizes Cloudflare header `cf-connecting-ip`, followed by `x-forwarded-for` (first non-proxy IP),
  * `x-real-ip`, and finally falls back to `req.ip`.
  */
 export const getClientIp = (req: Request): string => {
   // 1. Cloudflare header (highest priority for Cloudflare proxied requests)
-  const cfIp = req.headers['cf-connecting-ip'];
+  const cfIp = req.headers['cf-connecting-ip'] || req.headers['x-client-ip'];
   if (cfIp) {
     const rawIp = Array.isArray(cfIp) ? cfIp[0] : cfIp;
     if (rawIp && typeof rawIp === 'string' && rawIp.trim()) {
@@ -73,15 +89,19 @@ export const getClientIp = (req: Request): string => {
     }
   }
 
-  // 2. Standard X-Forwarded-For header (first IP in chain is original client)
+  // 2. Standard X-Forwarded-For header (filter out Cloudflare proxy node IPs)
   const forwarded = req.headers['x-forwarded-for'];
   if (forwarded) {
     const rawForwarded = Array.isArray(forwarded) ? forwarded[0] : forwarded;
     if (rawForwarded && typeof rawForwarded === 'string') {
-      const clientIp = rawForwarded.split(',')[0]?.trim();
-      if (clientIp) {
-        return cleanIp(clientIp);
+      const parts = rawForwarded.split(',');
+      for (const part of parts) {
+        const clientIp = cleanIp(part);
+        if (clientIp && !isCloudflareProxyIp(clientIp) && clientIp !== '127.0.0.1' && clientIp !== '::1') {
+          return clientIp;
+        }
       }
+      if (parts[0]) return cleanIp(parts[0]);
     }
   }
 
@@ -90,7 +110,10 @@ export const getClientIp = (req: Request): string => {
   if (realIp) {
     const rawReal = Array.isArray(realIp) ? realIp[0] : realIp;
     if (rawReal && typeof rawReal === 'string' && rawReal.trim()) {
-      return cleanIp(rawReal);
+      const cleaned = cleanIp(rawReal);
+      if (!isCloudflareProxyIp(cleaned)) {
+        return cleaned;
+      }
     }
   }
 
@@ -98,3 +121,4 @@ export const getClientIp = (req: Request): string => {
   const rawIp = req.ip || req.socket.remoteAddress || '127.0.0.1';
   return cleanIp(rawIp);
 };
+
