@@ -6,6 +6,10 @@ import { Request } from 'express';
 const cleanIp = (ip: string): string => {
   if (!ip) return '127.0.0.1';
   let cleaned = ip.trim();
+  if (cleaned.includes(',')) {
+    const [first] = cleaned.split(',');
+    cleaned = (first ?? '').trim();
+  }
   if (cleaned.startsWith('::ffff:')) {
     cleaned = cleaned.replace('::ffff:', '');
   }
@@ -87,7 +91,10 @@ export const getClientIp = (req: Request): string => {
   if (cfIp) {
     const rawIp = Array.isArray(cfIp) ? cfIp[0] : cfIp;
     if (rawIp && typeof rawIp === 'string' && rawIp.trim()) {
-      return cleanIp(rawIp);
+      const cleaned = cleanIp(rawIp);
+      if (cleaned && !isCloudflareProxyIp(cleaned) && cleaned !== '127.0.0.1' && cleaned !== '::1') {
+        return cleaned;
+      }
     }
   }
 
@@ -103,7 +110,6 @@ export const getClientIp = (req: Request): string => {
           return clientIp;
         }
       }
-      if (parts[0]) return cleanIp(parts[0]);
     }
   }
 
@@ -113,7 +119,7 @@ export const getClientIp = (req: Request): string => {
     const rawReal = Array.isArray(realIp) ? realIp[0] : realIp;
     if (rawReal && typeof rawReal === 'string' && rawReal.trim()) {
       const cleaned = cleanIp(rawReal);
-      if (!isCloudflareProxyIp(cleaned)) {
+      if (cleaned && !isCloudflareProxyIp(cleaned) && cleaned !== '127.0.0.1' && cleaned !== '::1') {
         return cleaned;
       }
     }
