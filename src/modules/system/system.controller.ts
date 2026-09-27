@@ -210,7 +210,18 @@ const syncIpCache = asyncHandler(async (req: Request, res: Response) => {
     await VisitorLog.deleteMany({ _id: { $in: cloudflareVisitorLogIds } });
   }
 
-  // 4. Purge logs older than 30 days
+  // 4. Purge invalid SSR/node server visitor logs
+  const invalidSsrVisitorLogs = await VisitorLog.deleteMany({
+    $or: [
+      { storeName: 'backapi.masheco.com' },
+      { storeName: 'adminsec.masheco.com' },
+      { userAgent: /^node/i },
+      { userAgent: 'node' },
+      { userAgent: /^axios/i }
+    ]
+  });
+
+  // 5. Purge logs older than 30 days
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const expiredSecurityLogs = await SecurityLog.deleteMany({ date: { $lt: thirtyDaysAgo } });
   const expiredVisitorLogs = await VisitorLog.deleteMany({ accessedAt: { $lt: thirtyDaysAgo } });
@@ -218,7 +229,7 @@ const syncIpCache = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(
     res,
     200,
-    `IP Cache synced. Purged ${cloudflareIpIds.length} proxy IPs, ${cloudflareLogIds.length} proxy security logs, and ${expiredSecurityLogs.deletedCount + expiredVisitorLogs.deletedCount} logs older than 30 days.`,
+    `IP Cache synced. Purged ${cloudflareIpIds.length} proxy IPs, ${invalidSsrVisitorLogs.deletedCount} SSR node visitor logs, and ${expiredSecurityLogs.deletedCount + expiredVisitorLogs.deletedCount} logs older than 30 days.`,
     null
   );
 });
@@ -228,17 +239,27 @@ const getVisitorLogs = asyncHandler(async (req: Request, res: Response) => {
   const limit = parseInt(req.query.limit as string) || 10;
   const search = (req.query.search as string) || '';
 
-  const query: any = {};
+  // Strict filter: Exclude backend infrastructure domains and internal Node SSR calls
+  const filterConditions: any[] = [
+    { storeName: { $nin: ['backapi.masheco.com', 'adminsec.masheco.com', 'localhost:8000', '127.0.0.1:8000'] } },
+    { userAgent: { $not: /^node/i } },
+    { userAgent: { $not: /^axios/i } }
+  ];
+
   if (search.trim()) {
-    query.$or = [
-      { ipAddress: { $regex: search.trim(), $options: 'i' } },
-      { storeName: { $regex: search.trim(), $options: 'i' } },
-      { ownerName: { $regex: search.trim(), $options: 'i' } },
-      { role: { $regex: search.trim(), $options: 'i' } },
-      { userAgent: { $regex: search.trim(), $options: 'i' } },
-    ];
+    filterConditions.push({
+      $or: [
+        { ipAddress: { $regex: search.trim(), $options: 'i' } },
+        { storeName: { $regex: search.trim(), $options: 'i' } },
+        { ownerName: { $regex: search.trim(), $options: 'i' } },
+        { role: { $regex: search.trim(), $options: 'i' } },
+        { userAgent: { $regex: search.trim(), $options: 'i' } },
+      ]
+    });
   }
-  
+
+  const query = { $and: filterConditions };
+
   const logs = await VisitorLog.find(query)
     .sort({ accessedAt: -1 })
     .skip((page - 1) * limit)
@@ -251,14 +272,19 @@ const getVisitorLogs = asyncHandler(async (req: Request, res: Response) => {
 
 const createVisitorLog = asyncHandler(async (req: Request, res: Response) => {
   const { role, storeName, ownerName } = req.body;
-  
-  const ipAddress = getClientIp(req);
   const userAgent = req.headers['user-agent'] || 'Unknown';
+
+  // Do not record visitor logs for Node SSR calls or backend API domains
+  if (/^node/i.test(userAgent) || /^axios/i.test(userAgent) || storeName === 'backapi.masheco.com') {
+    return ApiResponse.sendSuccess(res, 200, 'Ignored SSR call', null);
+  }
+
+  const ipAddress = getClientIp(req);
 
   const visitorLog = await VisitorLog.create({
     role: role || 'Merchant',
-    storeName,
-    ownerName,
+    storeName: storeName && storeName !== 'backapi.masheco.com' ? storeName : 'Web Store',
+    ownerName: ownerName || 'Storefront Visitor',
     ipAddress,
     userAgent
   });
