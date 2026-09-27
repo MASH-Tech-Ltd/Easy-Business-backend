@@ -18,6 +18,7 @@ app.set("trust proxy", true);
 
 import { ipBlocklistMiddleware, attackDetectionMiddleware } from './middleware/security.middleware';
 import { visitorTrackingMiddleware } from './middleware/visitorTracking.middleware';
+import { getClientIp } from './utils/ipHelper';
 
 // SECURITY FIX: Strict CORS allow-list — never trust unknown origins
 const allowedOrigins = [
@@ -100,7 +101,8 @@ app.use(attackDetectionMiddleware);
 app.use(cookieParser());
 app.use(helmet());
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
-app.use(morgan(config.app.env === "development" ? "dev" : "short"));
+morgan.token('real-ip', (req: Request) => getClientIp(req));
+app.use(morgan(':real-ip - :method :url HTTP/:http-version :status :res[content-length] - :response-time ms'));
 
 // Production-only strict security layers
 if (config.app.env === "production") {
