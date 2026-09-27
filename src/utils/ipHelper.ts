@@ -18,7 +18,7 @@ const cleanIp = (ip: string): string => {
 export const isCloudflareProxyIp = (ip: string): boolean => {
   const cleaned = cleanIp(ip).toLowerCase();
 
-  // Check Cloudflare IPv6 proxy ranges (2606:4700::/32, 2a06:98c0::/29, 2405:b500::/32, 2405:8100::/32, 2c0f:f248::/32, 2a02:4700::)
+  // Check Cloudflare & VPS IPv6 proxy ranges (2606:4700::/32, 2a06:98c0::/29, 2405:b500::/32, 2405:8100::/32, 2c0f:f248::/32, 2a02:4700::, 2a02:4780::)
   if (cleaned.includes(':')) {
     if (
       cleaned.startsWith('2606:4700:') ||
@@ -26,7 +26,9 @@ export const isCloudflareProxyIp = (ip: string): boolean => {
       cleaned.startsWith('2405:b500:') ||
       cleaned.startsWith('2405:8100:') ||
       cleaned.startsWith('2c0f:f248:') ||
-      cleaned.startsWith('2a02:4700:')
+      cleaned.startsWith('2a02:4700:') ||
+      cleaned.startsWith('2a02:4780:') ||
+      cleaned.startsWith('2a02:')
     ) {
       return true;
     }

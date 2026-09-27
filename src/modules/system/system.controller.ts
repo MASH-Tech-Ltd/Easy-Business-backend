@@ -239,11 +239,13 @@ const getVisitorLogs = asyncHandler(async (req: Request, res: Response) => {
   const limit = parseInt(req.query.limit as string) || 10;
   const search = (req.query.search as string) || '';
 
-  // Strict filter: Exclude backend infrastructure domains and internal Node SSR calls
+  // Strict filter: Exclude backend infrastructure domains, internal Node SSR calls, and proxy node IPs
   const filterConditions: any[] = [
     { storeName: { $nin: ['backapi.masheco.com', 'adminsec.masheco.com', 'localhost:8000', '127.0.0.1:8000'] } },
     { userAgent: { $not: /^node/i } },
-    { userAgent: { $not: /^axios/i } }
+    { userAgent: { $not: /^axios/i } },
+    { ipAddress: { $not: /^2a02:/i } },
+    { ipAddress: { $not: /^2606:/i } }
   ];
 
   if (search.trim()) {

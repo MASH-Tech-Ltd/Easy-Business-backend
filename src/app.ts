@@ -102,7 +102,9 @@ app.use(cookieParser());
 app.use(helmet());
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 morgan.token('real-ip', (req: Request) => getClientIp(req));
-app.use(morgan(':real-ip - :method :url HTTP/:http-version :status :res[content-length] - :response-time ms'));
+app.use(morgan(':real-ip - :method :url HTTP/:http-version :status :res[content-length] - :response-time ms', {
+  skip: (req) => req.url.startsWith('/socket.io')
+}));
 
 // Production-only strict security layers
 if (config.app.env === "production") {

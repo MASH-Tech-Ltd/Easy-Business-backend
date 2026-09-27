@@ -24,8 +24,17 @@ export const initSocket = (httpServer: http.Server): Server => {
   ];
 
   io = new Server(httpServer, {
+    path: "/socket.io",
     cors: {
-      origin: socketAllowedOrigins,
+      origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        if (socketAllowedOrigins.includes(origin)) return callback(null, true);
+        if (origin.endsWith('.masheco.com') || origin.endsWith('.localhost:3000') || origin.endsWith('.localhost:3001')) {
+          return callback(null, true);
+        }
+        return callback(null, true);
+      },
+      credentials: true,
       methods: ["GET", "POST"],
     },
   });

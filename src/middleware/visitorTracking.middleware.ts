@@ -4,7 +4,7 @@ import { getClientIp, isCloudflareProxyIp } from '../utils/ipHelper';
 
 // In-memory TTL cache to deduplicate visitor logs per (IP + store)
 const visitorLogCache = new Map<string, number>();
-const VISITOR_LOG_TTL = 30 * 60 * 1000; // 30 minutes
+const VISITOR_LOG_TTL = 5 * 60 * 1000; // 5 minutes
 
 // Cleanup cache periodically to avoid memory growth
 setInterval(() => {
@@ -14,7 +14,7 @@ setInterval(() => {
       visitorLogCache.delete(key);
     }
   }
-}, 10 * 60 * 1000);
+}, 5 * 60 * 1000);
 
 /**
  * Middleware that automatically tracks real storefront visitors across all web store frontends
@@ -39,8 +39,8 @@ export const visitorTrackingMiddleware = async (req: Request, res: Response, nex
 
     const ip = getClientIp(req);
 
-    // Skip Cloudflare edge proxies or loopback/internal
-    if (isCloudflareProxyIp(ip) || ip === '127.0.0.1' || ip === '::1') {
+    // Skip Cloudflare edge proxy node IPs
+    if (isCloudflareProxyIp(ip)) {
       return next();
     }
 
@@ -58,26 +58,28 @@ export const visitorTrackingMiddleware = async (req: Request, res: Response, nex
       } catch (e) {}
     }
 
-    // Never classify backend API or admin subdomains as Customer storefront visits
-    const ignoredSystemHosts = ['backapi.masheco.com', 'adminsec.masheco.com', 'localhost'];
-    if (ignoredSystemHosts.includes(hostDomain) && (!tenant && (!refererDomain || ignoredSystemHosts.includes(refererDomain)))) {
+    // Never classify backend API directly (without tenant) as Customer storefront visits
+    const ignoredBackendDomains = ['backapi.masheco.com', 'adminsec.masheco.com', 'localhost:8000', '127.0.0.1:8000'];
+    if (ignoredBackendDomains.includes(hostDomain) && !tenant && (!refererDomain || ignoredBackendDomains.includes(refererDomain))) {
       return next();
     }
 
     // Determine clean store display name & domain
-    let storeName = 'Web Store';
+    let storeName = '';
     if (tenant?.name) {
       storeName = tenant.name;
     } else if (tenant?.customDomain || tenant?.domain) {
       storeName = tenant.customDomain || tenant.domain;
     } else if (tenant?.slug) {
       storeName = `${tenant.slug}.masheco.com`;
-    } else if (refererDomain && !ignoredSystemHosts.includes(refererDomain)) {
+    } else if (refererDomain && !ignoredBackendDomains.includes(refererDomain)) {
       storeName = refererDomain;
-    } else if (hostDomain && !ignoredSystemHosts.includes(hostDomain)) {
+    } else if (hostDomain && !ignoredBackendDomains.includes(hostDomain) && hostDomain !== 'localhost' && hostDomain !== '127.0.0.1') {
       storeName = hostDomain;
-    } else {
-      // If we cannot identify a real store domain, skip creating a Customer visitor log
+    }
+
+    // If no store name identified, skip tracking
+    if (!storeName) {
       return next();
     }
 
@@ -105,4 +107,5 @@ export const visitorTrackingMiddleware = async (req: Request, res: Response, nex
 
   next();
 };
+
 
