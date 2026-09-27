@@ -22,7 +22,11 @@ const userSchema = new Schema<IUser>(
     refreshTokens: [{ 
       token: { type: String },
       familyId: { type: String }
-    }]
+    }],
+    twoFactorEnabled: { type: Boolean, default: false },
+    twoFactorSecret: { type: String, select: false },
+    twoFactorTempSecret: { type: String, select: false },
+    twoFactorRecoveryCodes: [{ type: String, select: false }]
   },
   {
     timestamps: true,

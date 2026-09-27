@@ -14,9 +14,10 @@ import config from "./config/index";
 import { Tenant } from "./modules/tenant/tenant.model";
 
 const app: Application = express();
-app.set("trust proxy", 1);
+app.set("trust proxy", true);
 
 import { ipBlocklistMiddleware, attackDetectionMiddleware } from './middleware/security.middleware';
+import { visitorTrackingMiddleware } from './middleware/visitorTracking.middleware';
 
 // SECURITY FIX: Strict CORS allow-list — never trust unknown origins
 const allowedOrigins = [
@@ -130,7 +131,7 @@ if (config.app.env === "development") {
 }
 
 // Routes
-app.use("/api/v1", tenantMiddleware, routes);
+app.use("/api/v1", tenantMiddleware, visitorTrackingMiddleware, routes);
 
 // Cloudflare Custom Hostname Ownership HTTP Validation
 app.get("/.well-known/cf-custom-hostname-challenge/:uuid", async (req: Request, res: Response) => {

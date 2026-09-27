@@ -2,8 +2,7 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { Request, Response, NextFunction } from 'express';
 import { SecurityLog, BlockedIp } from '../modules/system/security.model';
 import { getRequestedFrom } from './security.middleware';
-
-
+import { getClientIp, isCloudflareProxyIp } from '../utils/ipHelper';
 
 // Global baseline rate limiter for all unauthenticated routes (e.g. login, public APIs)
 export const globalRateLimiter = rateLimit({
@@ -12,12 +11,13 @@ export const globalRateLimiter = rateLimit({
   message: { success: false, message: 'Too many requests from this IP, please try again after 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req: Request) => getClientIp(req),
 });
 
 // In-memory cache for warnings (10-strike rule)
 const warningCache: Map<string, number> = new Map();
 
-// Clear warning cache every 24 hours to prevent memory leaks from inactive IPs
+// Clear warning cache every 2 hours to prevent memory leaks from inactive IPs
 setInterval(() => {
   warningCache.clear();
 }, 2 * 60 * 60 * 1000);
@@ -30,8 +30,9 @@ export const customRateLimit = (windowMs: number, max: number, messageText: stri
     message: { success: false, message: messageText },
     standardHeaders: true,
     legacyHeaders: false,
+    keyGenerator: (req: Request) => getClientIp(req),
     handler: async (req: Request, res: Response, next: NextFunction, options) => {
-      const ip = req.ip || req.socket.remoteAddress || '127.0.0.1';
+      const ip = getClientIp(req);
       
       try {
         await SecurityLog.create({
@@ -43,18 +44,20 @@ export const customRateLimit = (windowMs: number, max: number, messageText: stri
           userAgent: req.headers['user-agent'] || 'Unknown'
         });
 
-        // 10-strike rule: First 9 times warn, 10th time block
-        const strikes = (warningCache.get(ip) || 0) + 1;
-        if (strikes >= 10) {
-          await BlockedIp.create({
-            ipAddress: ip,
-            reason: '[AUTO-BLOCKED] Repeated Rate Limit Violations (10 strikes)',
-            type: 'auto',
-            userAgent: req.headers['user-agent'] || 'Unknown'
-          });
-          warningCache.delete(ip);
-        } else {
-          warningCache.set(ip, strikes);
+        // 10-strike rule for real IPs (never block Cloudflare edge proxy node IPs directly)
+        if (!isCloudflareProxyIp(ip)) {
+          const strikes = (warningCache.get(ip) || 0) + 1;
+          if (strikes >= 10) {
+            await BlockedIp.create({
+              ipAddress: ip,
+              reason: '[AUTO-BLOCKED] Repeated Rate Limit Violations (10 strikes)',
+              type: 'auto',
+              userAgent: req.headers['user-agent'] || 'Unknown'
+            });
+            warningCache.delete(ip);
+          } else {
+            warningCache.set(ip, strikes);
+          }
         }
       } catch (err) {}
 
@@ -64,7 +67,6 @@ export const customRateLimit = (windowMs: number, max: number, messageText: stri
 };
 
 // Role-based rate limiter middleware
-// This should be applied AFTER the authMiddleware so req.user is populated.
 export const roleBasedRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: (req: Request) => {
@@ -75,18 +77,15 @@ export const roleBasedRateLimiter = rateLimit({
     return 200;
   },
   keyGenerator: (req: Request, res: Response) => {
-    // Cast req, res to any to fix TS errors while still satisfying express-rate-limit's check for ipKeyGenerator
-    return req.user?.userId || ipKeyGenerator(req as any, res as any);
+    return req.user?.userId || getClientIp(req);
   },
   message: (req: Request, res: Response) => {
-    const role = req.user?.role;
-    const maxRequests = role === 'super_admin' ? 1000 : role === 'tenant_admin' ? 500 : (role === 'customer' || role === 'store_admin') ? 250 : 200;
     return { success: false, message: `Rate limit exceeded for your role.` };
   },
   standardHeaders: true,
   legacyHeaders: false,
   handler: async (req: Request, res: Response, next: NextFunction, options) => {
-    const ip = req.ip || req.socket.remoteAddress || '127.0.0.1';
+    const ip = getClientIp(req);
     
     try {
       await SecurityLog.create({
@@ -99,18 +98,19 @@ export const roleBasedRateLimiter = rateLimit({
         userAgent: req.headers['user-agent'] || 'Unknown'
       });
 
-      // 10-strike rule: First 9 times warn, 10th time block
-      const strikes = (warningCache.get(ip) || 0) + 1;
-      if (strikes >= 20) {
-        await BlockedIp.create({
-          ipAddress: ip,
-          reason: '[AUTO-BLOCKED] Repeated Role Rate Limit Violations (10 strikes)',
-          type: 'auto',
-          userAgent: req.headers['user-agent'] || 'Unknown'
-        });
-        warningCache.delete(ip);
-      } else {
-        warningCache.set(ip, strikes);
+      if (!isCloudflareProxyIp(ip)) {
+        const strikes = (warningCache.get(ip) || 0) + 1;
+        if (strikes >= 20) {
+          await BlockedIp.create({
+            ipAddress: ip,
+            reason: '[AUTO-BLOCKED] Repeated Role Rate Limit Violations (20 strikes)',
+            type: 'auto',
+            userAgent: req.headers['user-agent'] || 'Unknown'
+          });
+          warningCache.delete(ip);
+        } else {
+          warningCache.set(ip, strikes);
+        }
       }
     } catch (err) {}
 

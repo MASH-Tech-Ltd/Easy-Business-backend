@@ -45,7 +45,7 @@ const blockedIpSchema = new Schema<IBlockedIp>({
 export const BlockedIp = mongoose.model<IBlockedIp>('BlockedIp', blockedIpSchema);
 
 export interface IVisitorLog extends Document {
-  role: 'Merchant' | 'Customer';
+  role: 'Merchant' | 'Customer' | 'Super Admin' | 'Guest';
   ipAddress: string;
   userAgent: string;
   storeName?: string;
@@ -54,9 +54,9 @@ export interface IVisitorLog extends Document {
 }
 
 const visitorLogSchema = new Schema<IVisitorLog>({
-  role: { type: String, enum: ['Merchant', 'Customer'], required: true },
+  role: { type: String, enum: ['Merchant', 'Customer', 'Super Admin', 'Guest'], required: true },
   ipAddress: { type: String, required: true },
-  userAgent: { type: String, required: true },
+  userAgent: { type: String, default: 'Unknown' },
   storeName: { type: String },
   ownerName: { type: String },
   accessedAt: { type: Date, default: Date.now }

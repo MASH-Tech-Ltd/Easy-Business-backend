@@ -27,5 +27,13 @@ router.post('/reset-password', validate(resetPasswordSchema), AuthController.res
 router.post('/refresh-token', AuthController.refreshToken);
 router.post('/change-password-request', authMiddleware('super_admin', 'tenant_admin'), AuthController.requestChangePassword);
 router.post('/change-password-verify', authMiddleware('super_admin', 'tenant_admin'), AuthController.verifyChangePassword);
+router.post('/change-password', authMiddleware('super_admin', 'tenant_admin', 'customer'), AuthController.changePasswordDirect);
+
+// 2FA Authenticator Routes
+router.post('/2fa/setup', authMiddleware('super_admin', 'tenant_admin', 'customer'), AuthController.setup2FA);
+router.post('/2fa/verify-enable', authMiddleware('super_admin', 'tenant_admin', 'customer'), AuthController.verifyEnable2FA);
+router.post('/2fa/disable', authMiddleware('super_admin', 'tenant_admin', 'customer'), AuthController.disable2FA);
+router.get('/2fa/status', authMiddleware('super_admin', 'tenant_admin', 'customer'), AuthController.get2FAStatus);
+router.post('/2fa/verify-login', loginLimit, AuthController.verify2FALogin);
 
 export const AuthRoutes = router;

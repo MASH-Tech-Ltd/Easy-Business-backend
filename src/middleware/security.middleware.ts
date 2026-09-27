@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { BlockedIp, SecurityLog } from '../modules/system/security.model';
+import { getClientIp, isCloudflareProxyIp } from '../utils/ipHelper';
 
 // In-memory cache for blocked IPs to avoid querying the DB on every single request
 let blockedIpsCache: Set<string> = new Set();
@@ -11,7 +12,13 @@ const refreshBlockedIpsCache = async () => {
     const blocked = await BlockedIp.find({
       $or: [{ expiresAt: { $exists: false } }, { expiresAt: { $gt: new Date() } }]
     }).select('ipAddress');
-    blockedIpsCache = new Set(blocked.map(b => b.ipAddress));
+    
+    // Exclude any legacy Cloudflare proxy edge IPs from the active block cache
+    const validBlockedIps = blocked
+      .map(b => b.ipAddress)
+      .filter(ip => !isCloudflareProxyIp(ip));
+      
+    blockedIpsCache = new Set(validBlockedIps);
     lastCacheUpdate = Date.now();
   } catch (error) {
     console.error('Failed to refresh Blocked IPs cache:', error);
@@ -19,14 +26,15 @@ const refreshBlockedIpsCache = async () => {
 };
 
 export const ipBlocklistMiddleware = async (req: Request, res: Response, next: NextFunction) => {
-  const ip = req.ip || req.socket.remoteAddress || '127.0.0.1';
+  const ip = getClientIp(req);
 
   // Refresh cache if stale
   if (Date.now() - lastCacheUpdate > CACHE_TTL) {
     await refreshBlockedIpsCache();
   }
 
-  if (blockedIpsCache.has(ip)) {
+  // Never block Cloudflare proxy edge node IPs directly
+  if (!isCloudflareProxyIp(ip) && blockedIpsCache.has(ip)) {
     return res.status(403).json({
       success: false,
       message: 'Your IP address has been blocked due to suspicious activity or policy violations.'
@@ -60,11 +68,16 @@ export const getRequestedFrom = (req: Request): string => {
 };
 
 export const attackDetectionMiddleware = async (req: Request, res: Response, next: NextFunction) => {
-  const ip = req.ip || req.socket.remoteAddress || '127.0.0.1';
+  const ip = getClientIp(req);
+
+  // Never evaluate or block Cloudflare proxy node IPs
+  if (isCloudflareProxyIp(ip)) {
+    return next();
+  }
+
   const payloadStr = JSON.stringify(req.body || {}) + JSON.stringify(req.query || {}) + req.originalUrl;
   
   // Basic heuristic for malicious payload (XSS tags, inline JS).
-  // Removed MongoDB specific operators ($gt, $ne) from string matching to avoid false positives on legitimate text.
   const isSuspicious = /(<script>|<\/script>|javascript:)/i.test(payloadStr);
   
   // Critical files and path traversal attempts (Immediate 1-strike ban)

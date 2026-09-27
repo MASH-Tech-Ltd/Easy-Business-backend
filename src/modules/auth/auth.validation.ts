@@ -38,6 +38,7 @@ export const loginSchema = z.object({
     .toLowerCase()
     .email('Please provide a valid email address'),
   password: passwordValidation,
+  code: z.string().optional(),
 });
 
 export const forgotPasswordSchema = z.object({

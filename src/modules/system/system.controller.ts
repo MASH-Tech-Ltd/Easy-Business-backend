@@ -5,6 +5,7 @@ import os from 'os';
 import mongoose from 'mongoose';
 import v8 from 'v8';
 import { SecurityLog, BlockedIp, VisitorLog } from './security.model';
+import { isCloudflareProxyIp, getClientIp } from '../../utils/ipHelper';
 
 const getHealthStats = asyncHandler(async (req: Request, res: Response) => {
   const osUptime = os.uptime();
@@ -122,6 +123,13 @@ const getBlockedIps = asyncHandler(async (req: Request, res: Response) => {
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 10;
   
+  // Clean up any stale auto-blocked Cloudflare IPs dynamically
+  const allBlocked = await BlockedIp.find({ type: 'auto' });
+  const cloudflareIpIds = allBlocked.filter(b => isCloudflareProxyIp(b.ipAddress)).map(b => b._id);
+  if (cloudflareIpIds.length > 0) {
+    await BlockedIp.deleteMany({ _id: { $in: cloudflareIpIds } });
+  }
+
   const ips = await BlockedIp.find()
     .sort({ blockedAt: -1 })
     .skip((page - 1) * limit)
@@ -159,9 +167,12 @@ const unblockIp = asyncHandler(async (req: Request, res: Response) => {
 });
 
 const syncIpCache = asyncHandler(async (req: Request, res: Response) => {
-  // In a real app we might emit an event or update redis. 
-  // Since our cache refreshes every minute anyway, we can just return success.
-  ApiResponse.sendSuccess(res, 200, 'IP Cache synced across instances', null);
+  const allBlocked = await BlockedIp.find({ type: 'auto' });
+  const cloudflareIpIds = allBlocked.filter(b => isCloudflareProxyIp(b.ipAddress)).map(b => b._id);
+  if (cloudflareIpIds.length > 0) {
+    await BlockedIp.deleteMany({ _id: { $in: cloudflareIpIds } });
+  }
+  ApiResponse.sendSuccess(res, 200, `IP Cache synced across instances. Purged ${cloudflareIpIds.length} Cloudflare proxy IPs.`, null);
 });
 
 const getVisitorLogs = asyncHandler(async (req: Request, res: Response) => {
@@ -181,15 +192,11 @@ const getVisitorLogs = asyncHandler(async (req: Request, res: Response) => {
 const createVisitorLog = asyncHandler(async (req: Request, res: Response) => {
   const { role, storeName, ownerName } = req.body;
   
-  if (!role || !['Merchant', 'Customer'].includes(role)) {
-    return ApiResponse.sendError(res, 400, 'Valid role is required (Merchant or Customer)');
-  }
-
-  const ipAddress = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || 'Unknown';
+  const ipAddress = getClientIp(req);
   const userAgent = req.headers['user-agent'] || 'Unknown';
 
   const visitorLog = await VisitorLog.create({
-    role,
+    role: role || 'Merchant',
     storeName,
     ownerName,
     ipAddress,

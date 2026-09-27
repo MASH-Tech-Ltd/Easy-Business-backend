@@ -8,6 +8,8 @@ import crypto from 'crypto';
 import otpGenerator from 'otp-generator';
 import { sendEmail } from '../../utils/sendEmail';
 import { resetPasswordTemplate } from '../../templates/resetPassword';
+import speakeasy from 'speakeasy';
+import QRCode from 'qrcode';
 
 import mongoose from 'mongoose';
 import { Tenant } from '../tenant/tenant.model';
@@ -83,9 +85,9 @@ const register = async (payload: Partial<IUser>): Promise<Omit<IUser, 'password'
   }
 };
 
-const login = async (payload: Partial<IUser>): Promise<{ accessToken: string, refreshToken: string, user: any }> => {
-  const { email, password } = payload;
-  const user = await User.findOne({ email: email as string }).select('+password');
+const login = async (payload: Partial<IUser>): Promise<any> => {
+  const { email, password, code } = payload;
+  const user = await User.findOne({ email: email as string }).select('+password +twoFactorSecret +twoFactorRecoveryCodes');
   
   if (!user || !user.password) {
     // Run a dummy compare to mitigate timing attacks (prevent user enumeration)
@@ -96,6 +98,43 @@ const login = async (payload: Partial<IUser>): Promise<{ accessToken: string, re
   const isPasswordMatch = await bcrypt.compare(password as string, user.password);
   if (!isPasswordMatch) {
     throw new CustomError(401, 'Invalid email or password');
+  }
+
+  // Check 2FA requirement
+  if (user.twoFactorEnabled) {
+    if (!code) {
+      const twoFactorToken = jwt.sign(
+        { _id: user._id, role: user.role, is2FA: true },
+        config.jwt.accessSecret,
+        { expiresIn: '5m' }
+      );
+      return {
+        requires2FA: true,
+        twoFactorToken,
+        user: { _id: user._id, email: user.email, role: user.role },
+      };
+    }
+
+    // Verify 2FA code if passed during login
+    const isOtpValid = user.twoFactorSecret && speakeasy.totp.verify({
+      secret: user.twoFactorSecret,
+      encoding: 'base32',
+      token: code.trim(),
+      window: 1,
+    });
+    let recoveryUsed = false;
+    let recoveryIndex = -1;
+    if (!isOtpValid && user.twoFactorRecoveryCodes) {
+      recoveryIndex = user.twoFactorRecoveryCodes.indexOf(code.trim().toUpperCase());
+      if (recoveryIndex !== -1) recoveryUsed = true;
+    }
+    if (!isOtpValid && !recoveryUsed) {
+      throw new CustomError(400, 'Invalid 2FA authenticator code or recovery code');
+    }
+    if (recoveryUsed && user.twoFactorRecoveryCodes) {
+      user.twoFactorRecoveryCodes.splice(recoveryIndex, 1);
+      await user.save();
+    }
   }
 
   const familyId = crypto.randomBytes(8).toString('hex');
@@ -118,6 +157,8 @@ const login = async (payload: Partial<IUser>): Promise<{ accessToken: string, re
 
   const userObj = user.toObject();
   delete userObj.password;
+  delete userObj.twoFactorSecret;
+  delete userObj.twoFactorRecoveryCodes;
 
   await User.updateOne(
     { _id: user._id },
@@ -343,6 +384,209 @@ const verifyChangePassword = async (resetToken: string, otp: string, newPassword
   return { message: 'Password changed successfully' };
 };
 
+const changePasswordDirect = async (userId: string, oldPassword: string, newPassword: string) => {
+  const user = await User.findById(userId).select('+password');
+  if (!user || !user.password) {
+    throw new CustomError(404, 'User not found');
+  }
+
+  const isPasswordMatch = await bcrypt.compare(oldPassword, user.password);
+  if (!isPasswordMatch) {
+    throw new CustomError(400, 'Incorrect current password');
+  }
+
+  if (!newPassword || newPassword.length < 8) {
+    throw new CustomError(400, 'New password must be at least 8 characters long');
+  }
+
+  const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/;
+  if (!passwordRegex.test(newPassword)) {
+    throw new CustomError(400, 'New password must contain at least one uppercase letter, one lowercase letter, and one number');
+  }
+
+  user.password = newPassword;
+  await user.save();
+
+  return { message: 'Password updated successfully' };
+};
+
+const setup2FA = async (userId: string) => {
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new CustomError(404, 'User not found');
+  }
+
+  const secret = speakeasy.generateSecret({
+    length: 20,
+    name: `MASH ECO (${user.email})`,
+    issuer: 'Mash Eco Platform',
+  });
+
+  user.twoFactorTempSecret = secret.base32;
+  await user.save();
+
+  const qrCodeUrl = await QRCode.toDataURL(secret.otpauth_url || '');
+
+  return {
+    qrCodeUrl,
+    secret: secret.base32,
+  };
+};
+
+const verifyEnable2FA = async (userId: string, code: string) => {
+  const user = await User.findById(userId).select('+twoFactorTempSecret');
+  if (!user || !user.twoFactorTempSecret) {
+    throw new CustomError(400, '2FA setup has not been initiated. Please start setup again.');
+  }
+
+  const verified = speakeasy.totp.verify({
+    secret: user.twoFactorTempSecret,
+    encoding: 'base32',
+    token: code.trim(),
+    window: 1,
+  });
+
+  if (!verified) {
+    throw new CustomError(400, 'Invalid authenticator code. Please double check the code from your app.');
+  }
+
+  const recoveryCodes = Array.from({ length: 8 }, () =>
+    crypto.randomBytes(4).toString('hex').toUpperCase()
+  );
+
+  user.twoFactorSecret = user.twoFactorTempSecret;
+  user.twoFactorEnabled = true;
+  user.set('twoFactorTempSecret', undefined);
+  user.twoFactorRecoveryCodes = recoveryCodes;
+  await user.save();
+
+  return {
+    message: '2FA authenticator successfully enabled!',
+    recoveryCodes,
+  };
+};
+
+const disable2FA = async (userId: string, code?: string) => {
+  const user = await User.findById(userId).select('+twoFactorSecret +twoFactorRecoveryCodes');
+  if (!user) {
+    throw new CustomError(404, 'User not found');
+  }
+
+  if (user.twoFactorEnabled && code) {
+    const isOtpValid = user.twoFactorSecret && speakeasy.totp.verify({
+      secret: user.twoFactorSecret,
+      encoding: 'base32',
+      token: code.trim(),
+      window: 1,
+    });
+    const isRecoveryCode = user.twoFactorRecoveryCodes?.includes(code.trim().toUpperCase());
+
+    if (!isOtpValid && !isRecoveryCode) {
+      throw new CustomError(400, 'Invalid 2FA code or recovery code');
+    }
+  }
+
+  user.twoFactorEnabled = false;
+  user.set('twoFactorSecret', undefined);
+  user.set('twoFactorTempSecret', undefined);
+  user.twoFactorRecoveryCodes = [];
+  await user.save();
+
+  return { message: '2FA authenticator successfully disabled.' };
+};
+
+const get2FAStatus = async (userId: string) => {
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new CustomError(404, 'User not found');
+  }
+  return {
+    twoFactorEnabled: !!user.twoFactorEnabled,
+  };
+};
+
+const verify2FALogin = async (twoFactorToken: string, code: string) => {
+  let decoded: any;
+  try {
+    decoded = jwt.verify(twoFactorToken, config.jwt.accessSecret);
+  } catch (err) {
+    throw new CustomError(401, '2FA session expired. Please log in again.');
+  }
+
+  if (!decoded || !decoded._id) {
+    throw new CustomError(401, 'Invalid 2FA session');
+  }
+
+  const user = await User.findById(decoded._id).select('+password +twoFactorSecret +twoFactorRecoveryCodes');
+  if (!user || !user.twoFactorSecret) {
+    throw new CustomError(400, 'User 2FA setup not found');
+  }
+
+  const isOtpValid = speakeasy.totp.verify({
+    secret: user.twoFactorSecret,
+    encoding: 'base32',
+    token: code.trim(),
+    window: 1,
+  });
+
+  let recoveryUsed = false;
+  let recoveryIndex = -1;
+  if (!isOtpValid && user.twoFactorRecoveryCodes) {
+    recoveryIndex = user.twoFactorRecoveryCodes.indexOf(code.trim().toUpperCase());
+    if (recoveryIndex !== -1) recoveryUsed = true;
+  }
+
+  if (!isOtpValid && !recoveryUsed) {
+    throw new CustomError(400, 'Invalid authenticator code or recovery code.');
+  }
+
+  if (recoveryUsed && user.twoFactorRecoveryCodes) {
+    user.twoFactorRecoveryCodes.splice(recoveryIndex, 1);
+    await user.save();
+  }
+
+  const familyId = crypto.randomBytes(8).toString('hex');
+
+  const jwtPayload = {
+    _id: user._id,
+    email: user.email,
+    role: user.role,
+    tenantId: user.tenantId,
+    familyId,
+  };
+
+  const accessToken = jwt.sign(jwtPayload, config.jwt.accessSecret, {
+    expiresIn: config.jwt.accessExpiresIn as any,
+  });
+
+  const refreshToken = jwt.sign(jwtPayload, config.jwt.refreshSecret, {
+    expiresIn: config.jwt.refreshExpiresIn as any,
+  });
+
+  const userObj = user.toObject();
+  delete userObj.password;
+  delete userObj.twoFactorSecret;
+  delete userObj.twoFactorRecoveryCodes;
+
+  await User.updateOne(
+    { _id: user._id },
+    {
+      $push: {
+        refreshTokens: {
+          $each: [{ token: refreshToken, familyId }],
+          $slice: -2
+        }
+      }
+    }
+  );
+
+  return {
+    accessToken,
+    refreshToken,
+    user: userObj,
+  };
+};
+
 const logout = async (token: string) => {
   if (!token) return;
   try {
@@ -367,5 +611,11 @@ export const AuthService = {
   refreshToken,
   requestChangePassword,
   verifyChangePassword,
+  changePasswordDirect,
   logout,
+  setup2FA,
+  verifyEnable2FA,
+  disable2FA,
+  get2FAStatus,
+  verify2FALogin,
 };

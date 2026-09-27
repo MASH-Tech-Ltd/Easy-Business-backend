@@ -1,9 +1,10 @@
 import { Request, Response } from 'express';
 import { contactInquiryService } from './contactInquiry.service';
+import { getClientIp } from '../../utils/ipHelper';
 
 export const createInquiry = async (req: Request, res: Response) => {
   try {
-    const ipAddress = req.ip || req.socket.remoteAddress || 'Unknown';
+    const ipAddress = getClientIp(req);
     const inquiry = await contactInquiryService.createInquiry({ ...req.body, ipAddress });
     res.status(201).json({ success: true, data: inquiry, message: 'Inquiry submitted successfully' });
   } catch (error: any) {
