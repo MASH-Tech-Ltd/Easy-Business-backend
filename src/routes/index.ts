@@ -22,6 +22,7 @@ import { NotificationRoutes } from '../modules/notification/notification.route';
 import { SeedRoutes } from '../modules/seed/seed.route';
 import { CheckoutLeadRoutes } from '../modules/checkoutLead/checkoutLead.route';
 import { ContactInquiryRoutes } from '../modules/contactInquiry/contactInquiry.route';
+import { TrackingRoutes } from '../modules/analytics/tracking.route';
 
 const router = Router();
 
@@ -77,6 +78,10 @@ const moduleRoutes = [
   {
     path: '/analytics',
     route: AnalyticsRoutes,
+  },
+  {
+    path: '/tracking',
+    route: TrackingRoutes,
   },
   {
     path: '/system',
