@@ -17,27 +17,11 @@ const cleanIp = (ip: string): string => {
 };
 
 /**
- * Checks whether an IP address belongs to known Cloudflare IPv4 or IPv6 proxy ranges.
+ * Checks whether an IP address belongs to known Cloudflare IPv4 proxy ranges.
+ * (Only used when picking client IP from multi-node proxy headers like X-Forwarded-For).
  */
 export const isCloudflareProxyIp = (ip: string): boolean => {
   const cleaned = cleanIp(ip).toLowerCase();
-
-  // Check Cloudflare & VPS IPv6 proxy ranges (2606:4700::/32, 2a06:98c0::/29, 2405:b500::/32, 2405:8100::/32, 2c0f:f248::/32, 2a02:4700::, 2a02:4780::)
-  if (cleaned.includes(':')) {
-    if (
-      cleaned.startsWith('2606:4700:') ||
-      cleaned.startsWith('2a06:98c0:') ||
-      cleaned.startsWith('2405:b500:') ||
-      cleaned.startsWith('2405:8100:') ||
-      cleaned.startsWith('2c0f:f248:') ||
-      cleaned.startsWith('2a02:4700:') ||
-      cleaned.startsWith('2a02:4780:') ||
-      cleaned.startsWith('2a02:')
-    ) {
-      return true;
-    }
-    return false;
-  }
 
   const parts = cleaned.split('.').map(Number);
   if (parts.length !== 4) return false;
@@ -45,10 +29,9 @@ export const isCloudflareProxyIp = (ip: string): boolean => {
   const a = parts[0];
   const b = parts[1];
   const c = parts[2];
-  const d = parts[3];
 
-  if (a === undefined || b === undefined || c === undefined || d === undefined) return false;
-  if (isNaN(a) || isNaN(b) || isNaN(c) || isNaN(d)) return false;
+  if (a === undefined || b === undefined || c === undefined) return false;
+  if (isNaN(a) || isNaN(b) || isNaN(c)) return false;
 
   // 172.64.0.0 – 172.71.255.255
   if (a === 172 && b >= 64 && b <= 71) return true;
@@ -62,20 +45,6 @@ export const isCloudflareProxyIp = (ip: string): boolean => {
   if (a === 198 && b === 41 && c >= 128) return true;
   // 173.245.48.0 – 173.245.63.255
   if (a === 173 && b === 245 && c >= 48 && c <= 63) return true;
-  // 103.21.244.0 – 103.21.247.255
-  if (a === 103 && b === 21 && c >= 244 && c <= 247) return true;
-  // 103.22.200.0 – 103.22.203.255
-  if (a === 103 && b === 22 && c >= 200 && c <= 203) return true;
-  // 103.31.4.0 – 103.31.7.255
-  if (a === 103 && b === 31 && c >= 4 && c <= 7) return true;
-  // 141.101.64.0 – 141.101.127.255
-  if (a === 141 && b === 101 && c >= 64 && c <= 127) return true;
-  // 188.114.96.0 – 188.114.111.255
-  if (a === 188 && b === 114 && c >= 96 && c <= 111) return true;
-  // 190.93.240.0 – 190.93.255.255
-  if (a === 190 && b === 93 && c >= 240 && c <= 255) return true;
-  // 197.234.240.0 – 197.234.243.255
-  if (a === 197 && b === 234 && c >= 240 && c <= 243) return true;
 
   return false;
 };
@@ -86,19 +55,19 @@ export const isCloudflareProxyIp = (ip: string): boolean => {
  * `x-real-ip`, and finally falls back to `req.ip`.
  */
 export const getClientIp = (req: Request): string => {
-  // 1. Cloudflare header (highest priority for Cloudflare proxied requests)
+  // 1. Cloudflare header (highest priority for Cloudflare proxied requests - directly contains client IP)
   const cfIp = req.headers['cf-connecting-ip'] || req.headers['x-client-ip'];
   if (cfIp) {
     const rawIp = Array.isArray(cfIp) ? cfIp[0] : cfIp;
     if (rawIp && typeof rawIp === 'string' && rawIp.trim()) {
       const cleaned = cleanIp(rawIp);
-      if (cleaned && !isCloudflareProxyIp(cleaned) && cleaned !== '127.0.0.1' && cleaned !== '::1') {
+      if (cleaned && cleaned !== '127.0.0.1' && cleaned !== '::1') {
         return cleaned;
       }
     }
   }
 
-  // 2. Standard X-Forwarded-For header (filter out Cloudflare proxy node IPs)
+  // 2. Standard X-Forwarded-For header
   const forwarded = req.headers['x-forwarded-for'];
   if (forwarded) {
     const rawForwarded = Array.isArray(forwarded) ? forwarded[0] : forwarded;
@@ -119,7 +88,7 @@ export const getClientIp = (req: Request): string => {
     const rawReal = Array.isArray(realIp) ? realIp[0] : realIp;
     if (rawReal && typeof rawReal === 'string' && rawReal.trim()) {
       const cleaned = cleanIp(rawReal);
-      if (cleaned && !isCloudflareProxyIp(cleaned) && cleaned !== '127.0.0.1' && cleaned !== '::1') {
+      if (cleaned && cleaned !== '127.0.0.1' && cleaned !== '::1') {
         return cleaned;
       }
     }
@@ -129,4 +98,3 @@ export const getClientIp = (req: Request): string => {
   const rawIp = req.ip || req.socket.remoteAddress || '127.0.0.1';
   return cleanIp(rawIp);
 };
-
