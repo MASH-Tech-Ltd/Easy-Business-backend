@@ -158,11 +158,19 @@ export const visitorTrackingMiddleware = async (req: Request, res: Response, nex
       (async () => {
         let location = 'Unknown';
         try {
-          const response = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,city`);
+          const response = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,regionName,city,zip,isp`);
           if (response.ok) {
             const data = await response.json();
             if (data.status === 'success') {
-               location = `${data.city ? data.city + ', ' : ''}${data.country}`;
+               const parts = [];
+               if (data.city) parts.push(data.city);
+               if (data.regionName && data.regionName !== data.city) parts.push(data.regionName);
+               if (data.country) parts.push(data.country);
+               
+               let loc = parts.join(', ');
+               if (data.zip) loc += ` - ${data.zip}`;
+               if (data.isp) loc += ` (ISP: ${data.isp})`;
+               location = loc;
             }
           }
           

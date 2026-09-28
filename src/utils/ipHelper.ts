@@ -84,19 +84,7 @@ export const getClientIp = (req: Request): string => {
     }
   }
 
-  // 2. Cloudflare header (direct browser → CF → Backend, no intermediate SSR server)
-  const cfIp = req.headers['cf-connecting-ip'] || req.headers['x-client-ip'];
-  if (cfIp) {
-    const rawIp = Array.isArray(cfIp) ? cfIp[0] : cfIp;
-    if (rawIp && typeof rawIp === 'string' && rawIp.trim()) {
-      const cleaned = cleanIp(rawIp);
-      if (cleaned && cleaned !== '127.0.0.1' && cleaned !== '::1') {
-        return cleaned;
-      }
-    }
-  }
-
-  // 3. Standard X-Forwarded-For header
+  // 2. Standard X-Forwarded-For header (Provides original IP if passing through multiple proxies)
   const forwarded = req.headers['x-forwarded-for'];
   if (forwarded) {
     const rawForwarded = Array.isArray(forwarded) ? forwarded[0] : forwarded;
@@ -107,6 +95,18 @@ export const getClientIp = (req: Request): string => {
         if (clientIp && !isCloudflareProxyIp(clientIp) && clientIp !== '127.0.0.1' && clientIp !== '::1') {
           return clientIp;
         }
+      }
+    }
+  }
+
+  // 3. Cloudflare header (direct browser → CF → Backend)
+  const cfIp = req.headers['cf-connecting-ip'] || req.headers['x-client-ip'];
+  if (cfIp) {
+    const rawIp = Array.isArray(cfIp) ? cfIp[0] : cfIp;
+    if (rawIp && typeof rawIp === 'string' && rawIp.trim()) {
+      const cleaned = cleanIp(rawIp);
+      if (cleaned && cleaned !== '127.0.0.1' && cleaned !== '::1') {
+        return cleaned;
       }
     }
   }
