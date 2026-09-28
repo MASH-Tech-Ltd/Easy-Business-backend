@@ -14,7 +14,9 @@ import config from "./config/index";
 import { Tenant } from "./modules/tenant/tenant.model";
 
 const app: Application = express();
-app.set("trust proxy", true);
+// Trust exactly 1 proxy hop (Nginx/Cloudflare in front of Express).
+// Using `true` would trust ALL upstream proxies and allow IP spoofing via X-Forwarded-For.
+app.set("trust proxy", 1);
 
 import { ipBlocklistMiddleware, attackDetectionMiddleware } from './middleware/security.middleware';
 import { visitorTrackingMiddleware } from './middleware/visitorTracking.middleware';
