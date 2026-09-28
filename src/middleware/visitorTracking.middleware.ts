@@ -154,14 +154,35 @@ export const visitorTrackingMiddleware = async (req: Request, res: Response, nex
     if (!lastLogTime || (now - lastLogTime > VISITOR_LOG_TTL)) {
       visitorLogCache.set(cacheKey, now);
 
-      // Asynchronous non-blocking visitor log creation
-      VisitorLog.create({
-        role: role,
-        ipAddress: ip,
-        userAgent: userAgent,
-        storeName: displayStoreName,
-        ownerName: ownerName,
-      }).catch(err => {
+      // Asynchronous non-blocking location fetch & visitor log creation
+      (async () => {
+        let location = 'Unknown';
+        try {
+          const cfCountry = req.headers['cf-ipcountry'];
+          if (cfCountry && cfCountry !== 'XX') {
+            location = cfCountry as string;
+          } else {
+             const response = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,city`);
+             if (response.ok) {
+               const data = await response.json();
+               if (data.status === 'success') {
+                  location = `${data.city ? data.city + ', ' : ''}${data.country}`;
+               }
+             }
+          }
+        } catch (e) {
+          // Silent catch for API errors
+        }
+
+        await VisitorLog.create({
+          role: role,
+          ipAddress: ip,
+          userAgent: userAgent,
+          storeName: displayStoreName,
+          ownerName: ownerName,
+          location: location,
+        });
+      })().catch(err => {
         console.error('Visitor tracking log error:', err);
       });
     }

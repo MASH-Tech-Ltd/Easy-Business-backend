@@ -52,12 +52,14 @@ export interface IVisitorLog extends Document {
   userAgent: string;
   storeName?: string;
   ownerName?: string;
+  location?: string;
   accessedAt: Date;
 }
 
 const visitorLogSchema = new Schema<IVisitorLog>({
   role: { type: String, enum: ['Merchant', 'Customer', 'Super Admin', 'Guest'], required: true },
   ipAddress: { type: String, required: true },
+  location: { type: String, default: 'Unknown' },
   userAgent: { type: String, default: 'Unknown' },
   storeName: { type: String },
   ownerName: { type: String },
