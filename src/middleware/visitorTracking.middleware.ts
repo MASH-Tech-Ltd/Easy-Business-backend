@@ -158,20 +158,27 @@ export const visitorTrackingMiddleware = async (req: Request, res: Response, nex
       (async () => {
         let location = 'Unknown';
         try {
+          const response = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,city`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.status === 'success') {
+               location = `${data.city ? data.city + ', ' : ''}${data.country}`;
+            }
+          }
+          
+          // Fallback to Cloudflare header if API failed or returned nothing
+          if (location === 'Unknown') {
+            const cfCountry = req.headers['cf-ipcountry'];
+            if (cfCountry && cfCountry !== 'XX') {
+              location = cfCountry as string;
+            }
+          }
+        } catch (e) {
+          // Fallback on error
           const cfCountry = req.headers['cf-ipcountry'];
           if (cfCountry && cfCountry !== 'XX') {
             location = cfCountry as string;
-          } else {
-             const response = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,city`);
-             if (response.ok) {
-               const data = await response.json();
-               if (data.status === 'success') {
-                  location = `${data.city ? data.city + ', ' : ''}${data.country}`;
-               }
-             }
           }
-        } catch (e) {
-          // Silent catch for API errors
         }
 
         await VisitorLog.create({
