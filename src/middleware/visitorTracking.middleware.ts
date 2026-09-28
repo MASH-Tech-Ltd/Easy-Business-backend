@@ -37,12 +37,58 @@ export const visitorTrackingMiddleware = async (req: Request, res: Response, nex
       return next();
     }
 
+    // Skip known search engine crawlers and bots — they are not real store visitors
+    if (
+      userAgentLower.includes('googlebot') ||
+      userAgentLower.includes('google-inspectiontool') ||
+      userAgentLower.includes('adsbot-google') ||
+      userAgentLower.includes('mediapartners-google') ||
+      userAgentLower.includes('bingbot') ||
+      userAgentLower.includes('bingpreview') ||
+      userAgentLower.includes('slurp') ||           // Yahoo
+      userAgentLower.includes('duckduckbot') ||
+      userAgentLower.includes('baiduspider') ||
+      userAgentLower.includes('yandexbot') ||
+      userAgentLower.includes('sogou') ||
+      userAgentLower.includes('exabot') ||
+      userAgentLower.includes('facebot') ||
+      userAgentLower.includes('ia_archiver') ||     // Alexa/Wayback Machine
+      userAgentLower.includes('semrushbot') ||
+      userAgentLower.includes('ahrefsbot') ||
+      userAgentLower.includes('mj12bot') ||
+      userAgentLower.includes('dotbot') ||
+      userAgentLower.includes('rogerbot') ||
+      userAgentLower.includes('uptimerobot') ||
+      userAgentLower.includes('pingdom') ||
+      userAgentLower.includes('bot') && userAgentLower.includes('crawler') ||
+      userAgentLower.includes('spider') ||
+      userAgentLower.includes('headlesschrome') ||
+      userAgentLower.includes('phantomjs')
+    ) {
+      return next();
+    }
+
+
     const ip = getClientIp(req);
 
     // Skip Cloudflare edge proxy node IPs
     if (isCloudflareProxyIp(ip)) {
       return next();
     }
+
+    // Skip known Googlebot IP range: 66.249.64.0/19 (66.249.64.x – 66.249.95.x)
+    // Googlebot always uses IPs in this range — safe to block as bot traffic
+    const ipParts = ip.split('.');
+    if (
+      ipParts.length === 4 &&
+      ipParts[0] === '66' &&
+      ipParts[1] === '249' &&
+      parseInt(ipParts[2] || '0') >= 64 &&
+      parseInt(ipParts[2] || '0') <= 95
+    ) {
+      return next();
+    }
+
 
     const tenant = (req as any).tenant;
 
@@ -83,6 +129,24 @@ export const visitorTrackingMiddleware = async (req: Request, res: Response, nex
       return next();
     }
 
+    // Determine role based on context
+    let role: 'Customer' | 'Merchant' | 'Super Admin' | 'Guest' = 'Guest';
+    let displayStoreName = storeName;
+    let ownerName = 'Store Visitor-Guest';
+
+    if (storeName === 'masheco.com' || storeName === 'www.masheco.com') {
+      role = 'Guest';
+      ownerName = 'Landing Guest';
+    } else if (storeName.includes('merchant')) {
+      role = 'Merchant';
+      displayStoreName = 'Merchant Dashboard';
+      ownerName = 'Merchant';
+    } else if (storeName === 'adminsec.masheco.com' || storeName.includes('admin')) {
+      role = 'Super Admin';
+      displayStoreName = 'Super Admin Dashboard';
+      ownerName = 'Authority';
+    }
+
     const cacheKey = `${ip}_${storeName}`;
     const now = Date.now();
 
@@ -92,11 +156,11 @@ export const visitorTrackingMiddleware = async (req: Request, res: Response, nex
 
       // Asynchronous non-blocking visitor log creation
       VisitorLog.create({
-        role: 'Customer',
+        role: role,
         ipAddress: ip,
         userAgent: userAgent,
-        storeName: storeName,
-        ownerName: tenant?.ownerName || 'Storefront Visitor',
+        storeName: displayStoreName,
+        ownerName: ownerName,
       }).catch(err => {
         console.error('Visitor tracking log error:', err);
       });
