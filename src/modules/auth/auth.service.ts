@@ -8,6 +8,7 @@ import crypto from 'crypto';
 import otpGenerator from 'otp-generator';
 import { sendEmail } from '../../utils/sendEmail';
 import { resetPasswordTemplate } from '../../templates/resetPassword';
+import { newRegistrationTemplate } from '../../templates/newRegistration';
 import speakeasy from 'speakeasy';
 import QRCode from 'qrcode';
 
@@ -74,6 +75,13 @@ const register = async (payload: Partial<IUser>): Promise<Omit<IUser, 'password'
 
     await session.commitTransaction();
     session.endSession();
+
+    try {
+      const emailContent = newRegistrationTemplate(user.email as string, user.name || '');
+      await sendEmail('sabbir00921@gmail.com', 'New User Registration Notification', emailContent);
+    } catch (err) {
+      console.error('Failed to send registration notification email:', err);
+    }
 
     const userObj = user.toObject();
     delete userObj.password;
