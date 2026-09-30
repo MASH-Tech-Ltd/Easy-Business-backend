@@ -13,8 +13,6 @@ import { Addon } from '../addon/addon.model';
 const getCourierChargeByTenant = async (tenantId: string): Promise<ICourier> => {
   let courier = await Courier.findOne({ tenantId });
   if (!courier) {
-    // SECURITY FIX: Validate tenant exists before auto-creating a courier record.
-    // Previously any random tenantId from the URL would create a DB document.
     const tenantExists = await Tenant.exists({ _id: tenantId, status: 'active' });
     if (!tenantExists) {
       throw new CustomError(404, 'Tenant not found');
@@ -26,23 +24,61 @@ const getCourierChargeByTenant = async (tenantId: string): Promise<ICourier> => 
     );
   }
   
-  if (courier && courier.apiSecret) {
+  if (courier) {
     const doc = courier.toObject();
-    try {
-      const decrypted = decryptText(doc.apiSecret as string);
-      const visibleCount = 6;
-      if (decrypted.length > visibleCount) {
-        doc.apiSecret = '*'.repeat(16) + decrypted.slice(-visibleCount);
-      } else {
-        doc.apiSecret = '*'.repeat(16);
+    
+    // Process API Secret Masking (Legacy)
+    if (doc.apiSecret) {
+      try {
+        const decrypted = decryptText(doc.apiSecret as string);
+        doc.apiSecret = '•'.repeat(12) + decrypted.slice(-4);
+      } catch (e) {
+        doc.apiSecret = '•'.repeat(16);
       }
-    } catch (e) {
-      doc.apiSecret = '*'.repeat(16);
     }
+    
+    // Process Client ID (API Key) Masking for Steadfast (Legacy)
+    if (doc.clientId && doc.provider === 'steadfast') {
+      try {
+        const decryptedClientId = decryptText(doc.clientId as string);
+        doc.clientId = '•'.repeat(12) + decryptedClientId.slice(-4);
+      } catch (e) {
+        doc.clientId = '•'.repeat(16);
+      }
+    } else if (doc.clientId) {
+      try { doc.clientId = decryptText(doc.clientId as string); } catch(e) {}
+    }
+
+    // Process all providers
+    if (doc.providers) {
+      for (const [key, p] of Object.entries(doc.providers) as any) {
+        if (p.apiSecret) {
+          try {
+            const decrypted = decryptText(p.apiSecret);
+            p.apiSecret = '•'.repeat(12) + decrypted.slice(-4);
+          } catch (e) {
+            p.apiSecret = '•'.repeat(16);
+          }
+        }
+        if (p.clientId) {
+          if (key === 'steadfast') {
+            try {
+              const decrypted = decryptText(p.clientId);
+              p.clientId = '•'.repeat(12) + decrypted.slice(-4);
+            } catch (e) {
+              p.clientId = '•'.repeat(16);
+            }
+          } else {
+            try { p.clientId = decryptText(p.clientId); } catch (e) {}
+          }
+        }
+      }
+    }
+
     return doc as ICourier;
   }
   
-  return courier as ICourier;
+  return courier as unknown as ICourier;
 };
 
 const updateCourierCharge = async (tenantId: string, payload: Partial<ICourier>): Promise<ICourier | null> => {
@@ -54,17 +90,39 @@ const updateCourierCharge = async (tenantId: string, payload: Partial<ICourier>)
   return result;
 };
 
-const saveCredentials = async (tenantId: string, payload: Partial<ICourier>): Promise<ICourier | null> => {
-  if (payload.apiSecret && !payload.apiSecret.includes('***')) {
-    payload.apiSecret = encryptText(payload.apiSecret);
-  } else {
-    // Do not overwrite existing secret if blank or masked
-    delete payload.apiSecret;
+const saveCredentials = async (tenantId: string, payload: any): Promise<ICourier | null> => {
+  const { provider, clientId, apiSecret, autoForward, isActive = true } = payload;
+  const updateDoc: any = {};
+
+  let finalClientId = clientId;
+  if (clientId && !clientId.includes('•••') && !clientId.includes('***')) {
+    finalClientId = encryptText(clientId);
   }
-  
+  let finalApiSecret = apiSecret;
+  if (apiSecret && !apiSecret.includes('•••') && !apiSecret.includes('***')) {
+    finalApiSecret = encryptText(apiSecret);
+  }
+
+  if (provider) {
+    if (finalClientId !== undefined && !clientId?.includes('•••') && !clientId?.includes('***')) {
+      updateDoc[`providers.${provider}.clientId`] = finalClientId;
+      updateDoc.clientId = finalClientId; // Legacy fallback
+    }
+    if (finalApiSecret !== undefined && !apiSecret?.includes('•••') && !apiSecret?.includes('***')) {
+      updateDoc[`providers.${provider}.apiSecret`] = finalApiSecret;
+      updateDoc.apiSecret = finalApiSecret; // Legacy fallback
+    }
+    if (autoForward !== undefined) {
+      updateDoc[`providers.${provider}.autoForward`] = autoForward;
+      updateDoc.autoForward = autoForward; // Legacy fallback
+    }
+    updateDoc[`providers.${provider}.isActive`] = isActive;
+    if (isActive) updateDoc.provider = provider;
+  }
+
   const result = await Courier.findOneAndUpdate(
     { tenantId },
-    { $set: payload },
+    { $set: updateDoc },
     { returnDocument: 'after', upsert: true }
   );
   return result;
@@ -124,16 +182,27 @@ const forwardOrder = async (orderId: string, tenantId: string, providerId: strin
 
   // 3. Get Credentials
   const courierConfig = await Courier.findOne({ tenantId });
-  if (!courierConfig || !courierConfig.provider || courierConfig.provider !== providerId) {
-    throw new CustomError(400, `Courier provider ${providerId} is not configured`);
+  
+  let pConfig: any = null;
+  if (courierConfig?.providers && (courierConfig.providers as Record<string, any>)[providerId]) {
+    pConfig = (courierConfig.providers as Record<string, any>)[providerId];
+  } else if (courierConfig?.provider === providerId) {
+    pConfig = { clientId: courierConfig.clientId, apiSecret: courierConfig.apiSecret, isActive: true };
   }
 
-  if (!courierConfig.clientId || !courierConfig.apiSecret) {
-    throw new CustomError(400, 'Courier credentials are missing');
+  if (!pConfig || !pConfig.isActive) {
+    throw new CustomError(400, `Courier provider ${providerId} is not configured or active`);
   }
 
-  const clientId = courierConfig.clientId;
-  const apiSecret = decryptText(courierConfig.apiSecret);
+  if (!pConfig.clientId || !pConfig.apiSecret) {
+    throw new CustomError(400, `Courier credentials for ${providerId} are missing`);
+  }
+
+  let clientId = pConfig.clientId;
+  let apiSecret = pConfig.apiSecret;
+  
+  try { clientId = decryptText(clientId); } catch(e) {}
+  try { apiSecret = decryptText(apiSecret); } catch(e) {}
 
   // 4. Create Order on Provider
   let result;

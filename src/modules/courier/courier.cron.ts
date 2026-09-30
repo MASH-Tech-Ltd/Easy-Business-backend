@@ -43,7 +43,7 @@ export const initCourierCron = () => {
           }
 
           const providerId = courierConfig.provider;
-          const clientId = courierConfig.clientId;
+          const clientId = decryptText(courierConfig.clientId);
           const apiSecret = decryptText(courierConfig.apiSecret);
 
           let providerInstance: any;
