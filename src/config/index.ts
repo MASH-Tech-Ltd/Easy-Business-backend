@@ -61,6 +61,7 @@ const config = {
   // Security & Authentication
   security: {
     bcryptSaltRounds: Number(process.env.BCRYPT_SALT_ROUNDS) || 12,
+    encryptionSecretKey: requireSecret('ENCRYPTION_SECRET_KEY', 'insecure-dev-encryption-secret'),
   },
 
   jwt: {
@@ -74,7 +75,7 @@ const config = {
 
   // Super Admin Bootstrap Credentials
   superAdmin: {
-    email: process.env.SUPER_ADMIN_EMAIL || 'admin@famouselectronics.com',
+    email: process.env.SUPER_ADMIN_EMAIL || 'admin@gmail.com',
     password: requireSecret('SUPER_ADMIN_PASSWORD', 'insecure-dev-password'),
   },
 
@@ -96,7 +97,7 @@ const config = {
     port: Number(process.env.BREVO_SMTP_PORT) || 587,
     user: process.env.BREVO_SMTP_USER || '',
     pass: process.env.BREVO_SMTP_PASS || '',
-    from: process.env.BREVO_SMTP_FROM || 'contact@famouselectronics.com',
+    from: process.env.BREVO_SMTP_FROM || 'contact@masheco.com',
   },
 
   // Cloudflare

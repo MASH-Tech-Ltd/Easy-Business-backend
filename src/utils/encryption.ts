@@ -4,9 +4,9 @@ import config from '../config';
 const ALGORITHM = 'aes-256-cbc';
 const IV_LENGTH = 16;
 
-// Derive a 32-byte key from JWT_ACCESS_SECRET (pad or truncate)
+// Derive a 32-byte key from ENCRYPTION_SECRET_KEY (pad or truncate)
 const getEncryptionKey = (): Buffer => {
-  const secret = config.jwt.accessSecret || 'default_secret_key';
+  const secret = config.security.encryptionSecretKey || 'default_secret_key';
   return crypto.createHash('sha256').update(String(secret)).digest();
 };
 
