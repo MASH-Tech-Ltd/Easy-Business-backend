@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { CourierService } from './courier.service';
+import { runCourierStatusSync } from './courier.cron';
 import ApiResponse from '../../utils/apiResponse';
 import { asyncHandler } from '../../utils/asyncHandler';
 
@@ -48,6 +49,11 @@ const forwardOrder = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 200, 'Order forwarded successfully', result);
 });
 
+const syncCourierStatuses = asyncHandler(async (req: Request, res: Response) => {
+  const result = await runCourierStatusSync();
+  ApiResponse.sendSuccess(res, 200, 'Courier status sync completed', result);
+});
+
 export const CourierController = {
   getMyCourierCharge,
   getStorefrontCourierCharge,
@@ -56,4 +62,5 @@ export const CourierController = {
   getAllCredentials,
   checkAddonLimit,
   forwardOrder,
+  syncCourierStatuses,
 };

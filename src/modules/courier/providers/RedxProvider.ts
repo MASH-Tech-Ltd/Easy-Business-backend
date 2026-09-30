@@ -13,38 +13,41 @@ export class RedxProvider {
 
   async createOrder(order: IOrder): Promise<{ consignmentId: string; trackingUrl: string }> {
     try {
-      // 1. Authenticate and get token
-      // const token = await this.getAccessToken();
-
       // 2. Prepare payload
       const payload = {
         customer_name: order.customerName,
         customer_phone: order.customerPhone,
         delivery_area: order.shippingAddress,
-        delivery_area_id: 1, // Example ID
+        delivery_area_id: 1, // Example ID, real one should be fetched from area API
         customer_address: order.shippingAddress,
         merchant_invoice_id: order.orderId,
         cash_collection_amount: order.paymentStatus === 'unpaid' ? order.totalPrice : 0,
         parcel_weight: 1000, // 1 kg
         instruction: order.note || '',
-        value: order.totalPrice
+        value: order.totalPrice,
+        pickup_store_id: this.clientId // Store ID from clientId
       };
 
       console.log('Sending order to REDX with payload:', payload);
 
       // 3. Make API request
-      // const response = await axios.post(`${this.baseUrl}/parcel`, payload, {
-      //   headers: { Authorization: `Bearer ${token}` }
-      // });
+      const response = await axios.post(`${this.baseUrl}/parcel`, payload, {
+        headers: { 
+          'Authorization': `Bearer ${this.apiSecret}`,
+          'Content-Type': 'application/json'
+        }
+      });
       
-      // Mocking successful response for now
       return {
-        consignmentId: `REDX-${order.orderId}-${Math.floor(Math.random() * 10000)}`,
-        trackingUrl: `https://redx.com.bd/track-parcel/?trackingId=REDX-${order.orderId}`
+        consignmentId: response.data?.tracking_id || response.data?.parcel_id,
+        trackingUrl: `https://redx.com.bd/track-parcel/?trackingId=${response.data?.tracking_id || response.data?.parcel_id}`
       };
-    } catch (error) {
-      console.error('REDX API Error:', error);
-      throw new Error('Failed to create order on REDX');
+    } catch (error: any) {
+      const errorMsg = typeof error?.response?.data === 'string' 
+        ? error.response.data 
+        : error?.response?.data?.message || 'Failed to create order on REDX';
+      console.error('REDX API Error:', errorMsg);
+      throw new Error(`REDX: ${errorMsg}`);
     }
   }
 

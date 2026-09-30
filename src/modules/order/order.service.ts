@@ -65,7 +65,9 @@ const createOrder = async (payload: IOrder): Promise<IOrder> => {
     // ── Step 4: Override ALL money fields — client values are fully ignored ──────
     payload.subTotal = Math.round(trustedSubTotal);
     payload.shippingCharge = trustedShippingCharge;
-    payload.totalPrice = Math.round(trustedSubTotal + trustedShippingCharge);
+    payload.totalPrice = payload.isDeliveryChargePaid 
+      ? Math.round(trustedSubTotal) 
+      : Math.round(trustedSubTotal + trustedShippingCharge);
   } catch (err) {
     // SECURITY: Do NOT fall through — if price recalculation fails, reject the order entirely
     // to prevent client-manipulated prices from being saved.
@@ -168,6 +170,11 @@ const getOrdersByTenant = async (tenantId: string, query: any = {}) => {
 const updateOrder = async (id: string, payload: Partial<IOrder>, tenantId: string) => {
   const order = await Order.findOne({ _id: id, tenantId });
   if (!order) return null;
+
+  // Prevent manual status updates if the order is managed by a courier
+  if (payload.status && payload.status !== order.status && order.consignmentId) {
+    throw new CustomError(400, 'Status cannot be changed manually after the order has been forwarded to a courier.');
+  }
 
   const oldStatus = order.status;
   const newStatus = payload.status || oldStatus;

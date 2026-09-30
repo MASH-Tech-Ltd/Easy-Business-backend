@@ -16,5 +16,6 @@ router.patch('/update-charges', authMiddleware('tenant_admin'), CourierControlle
 router.post('/credentials', authMiddleware('tenant_admin'), CourierController.saveCredentials);
 router.get('/check-addon', authMiddleware('tenant_admin'), CourierController.checkAddonLimit);
 router.post('/forward', authMiddleware('tenant_admin'), CourierController.forwardOrder);
+router.post('/sync-status', authMiddleware('super_admin'), CourierController.syncCourierStatuses);
 
 export const CourierRoutes = router;
