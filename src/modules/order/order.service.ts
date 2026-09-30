@@ -145,9 +145,12 @@ const getOrdersByTenant = async (tenantId: string, query: any = {}) => {
   }
   
   if (query.search) {
+    // Optionally strip leading '#' from the search term if users search like "#123456"
+    const searchTerm = query.search.replace(/^#/, '');
     filter.$or = [
-      { customerName: { $regex: query.search, $options: 'i' } },
-      { customerPhone: { $regex: query.search, $options: 'i' } },
+      { orderId: { $regex: searchTerm, $options: 'i' } },
+      { customerName: { $regex: searchTerm, $options: 'i' } },
+      { customerPhone: { $regex: searchTerm, $options: 'i' } },
     ];
   }
 

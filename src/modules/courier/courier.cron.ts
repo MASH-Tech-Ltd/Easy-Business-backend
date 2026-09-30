@@ -1,15 +1,49 @@
 import cron from 'node-cron';
 import { Order } from '../order/order.model';
 import { Courier } from './courier.model';
+import { Tenant } from '../tenant/tenant.model';
 import { decryptText } from '../../utils/encryption';
 import { PathaoProvider } from './providers/PathaoProvider';
 import { SteadfastProvider } from './providers/SteadfastProvider';
 import { RedxProvider } from './providers/RedxProvider';
 import { getIO } from '../../socket';
 
+export interface SyncDetail {
+  tenantId: string;
+  merchantName: string;
+  orderId: string;
+  provider: string;
+  oldStatus: string;
+  newStatus: string;
+}
+
+export interface SkippedDetail {
+  tenantId: string;
+  merchantName: string;
+  orderId?: string;
+  provider?: string;
+  reason: string;
+  errorType: 'NO_CONFIG' | 'NO_PROVIDER' | 'UNKNOWN_PROVIDER' | 'AUTH_ERROR' | 'TRACKING_ERROR' | 'NO_STATUS_CHANGE';
+}
+
+export interface SyncResult {
+  synced: number;
+  updated: number;
+  skipped: number;
+  details: SyncDetail[];
+  skippedDetails: SkippedDetail[];
+  startedAt: string;
+  completedAt: string;
+  durationMs: number;
+}
+
 // Extracted as a named function so it can be triggered manually via API
-export const runCourierStatusSync = async () => {
-  console.log('[Courier Cron] Starting status sync for shipped orders...');
+export const runCourierStatusSync = async (): Promise<SyncResult> => {
+  const startedAt = new Date();
+
+  const details: SyncDetail[] = [];
+  const skippedDetails: SkippedDetail[] = [];
+
   try {
     // Find orders that have been shipped and have a consignment ID
     const activeOrders = await Order.find({ 
@@ -19,11 +53,14 @@ export const runCourierStatusSync = async () => {
     });
 
     if (activeOrders.length === 0) {
-      console.log('[Courier Cron] No active shipped orders to track.');
-      return { synced: 0, updated: 0, details: [] };
+      const completedAt = new Date();
+      return { 
+        synced: 0, updated: 0, skipped: 0, details: [], skippedDetails: [],
+        startedAt: startedAt.toISOString(),
+        completedAt: completedAt.toISOString(),
+        durationMs: completedAt.getTime() - startedAt.getTime()
+      };
     }
-
-    console.log(`[Courier Cron] Found ${activeOrders.length} orders to track.`);
 
     // Group orders by tenantId to minimize Courier Config DB calls
     const ordersByTenant = activeOrders.reduce((acc, order) => {
@@ -33,14 +70,31 @@ export const runCourierStatusSync = async () => {
       return acc;
     }, {} as Record<string, typeof activeOrders>);
 
+    // Pre-fetch tenant names for display
+    const tenantIds = Object.keys(ordersByTenant);
+    const tenants = await Tenant.find({ _id: { $in: tenantIds } }).select('_id name slug');
+    const tenantMap: Record<string, string> = {};
+    tenants.forEach((t: any) => { tenantMap[t._id.toString()] = t.name || t.slug || t._id.toString(); });
+
     let totalUpdated = 0;
-    const details: any[] = [];
+    let totalSkipped = 0;
 
     for (const [tenantId, orders] of Object.entries(ordersByTenant)) {
+      const merchantName = tenantMap[tenantId] || tenantId;
+
       try {
         const courierConfig = await Courier.findOne({ tenantId });
         if (!courierConfig) {
           console.log(`[Courier Cron] Missing courier configuration for tenant ${tenantId}`);
+          for (const order of orders) {
+            skippedDetails.push({
+              tenantId, merchantName,
+              orderId: order.orderId,
+              reason: 'No courier configuration found for this merchant',
+              errorType: 'NO_CONFIG'
+            });
+            totalSkipped++;
+          }
           continue;
         }
 
@@ -48,6 +102,15 @@ export const runCourierStatusSync = async () => {
         const providerId = courierConfig.provider;
         if (!providerId) {
           console.log(`[Courier Cron] No provider set for tenant ${tenantId}`);
+          for (const order of orders) {
+            skippedDetails.push({
+              tenantId, merchantName,
+              orderId: order.orderId,
+              reason: 'No active courier provider configured for this merchant',
+              errorType: 'NO_PROVIDER'
+            });
+            totalSkipped++;
+          }
           continue;
         }
 
@@ -64,7 +127,6 @@ export const runCourierStatusSync = async () => {
 
         let providerInstance: any;
         if (providerId === 'pathao') {
-          // Pathao needs username + password for OAuth token generation
           let pathaoUsername = '';
           let pathaoPassword = '';
           try { pathaoUsername = decryptText(pConfig.username || ''); } catch (e) { pathaoUsername = pConfig.username || ''; }
@@ -78,6 +140,16 @@ export const runCourierStatusSync = async () => {
 
         if (!providerInstance) {
           console.log(`[Courier Cron] Unknown provider ${providerId} for tenant ${tenantId}`);
+          for (const order of orders) {
+            skippedDetails.push({
+              tenantId, merchantName,
+              orderId: order.orderId,
+              provider: providerId,
+              reason: `Unknown or unsupported courier provider: "${providerId}"`,
+              errorType: 'UNKNOWN_PROVIDER'
+            });
+            totalSkipped++;
+          }
           continue;
         }
 
@@ -86,7 +158,7 @@ export const runCourierStatusSync = async () => {
         for (const order of orders) {
           try {
             const trackingData = await providerInstance.getTrackingStatus(order.consignmentId);
-            let newStatus: "pending" | "confirmed" | "shipped" | "delivered" | "cancelled" | null = null;
+            let newStatus: "pending" | "confirmed" | "shipped" | "delivered" | "cancelled" | "returned" | null = null;
             
             const courierStatus = trackingData.status.toLowerCase();
             
@@ -100,9 +172,14 @@ export const runCourierStatusSync = async () => {
               newStatus = 'delivered';
             } else if (
               courierStatus.includes('returned') || 
+              courierStatus.includes('return_successful') ||
+              courierStatus.includes('returned_to_merchant') ||
+              courierStatus.includes('return')
+            ) {
+              newStatus = 'returned';
+            } else if (
               courierStatus.includes('cancel') || 
               courierStatus.includes('delivery_failed') ||
-              courierStatus.includes('return_successful') ||
               courierStatus === 'hold'
             ) {
               newStatus = 'cancelled';
@@ -127,6 +204,7 @@ export const runCourierStatusSync = async () => {
               
               details.push({
                 tenantId,
+                merchantName,
                 orderId: order.orderId,
                 provider: providerId,
                 oldStatus: order.status,
@@ -137,13 +215,44 @@ export const runCourierStatusSync = async () => {
               await order.save();
               tenantUpdated = true;
               totalUpdated++;
+            } else {
+              // No status change needed — still a valid skip
+              skippedDetails.push({
+                tenantId, merchantName,
+                orderId: order.orderId,
+                provider: providerId,
+                reason: `Status unchanged (current: ${order.status}, courier: ${courierStatus})`,
+                errorType: 'NO_STATUS_CHANGE'
+              });
+              totalSkipped++;
             }
           } catch (err: any) {
-            console.error(`[Courier Cron] Error tracking order ${order.orderId}:`, err.message);
+            // Detect auth errors
+            const errMsg = err.message || '';
+            const isAuthError = 
+              errMsg.toLowerCase().includes('unauthorized') ||
+              errMsg.toLowerCase().includes('401') ||
+              errMsg.toLowerCase().includes('forbidden') ||
+              errMsg.toLowerCase().includes('403') ||
+              errMsg.toLowerCase().includes('invalid credentials') ||
+              errMsg.toLowerCase().includes('authentication') ||
+              errMsg.toLowerCase().includes('token') ||
+              errMsg.toLowerCase().includes('access denied');
+
+            skippedDetails.push({
+              tenantId, merchantName,
+              orderId: order.orderId,
+              provider: providerId,
+              reason: isAuthError
+                ? `Authentication failed for ${providerId}: ${errMsg}`
+                : `Tracking error: ${errMsg}`,
+              errorType: isAuthError ? 'AUTH_ERROR' : 'TRACKING_ERROR'
+            });
+            totalSkipped++;
           }
         }
 
-        // If any orders for this tenant were updated, emit a websocket event to refresh their dashboard
+        // If any orders for this tenant were updated, emit a websocket event
         if (tenantUpdated) {
           const io = getIO();
           if (io) {
@@ -153,18 +262,41 @@ export const runCourierStatusSync = async () => {
 
       } catch (err: any) {
         console.error(`[Courier Cron] Error processing tenant ${tenantId}:`, err.message);
+        skippedDetails.push({
+          tenantId, merchantName,
+          reason: `Fatal error processing merchant: ${err.message}`,
+          errorType: 'AUTH_ERROR'
+        });
+        totalSkipped += orders.length;
       }
     }
-    
-    console.log('[Courier Cron] Completed status sync.');
-    return { synced: activeOrders.length, updated: totalUpdated, details };
+
+    const completedAt = new Date();
+    return { 
+      synced: activeOrders.length, 
+      updated: totalUpdated, 
+      skipped: totalSkipped,
+      details,
+      skippedDetails,
+      startedAt: startedAt.toISOString(),
+      completedAt: completedAt.toISOString(),
+      durationMs: completedAt.getTime() - startedAt.getTime()
+    };
   } catch (error: any) {
-    console.error('[Courier Cron] Fatal Error during sync:', error.message);
     throw error;
   }
 };
 
 export const initCourierCron = () => {
-  // Run every 30 minutes
-  cron.schedule('*/30 * * * *', runCourierStatusSync);
+  // Run every 30 minutes — auto-save result to DB
+  cron.schedule('*/30 * * * *', async () => {
+    try {
+      const result = await runCourierStatusSync();
+      // Lazy import to avoid circular dependency issues at module init time
+      const { CourierSyncService } = await import('../courierSync/courierSync.service');
+      await CourierSyncService.saveSyncReport(result);
+    } catch (err: any) {
+    }
+  });
 };
+

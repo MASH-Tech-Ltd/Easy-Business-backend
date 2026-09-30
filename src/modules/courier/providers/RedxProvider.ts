@@ -62,18 +62,22 @@ export class RedxProvider {
   }
 
   async getTrackingStatus(trackingId: string): Promise<{ status: string }> {
-    try {
-      const token = await this.getAccessToken();
-      const response = await axios.get(`${this.baseUrl}/parcel/track/${trackingId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      // RedX returns an array of tracking updates, we take the latest one
-      const trackingHistory = response.data?.tracking || [];
-      const latestUpdate = trackingHistory.length > 0 ? trackingHistory[trackingHistory.length - 1] : null;
-      return { status: latestUpdate?.message || 'unknown' };
-    } catch (error) {
-      console.error('REDX Tracking API Error:', error);
-      return { status: 'unknown' };
+    const token = await this.getAccessToken();
+    const response = await axios.get(`${this.baseUrl}/parcel/track/${trackingId}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    // RedX returns an array of tracking updates, we take the latest one
+    const trackingHistory = response.data?.tracking || [];
+    const latestUpdate = trackingHistory.length > 0 ? trackingHistory[trackingHistory.length - 1] : null;
+    const rawStatus = latestUpdate?.message || latestUpdate?.status || null;
+
+    console.log(`[REDX Tracking] trackingId=${trackingId} rawStatus=${rawStatus}`, JSON.stringify(latestUpdate));
+
+    if (!rawStatus) {
+      throw new Error(`REDX returned no status for tracking ID ${trackingId}. Raw: ${JSON.stringify(response.data)}`);
     }
+
+    return { status: rawStatus };
   }
 }

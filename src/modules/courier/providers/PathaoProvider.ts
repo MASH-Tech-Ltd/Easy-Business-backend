@@ -107,17 +107,39 @@ export class PathaoProvider {
     return response.data.access_token;
   }
 
-  async getTrackingStatus(consignmentId: string): Promise<{ status: string }> {
-    try {
-      const accessToken = await this.getAccessToken();
+  async getTrackingStatus(consignmentId: string): Promise<{ status: string; rawStatus?: string }> {
+    const accessToken = await this.getAccessToken();
 
-      const response = await axios.get(`${this.baseUrl}/orders/${consignmentId}`, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
-      return { status: response.data.data?.order_status || 'unknown' };
-    } catch (error) {
-      console.error('Pathao Tracking API Error:', error);
-      return { status: 'unknown' };
+    const response = await axios.get(`${this.baseUrl}/orders/${consignmentId}`, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+
+    const raw = response.data;
+    // Pathao returns [] (empty array) when consignment ID is not found
+    if (Array.isArray(raw) && raw.length === 0) {
+      throw new Error(
+        `Pathao: Consignment "${consignmentId}" not found in Pathao system. ` +
+        `This order may have been created outside Pathao, or the consignment ID is invalid.`
+      );
     }
+
+    const d = raw?.data || raw;
+
+    // Pathao can return order_status, status, or delivery_status depending on endpoint version
+    const rawStatus =
+      d?.order_status ||
+      d?.status ||
+      d?.delivery_status ||
+      (Array.isArray(d) && d[0]?.order_status) ||  // array response
+      null;
+
+    if (!rawStatus) {
+      throw new Error(
+        `Pathao: No recognisable status field for consignment "${consignmentId}". ` +
+        `Response keys: [${Object.keys(d || {}).join(', ')}]`
+      );
+    }
+
+    return { status: rawStatus, rawStatus };
   }
 }

@@ -23,6 +23,8 @@ import { SeedRoutes } from '../modules/seed/seed.route';
 import { CheckoutLeadRoutes } from '../modules/checkoutLead/checkoutLead.route';
 import { ContactInquiryRoutes } from '../modules/contactInquiry/contactInquiry.route';
 import { TrackingRoutes } from '../modules/analytics/tracking.route';
+import { CourierSyncRoutes } from '../modules/courierSync/courierSync.route';
+
 
 const router = Router();
 
@@ -118,6 +120,10 @@ const moduleRoutes = [
   {
     path: '/contact-inquiries',
     route: ContactInquiryRoutes,
+  },
+  {
+    path: '/courier-sync',
+    route: CourierSyncRoutes,
   },
 ];
 

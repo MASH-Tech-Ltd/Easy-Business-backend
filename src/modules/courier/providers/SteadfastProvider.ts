@@ -58,17 +58,20 @@ export class SteadfastProvider {
   }
 
   async getTrackingStatus(consignmentId: string): Promise<{ status: string }> {
-    try {
-      const response = await axios.get(`${this.baseUrl}/status_by_cid/${consignmentId}`, {
-        headers: {
-          'Api-Key': this.clientId,
-          'Secret-Key': this.apiSecret
-        }
-      });
-      return { status: response.data.delivery_status || 'unknown' };
-    } catch (error) {
-      console.error('Steadfast Tracking API Error:', error);
-      return { status: 'unknown' };
+    const response = await axios.get(`${this.baseUrl}/status_by_cid/${consignmentId}`, {
+      headers: {
+        'Api-Key': this.clientId,
+        'Secret-Key': this.apiSecret
+      }
+    });
+
+    const rawStatus = response.data?.delivery_status || response.data?.status || null;
+    console.log(`[Steadfast Tracking] consignment=${consignmentId} rawStatus=${rawStatus}`, JSON.stringify(response.data));
+
+    if (!rawStatus) {
+      throw new Error(`Steadfast returned no status for consignment ${consignmentId}. Raw: ${JSON.stringify(response.data)}`);
     }
+
+    return { status: rawStatus };
   }
 }
