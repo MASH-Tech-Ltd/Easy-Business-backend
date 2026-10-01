@@ -300,43 +300,46 @@ export const supportService = {
       console.error("Socket emit error:", err);
     }
 
-    // Notify the other party
+    // Notify recipient via Socket.IO in real-time (shows screen toast and refreshes badges)
+    // without saving to the database (saving database storage space)
     try {
-      const { notificationService } = require("../notification/notification.service");
+      const io = require("../../socket").getIO();
       const { User } = require("../auth/auth.model");
 
+      const ephemeralNotification = {
+        _id: `temp_${Date.now()}`,
+        type: "TICKET_REPLY",
+        title: senderType === "ADMIN" ? "New Ticket Reply" : "New Ticket Reply",
+        message:
+          senderType === "ADMIN"
+            ? `An admin has replied to your ticket: "${ticket.subject}"`
+            : `A merchant has replied to ticket: "${ticket.subject}"`,
+        relatedId: ticket._id,
+        tenantId: ticket.tenantId,
+        read: false,
+        createdAt: new Date().toISOString(),
+      };
+
       if (senderType === "ADMIN") {
-        // Find the merchant who created the ticket (the first message sender)
         const merchantUser = ticket.messages[0]?.senderId as any;
-        // Handle populated object or raw ObjectId string
-        const merchantId = merchantUser?._id ? merchantUser._id.toString() : merchantUser?.toString();
-        
+        const merchantId = merchantUser?._id
+          ? merchantUser._id.toString()
+          : merchantUser?.toString();
+
         if (merchantId) {
-          await notificationService.createNotification(
-            merchantId,
-            "TICKET_REPLY",
-            "New Reply to Ticket",
-            `An admin has replied to your ticket: ${ticket.subject}`,
-            ticket._id,
-            ticket.tenantId
-          );
+          io.to(`user_${merchantId}`).emit("new_notification", ephemeralNotification);
+          io.to(`user_${merchantId}`).emit("refresh_tickets");
         }
       } else if (senderType === "MERCHANT") {
-        // Notify all Super Admins
         const superAdmins = await User.find({ role: "super_admin" });
         for (const admin of superAdmins) {
-          await notificationService.createNotification(
-            admin._id.toString(),
-            "TICKET_REPLY",
-            "New Ticket Reply",
-            `A merchant has replied to ticket: ${ticket.subject}`,
-            ticket._id,
-            ticket.tenantId
-          );
+          const adminId = admin._id.toString();
+          io.to(`user_${adminId}`).emit("new_notification", ephemeralNotification);
+          io.to(`user_${adminId}`).emit("refresh_tickets");
         }
       }
     } catch (err) {
-      console.error("Notification error on reply:", err);
+      console.error("Socket notification error on reply:", err);
     }
 
     return ticket;
@@ -369,21 +372,48 @@ export const supportService = {
       console.error("Socket emit error:", err);
     }
 
-    // Notify the merchant
+    // Notify merchant and super admins on ticket status update (closed / resolved / status change)
     try {
       const {
         notificationService,
       } = require("../notification/notification.service");
-      const merchantId = ticket.messages[0]?.senderId;
+      const { User } = require("../auth/auth.model");
+
+      const merchantUser = ticket.messages[0]?.senderId as any;
+      const merchantId = merchantUser?._id ? merchantUser._id.toString() : merchantUser?.toString();
+
+      const statusTitle =
+        status === "RESOLVED"
+          ? "Ticket Solved"
+          : status === "CLOSED"
+          ? "Ticket Closed"
+          : "Ticket Status Updated";
+
+      // Notify Merchant
       if (merchantId) {
         await notificationService.createNotification(
-          merchantId.toString(),
+          merchantId,
           "TICKET_STATUS",
-          "Ticket Status Updated",
-          `Your ticket "${ticket.subject}" has been marked as ${status}.`,
+          statusTitle,
+          `Your support ticket "${ticket.subject}" status has been set to ${status}.`,
           ticket._id,
           ticket.tenantId,
         );
+      }
+
+      // Notify Super Admins when a ticket is closed or resolved
+      if (status === "RESOLVED" || status === "CLOSED") {
+        const superAdmins = await User.find({ role: "super_admin" });
+        for (const admin of superAdmins) {
+          await notificationService.createNotification(
+            admin._id.toString(),
+            "TICKET_STATUS",
+            statusTitle,
+            `Support ticket "${ticket.subject}" has been marked as ${status}.`,
+            ticket._id,
+            ticket.tenantId,
+          );
+        }
       }
     } catch (err) {
       console.error("Notification error on status update:", err);
