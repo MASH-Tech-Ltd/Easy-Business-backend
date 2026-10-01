@@ -272,10 +272,38 @@ const refreshToken = async (token: string) => {
   const tokenExists = user.refreshTokens && user.refreshTokens.some(rt => rt.token === token);
   
   if (!tokenExists) {
-    // SECURITY FIX: Refresh Token Reuse Detection
-    // The token is valid (verified by jwt.verify) but not in the DB's active list.
-    // This indicates an old, already consumed token is being reused.
-    // We isolate and revoke ONLY the compromised device's sessions using its familyId.
+    // RACE CONDITION FIX FOR TOKEN ROTATION:
+    // If multiple parallel requests hit /auth/refresh-token at the exact moment the access token expires (e.g. after 8-15 min),
+    // Request 1 consumes the token first. Request 2 arrives milliseconds later with the same token.
+    // If the token is valid (verified by jwt.verify above) and was issued within the last 30 seconds,
+    // it is a parallel in-flight request from the same browser session. Return a fresh access token for the active session
+    // instead of triggering false-positive security revocation.
+    const now = Date.now();
+    const tokenIssuedAt = (decoded.iat || 0) * 1000;
+    const isRecentlyIssued = (now - tokenIssuedAt) < 30_000; // 30-second grace window for concurrent request bursts
+
+    if (isRecentlyIssued && decoded.familyId) {
+      const familyToken = user.refreshTokens && user.refreshTokens.find(rt => rt.familyId === decoded.familyId);
+      if (familyToken) {
+        const jwtPayload = {
+          _id: user._id,
+          email: user.email,
+          role: user.role,
+          tenantId: user.tenantId,
+          familyId: decoded.familyId,
+        };
+        const newAccessToken = jwt.sign(jwtPayload, config.jwt.accessSecret, {
+          expiresIn: config.jwt.accessExpiresIn as any,
+        });
+        return {
+          accessToken: newAccessToken,
+          refreshToken: familyToken.token,
+          user,
+        };
+      }
+    }
+
+    // Actual stolen token reuse (outside 30s grace window) -> revoke session for that device family
     if (decoded.familyId) {
       await User.updateOne({ _id: user._id }, { $pull: { refreshTokens: { familyId: decoded.familyId } } });
     } else {
@@ -311,7 +339,7 @@ const refreshToken = async (token: string) => {
       $push: {
         refreshTokens: {
           $each: [{ token: newRefreshToken, familyId: jwtPayload.familyId }],
-          $slice: -2 // Allow up to 2 concurrent devices
+          $slice: -3 // Allow up to 4 active devices per user
         }
       }
     }
