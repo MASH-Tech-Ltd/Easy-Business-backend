@@ -95,6 +95,31 @@ const approveAddonRequest = asyncHandler(async (req: Request, res: Response) => 
   ApiResponse.sendSuccess(res, 200, 'Addon request approved successfully', result);
 });
 
+const deactivateAddonRequest = asyncHandler(async (req: Request, res: Response) => {
+  const { subscriptionId, addonId } = req.params;
+  const result = await SubscriptionService.deactivateAddonRequest(subscriptionId as string, addonId as string);
+  ApiResponse.sendSuccess(res, 200, 'Addon deactivated / put on hold successfully', result);
+});
+
+const reactivateAddonRequest = asyncHandler(async (req: Request, res: Response) => {
+  const { subscriptionId, addonId } = req.params;
+  const result = await SubscriptionService.reactivateAddonRequest(subscriptionId as string, addonId as string);
+  ApiResponse.sendSuccess(res, 200, 'Addon reactivated successfully', result);
+});
+
+const extendAddonLimit = asyncHandler(async (req: Request, res: Response) => {
+  const { subscriptionId, addonId } = req.params;
+  const extraLimit = req.body?.extraLimit || req.body?.limit;
+  const result = await SubscriptionService.extendAddonLimit(subscriptionId as string, addonId as string, extraLimit);
+  ApiResponse.sendSuccess(res, 200, 'Addon limit extended successfully', result);
+});
+
+const terminateAddonRequest = asyncHandler(async (req: Request, res: Response) => {
+  const { subscriptionId, addonId } = req.params;
+  const result = await SubscriptionService.terminateAddonRequest(subscriptionId as string, addonId as string);
+  ApiResponse.sendSuccess(res, 200, 'Addon terminated successfully', result);
+});
+
 const rejectAddonRequest = asyncHandler(async (req: Request, res: Response) => {
   const { subscriptionId, addonId } = req.params;
   const result = await SubscriptionService.rejectAddonRequest(subscriptionId as string, addonId as string);
@@ -120,6 +145,10 @@ export const SubscriptionController = {
   purchaseAddon,
   getAllAddonRequests,
   approveAddonRequest,
+  deactivateAddonRequest,
+  reactivateAddonRequest,
+  extendAddonLimit,
+  terminateAddonRequest,
   rejectAddonRequest,
   removeAddon
 };

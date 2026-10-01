@@ -13,7 +13,7 @@ export interface ISubscription extends Document {
     limit: number;
     used: number;
     isActive: boolean;
-    status?: 'pending' | 'active' | 'rejected';
+    status?: 'pending' | 'active' | 'rejected' | 'inactive' | 'terminated';
   }[];
   createdAt?: Date;
   updatedAt?: Date;

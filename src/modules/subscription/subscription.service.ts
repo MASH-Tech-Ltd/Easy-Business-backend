@@ -364,7 +364,7 @@ const purchaseAddon = async (tenantId: string, payload: { addonId: string }): Pr
   
   const existing = subscription.purchasedAddons.find(pa => pa.addonId.toString() === payload.addonId);
   if (existing) {
-    if (existing.status === 'rejected') {
+    if (existing.status === 'rejected' || existing.status === 'terminated' || existing.status === 'inactive') {
       existing.status = 'pending';
       existing.isActive = false;
       existing.used = 0;
@@ -378,8 +378,10 @@ const purchaseAddon = async (tenantId: string, payload: { addonId: string }): Pr
       
       await subscription.save();
       return subscription;
+    } else if (existing.status === 'pending') {
+      throw new CustomError(400, 'Addon request is already pending approval');
     } else {
-      throw new CustomError(400, 'Addon already purchased');
+      throw new CustomError(400, 'Addon is already active');
     }
   }
 
@@ -441,6 +443,8 @@ const getAllAddonRequests = async (query: any): Promise<{ data: any[]; meta: any
         tenant: sub.tenantId,
         addonId: addon._id,
         addonDetails: addon.addonId,
+        limit: addon.limit || 0,
+        used: addon.used || 0,
         status: addon.status || (addon.isActive ? 'active' : 'pending'),
         requestedAt: sub.updatedAt,
       });
@@ -450,8 +454,12 @@ const getAllAddonRequests = async (query: any): Promise<{ data: any[]; meta: any
   const stats = {
     totalActive: allAddons.filter(a => a.status === 'active').length,
     totalPending: allAddons.filter(a => a.status === 'pending').length,
+    totalInactive: allAddons.filter(a => a.status === 'inactive').length,
+    totalTerminated: allAddons.filter(a => a.status === 'terminated').length,
     totalRejected: allAddons.filter(a => a.status === 'rejected').length,
-    totalRevenue: allAddons.filter(a => a.status === 'active').reduce((sum, a) => sum + (a.addonDetails?.price || 0), 0)
+    totalRevenue: allAddons
+      .filter(a => a.status !== 'pending' && a.status !== 'rejected')
+      .reduce((sum, a) => sum + (a.addonDetails?.price || 0), 0)
   };
 
   if (status && status !== 'all') {
@@ -526,6 +534,140 @@ const approveAddonRequest = async (subscriptionId: string, addonId: string) => {
   return subscription;
 };
 
+const deactivateAddonRequest = async (subscriptionId: string, addonId: string) => {
+  const subscription = await Subscription.findById(subscriptionId);
+  if (!subscription) throw new CustomError(404, 'Subscription not found');
+
+  const addonIndex = subscription.purchasedAddons?.findIndex(a => a._id?.toString() === addonId);
+  if (addonIndex === undefined || addonIndex === -1) throw new CustomError(404, 'Addon request not found');
+
+  const addon = subscription.purchasedAddons![addonIndex];
+  if (!addon) throw new CustomError(404, 'Addon not found');
+
+  const addonDoc = await Addon.findById(addon.addonId);
+
+  addon.status = 'inactive';
+  addon.isActive = false;
+
+  await subscription.save();
+
+  const tenant = await Tenant.findById(subscription.tenantId);
+  if (tenant && tenant.ownerId) {
+    await notificationService.createNotification(
+      tenant.ownerId,
+      'ADDON_DEACTIVATED',
+      'Addon Placed on Hold',
+      `Your addon ${addonDoc?.name || ''} has been placed on hold / deactivated by Super Admin. Money collected remains credited.`,
+      addon._id,
+      subscription.tenantId
+    );
+  }
+
+  await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
+  return subscription;
+};
+
+const reactivateAddonRequest = async (subscriptionId: string, addonId: string) => {
+  const subscription = await Subscription.findById(subscriptionId);
+  if (!subscription) throw new CustomError(404, 'Subscription not found');
+
+  const addonIndex = subscription.purchasedAddons?.findIndex(a => a._id?.toString() === addonId);
+  if (addonIndex === undefined || addonIndex === -1) throw new CustomError(404, 'Addon request not found');
+
+  const addon = subscription.purchasedAddons![addonIndex];
+  if (!addon) throw new CustomError(404, 'Addon not found');
+
+  const addonDoc = await Addon.findById(addon.addonId);
+
+  addon.status = 'active';
+  addon.isActive = true;
+
+  await subscription.save();
+
+  const tenant = await Tenant.findById(subscription.tenantId);
+  if (tenant && tenant.ownerId) {
+    await notificationService.createNotification(
+      tenant.ownerId,
+      'ADDON_REACTIVATED',
+      'Addon Reactivated',
+      `Your addon ${addonDoc?.name || ''} has been reactivated.`,
+      addon._id,
+      subscription.tenantId
+    );
+  }
+
+  await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
+  return subscription;
+};
+
+const extendAddonLimit = async (subscriptionId: string, addonId: string, extraLimit?: number) => {
+  const subscription = await Subscription.findById(subscriptionId);
+  if (!subscription) throw new CustomError(404, 'Subscription not found');
+
+  const addonIndex = subscription.purchasedAddons?.findIndex(a => a._id?.toString() === addonId);
+  if (addonIndex === undefined || addonIndex === -1) throw new CustomError(404, 'Addon request not found');
+
+  const addon = subscription.purchasedAddons![addonIndex];
+  if (!addon) throw new CustomError(404, 'Addon not found');
+
+  const addonDoc = await Addon.findById(addon.addonId);
+  const increment = Number(extraLimit) || addonDoc?.defaultLimit || 50;
+
+  addon.limit += increment;
+  addon.status = 'active';
+  addon.isActive = true;
+
+  await subscription.save();
+
+  const tenant = await Tenant.findById(subscription.tenantId);
+  if (tenant && tenant.ownerId) {
+    await notificationService.createNotification(
+      tenant.ownerId,
+      'ADDON_LIMIT_EXTENDED',
+      'Addon Limit Extended',
+      `Your limit for ${addonDoc?.name || 'addon'} has been extended by ${increment} units.`,
+      addon._id,
+      subscription.tenantId
+    );
+  }
+
+  await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
+  return subscription;
+};
+
+const terminateAddonRequest = async (subscriptionId: string, addonId: string) => {
+  const subscription = await Subscription.findById(subscriptionId);
+  if (!subscription) throw new CustomError(404, 'Subscription not found');
+
+  const addonIndex = subscription.purchasedAddons?.findIndex(a => a._id?.toString() === addonId);
+  if (addonIndex === undefined || addonIndex === -1) throw new CustomError(404, 'Addon request not found');
+
+  const addon = subscription.purchasedAddons![addonIndex];
+  if (!addon) throw new CustomError(404, 'Addon not found');
+
+  const addonDoc = await Addon.findById(addon.addonId);
+
+  addon.status = 'terminated';
+  addon.isActive = false;
+
+  await subscription.save();
+
+  const tenant = await Tenant.findById(subscription.tenantId);
+  if (tenant && tenant.ownerId) {
+    await notificationService.createNotification(
+      tenant.ownerId,
+      'ADDON_TERMINATED',
+      'Addon Terminated',
+      `Your addon ${addonDoc?.name || ''} has been terminated by Super Admin.`,
+      addon._id,
+      subscription.tenantId
+    );
+  }
+
+  await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
+  return subscription;
+};
+
 const rejectAddonRequest = async (subscriptionId: string, addonId: string) => {
   const subscription = await Subscription.findById(subscriptionId);
   if (!subscription) throw new CustomError(404, 'Subscription not found');
@@ -583,6 +725,10 @@ export const SubscriptionService = {
   purchaseAddon,
   getAllAddonRequests,
   approveAddonRequest,
+  deactivateAddonRequest,
+  reactivateAddonRequest,
+  extendAddonLimit,
+  terminateAddonRequest,
   rejectAddonRequest,
   removeAddon,
 };
