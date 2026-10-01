@@ -1,0 +1,200 @@
+import { PlatformPaymentSettings, PlatformPaymentSubmission } from './billing.model';
+import { IPlatformPaymentAccount } from './billing.interface';
+import CustomError from '../../helpers/CustomError';
+import { Tenant } from '../tenant/tenant.model';
+import { notificationService } from '../notification/notification.service';
+import { User } from '../auth/auth.model';
+
+const getPlatformPaymentSettings = async () => {
+  let settings = await PlatformPaymentSettings.findOne();
+  if (!settings) {
+    // Default initial platform payment accounts if none configured yet
+    settings = await PlatformPaymentSettings.create({
+      accounts: [
+        {
+          id: 'bkash-1',
+          provider: 'bKash',
+          type: 'Merchant',
+          accountNumber: '01700000000',
+          accountName: 'MASH ECO Billing',
+          instructions: 'Use bKash Merchant Payment (Make Payment option) or Send Money. Put your store domain as reference.',
+          isActive: true,
+        },
+        {
+          id: 'nagad-1',
+          provider: 'Nagad',
+          type: 'Personal',
+          accountNumber: '01800000000',
+          accountName: 'MASH ECO Accounts',
+          instructions: 'Use Nagad Send Money. Put your store domain as reference.',
+          isActive: true,
+        },
+        {
+          id: 'bank-1',
+          provider: 'Bank Transfer',
+          type: 'Bank Account',
+          accountNumber: '1234567890123',
+          accountName: 'MASH TECH LIMITED',
+          bankName: 'City Bank Ltd.',
+          branchName: 'Gulshan Branch',
+          instructions: 'Transfer to company bank account and upload TrxID / Deposit Slip.',
+          isActive: true,
+        },
+      ],
+      gatewaySettings: {
+        sslCommerzEnabled: false,
+        bKashCheckoutEnabled: false,
+        stripeEnabled: false,
+      },
+    });
+  }
+  return settings;
+};
+
+const updatePlatformPaymentSettings = async (payload: { accounts?: IPlatformPaymentAccount[]; gatewaySettings?: any }) => {
+  let settings = await PlatformPaymentSettings.findOne();
+  if (!settings) {
+    settings = new PlatformPaymentSettings();
+  }
+  if (payload.accounts) settings.accounts = payload.accounts;
+  if (payload.gatewaySettings) settings.gatewaySettings = payload.gatewaySettings;
+  await settings.save();
+  return settings;
+};
+
+const submitPaymentProof = async (tenantId: string, payload: {
+  purpose: 'addon' | 'package' | 'renewal' | 'other';
+  purposeTitle: string;
+  amount: number;
+  provider: string;
+  senderNumber: string;
+  transactionId: string;
+  note?: string;
+}) => {
+  if (!payload.transactionId || !payload.amount || !payload.provider || !payload.senderNumber) {
+    throw new CustomError(400, 'Please fill in all required payment details');
+  }
+
+  const existingTrx = await PlatformPaymentSubmission.findOne({ transactionId: payload.transactionId.trim() });
+  if (existingTrx) {
+    throw new CustomError(400, 'This Transaction ID (TrxID) has already been submitted');
+  }
+
+  const submissionData: any = {
+    tenantId,
+    purpose: payload.purpose || 'addon',
+    purposeTitle: payload.purposeTitle || 'Platform Payment',
+    amount: payload.amount,
+    provider: payload.provider,
+    senderNumber: payload.senderNumber,
+    transactionId: payload.transactionId.trim(),
+    status: 'pending',
+  };
+  if (payload.note) {
+    submissionData.note = payload.note;
+  }
+
+  const submission: any = await PlatformPaymentSubmission.create(submissionData);
+
+  const tenant = await Tenant.findById(tenantId);
+  const superAdmins = await User.find({ role: 'super_admin' });
+  for (const admin of superAdmins) {
+    await notificationService.createNotification(
+      admin._id,
+      'PAYMENT_SUBMITTED',
+      'New Payment Submitted',
+      `Store ${tenant?.name || tenant?.domain} submitted ৳${payload.amount} via ${payload.provider} (TrxID: ${payload.transactionId}).`,
+      submission._id,
+      tenantId
+    );
+  }
+
+  return submission;
+};
+
+const getMyPaymentSubmissions = async (tenantId: string) => {
+  return PlatformPaymentSubmission.find({ tenantId }).sort({ createdAt: -1 }).lean();
+};
+
+const getAllPaymentSubmissions = async () => {
+  return PlatformPaymentSubmission.find()
+    .populate('tenantId', 'name domain slug')
+    .sort({ createdAt: -1 })
+    .lean();
+};
+
+const verifyPaymentSubmission = async (id: string, status: 'approved' | 'rejected', adminFeedback?: string) => {
+  const submission = await PlatformPaymentSubmission.findById(id);
+  if (!submission) throw new CustomError(404, 'Payment submission not found');
+
+  submission.status = status;
+  if (adminFeedback) submission.adminFeedback = adminFeedback;
+  await submission.save();
+
+  const tenant = await Tenant.findById(submission.tenantId);
+  if (tenant && tenant.ownerId) {
+    await notificationService.createNotification(
+      tenant.ownerId,
+      status === 'approved' ? 'PAYMENT_VERIFIED' : 'PAYMENT_REJECTED',
+      status === 'approved' ? 'Payment Verified' : 'Payment Verification Rejected',
+      `Your payment of ৳${submission.amount} (TrxID: ${submission.transactionId}) has been ${status}. ${adminFeedback ? 'Note: ' + adminFeedback : ''}`,
+      submission._id,
+      submission.tenantId
+    );
+  }
+
+  return submission;
+};
+
+const updateMyPaymentSubmission = async (
+  tenantId: string,
+  id: string,
+  payload: {
+    purposeTitle?: string;
+    amount?: number;
+    provider?: string;
+    senderNumber?: string;
+    transactionId?: string;
+    note?: string;
+  }
+) => {
+  const submission = await PlatformPaymentSubmission.findOne({ _id: id, tenantId });
+  if (!submission) {
+    throw new CustomError(404, 'Payment submission not found');
+  }
+
+  if (submission.status !== 'pending') {
+    throw new CustomError(400, 'Cannot edit payment proof after it has been processed by admin');
+  }
+
+  if (payload.transactionId && payload.transactionId.trim() !== submission.transactionId) {
+    const existing = await PlatformPaymentSubmission.findOne({
+      transactionId: payload.transactionId.trim(),
+      _id: { $ne: id },
+    });
+    if (existing) {
+      throw new CustomError(400, 'This Transaction ID (TrxID) is already in use');
+    }
+    submission.transactionId = payload.transactionId.trim();
+  }
+
+  if (payload.senderNumber) submission.senderNumber = payload.senderNumber;
+  if (payload.provider) submission.provider = payload.provider;
+  if (payload.amount) submission.amount = payload.amount;
+  if (payload.purposeTitle) submission.purposeTitle = payload.purposeTitle;
+  if (payload.note !== undefined) submission.note = payload.note;
+
+  await submission.save();
+  return submission;
+};
+
+export const BillingService = {
+  getPlatformPaymentSettings,
+  updatePlatformPaymentSettings,
+  submitPaymentProof,
+  getMyPaymentSubmissions,
+  updateMyPaymentSubmission,
+  getAllPaymentSubmissions,
+  verifyPaymentSubmission,
+};
+

@@ -556,8 +556,8 @@ const deactivateAddonRequest = async (subscriptionId: string, addonId: string) =
     await notificationService.createNotification(
       tenant.ownerId,
       'ADDON_DEACTIVATED',
-      'Addon Placed on Hold',
-      `Your addon ${addonDoc?.name || ''} has been placed on hold / deactivated by Super Admin. Money collected remains credited.`,
+      'Addon Temporarily On Hold',
+      `Your addon ${addonDoc?.name || ''} is temporarily on hold. Please contact support or re-activate in your dashboard.`,
       addon._id,
       subscription.tenantId
     );

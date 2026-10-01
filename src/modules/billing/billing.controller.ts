@@ -3,6 +3,7 @@ import ApiResponse from '../../utils/apiResponse';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { Tenant } from '../tenant/tenant.model';
 import { Subscription } from '../subscription/subscription.model';
+import { BillingService } from './billing.service';
 
 const getBillingOverview = asyncHandler(async (req: Request, res: Response) => {
   const [totalMerchants, activeSubscriptions, pendingInvoices, allSubs] = await Promise.all([
@@ -52,6 +53,55 @@ const getBillingOverview = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 200, 'Billing stats retrieved', data);
 });
 
+const getPlatformPaymentSettings = asyncHandler(async (req: Request, res: Response) => {
+  const result = await BillingService.getPlatformPaymentSettings();
+  ApiResponse.sendSuccess(res, 200, 'Platform payment settings retrieved', result);
+});
+
+const updatePlatformPaymentSettings = asyncHandler(async (req: Request, res: Response) => {
+  const result = await BillingService.updatePlatformPaymentSettings(req.body);
+  ApiResponse.sendSuccess(res, 200, 'Platform payment settings updated', result);
+});
+
+const submitPaymentProof = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = (req as any).user.tenantId;
+  const result = await BillingService.submitPaymentProof(tenantId, req.body);
+  ApiResponse.sendSuccess(res, 201, 'Payment proof submitted successfully', result);
+});
+
+const getMyPaymentSubmissions = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = (req as any).user.tenantId;
+  const result = await BillingService.getMyPaymentSubmissions(tenantId);
+  ApiResponse.sendSuccess(res, 200, 'Payment submissions retrieved', result);
+});
+
+const updateMyPaymentSubmission = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = (req as any).user.tenantId;
+  const { id } = req.params;
+  const result = await BillingService.updateMyPaymentSubmission(tenantId, id as string, req.body);
+  ApiResponse.sendSuccess(res, 200, 'Payment submission updated successfully', result);
+});
+
+const getAllPaymentSubmissions = asyncHandler(async (req: Request, res: Response) => {
+  const result = await BillingService.getAllPaymentSubmissions();
+  ApiResponse.sendSuccess(res, 200, 'All payment submissions retrieved', result);
+});
+
+const verifyPaymentSubmission = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { status, adminFeedback } = req.body;
+  const result = await BillingService.verifyPaymentSubmission(id as string, status, adminFeedback);
+  ApiResponse.sendSuccess(res, 200, `Payment submission ${status}`, result);
+});
+
 export const BillingController = {
   getBillingOverview,
+  getPlatformPaymentSettings,
+  updatePlatformPaymentSettings,
+  submitPaymentProof,
+  getMyPaymentSubmissions,
+  updateMyPaymentSubmission,
+  getAllPaymentSubmissions,
+  verifyPaymentSubmission,
 };
+
