@@ -1,27 +1,27 @@
 {
   "name": "electronics-backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Electronics Multi-Tenant E-Commerce Backend Service",
+  "main": "dist/server.js",
   "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node ./dist/server.js",
     "lint": "tsc --noEmit",
     "lint:fix": "npm run lint",
     "prettier": "prettier --ignore-path .gitignore --write \"./src/**/*.+(js|ts|json)\"",
-    "prettier:fix": "prettier --write src",
-    "dev": "tsx watch src/server.ts",
-    "build": "tsc",
-    "start": "node ./dist/server.js"
+    "prettier:fix": "prettier --write src"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@types/qrcode": "^1.5.6",
-    "@types/speakeasy": "^2.0.10",
     "axios": "^1.19.0",
     "bcrypt": "^6.0.0",
-    "bcryptjs": "^3.0.3",
     "cloudinary": "^2.10.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
@@ -33,14 +33,12 @@
     "geoip-lite": "^2.0.3",
     "helmet": "^8.3.0",
     "hpp": "^0.2.3",
-    "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.9.1",
     "morgan": "^1.11.0",
     "multer": "^2.2.0",
     "ngeohash": "^0.6.4",
     "node-cron": "^4.6.0",
-    "node-fetch": "^3.3.2",
     "nodemailer": "^10.0.9",
     "otp-generator": "^4.0.1",
     "qrcode": "^1.5.4",
@@ -66,9 +64,10 @@
     "@types/node": "^26.1.2",
     "@types/nodemailer": "^8.0.1",
     "@types/otp-generator": "^4.0.2",
+    "@types/qrcode": "^1.5.6",
+    "@types/speakeasy": "^2.0.10",
     "eslint": "^10.8.0",
     "prettier": "^3.9.6",
-    "ts-node-dev": "^2.0.0",
     "tsx": "^4.23.9",
     "typescript": "^7.0.2"
   }
