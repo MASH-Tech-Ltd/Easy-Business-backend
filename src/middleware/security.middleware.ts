@@ -28,6 +28,11 @@ const refreshBlockedIpsCache = async () => {
 };
 
 export const ipBlocklistMiddleware = async (req: Request, res: Response, next: NextFunction) => {
+  // Always bypass blocklist for internal Socket.IO polling & websocket handshakes
+  if (req.originalUrl.startsWith('/socket.io')) {
+    return next();
+  }
+
   const ip = getClientIp(req);
 
   // Refresh cache if stale (non-blocking — awaited here intentionally for correctness)
