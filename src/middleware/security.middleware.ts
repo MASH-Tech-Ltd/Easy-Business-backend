@@ -80,6 +80,12 @@ setInterval(() => {
   }
 }, 30 * 60 * 1000).unref();
 
+// Helper to check if a User-Agent belongs to a legitimate search engine or social media crawler
+export const isLegitimateSearchBot = (userAgent?: string): boolean => {
+  if (!userAgent) return false;
+  return /googlebot|bingbot|yandexbot|baiduspider|duckduckbot|slurp|facebookexternalhit|twitterbot|linkedinbot|pinterestbot|applebot|whatsapp|telegram/i.test(userAgent);
+};
+
 // Helper to determine exact source app based on Origin/Referer
 export const getRequestedFrom = (req: Request): string => {
   const origin = req.headers.origin || req.headers.referer || '';
@@ -91,6 +97,7 @@ export const getRequestedFrom = (req: Request): string => {
 
 export const attackDetectionMiddleware = async (req: Request, res: Response, next: NextFunction) => {
   const ip = getClientIp(req);
+  const userAgent = (req.headers['user-agent'] as string) || '';
 
   // Never evaluate or block Cloudflare proxy node IPs or internal Socket.IO polling
   if (isCloudflareProxyIp(ip) || req.originalUrl.startsWith('/socket.io')) {
@@ -102,8 +109,20 @@ export const attackDetectionMiddleware = async (req: Request, res: Response, nex
   // Basic heuristic for malicious payload (XSS tags, inline JS)
   const isSuspicious = /(<script>|<\/script>|javascript:)/i.test(payloadStr);
 
+  // Detect bot probes targeting PHP / ASP / WordPress / exploit files in requested URL path
+  const isPhpBotProbe = /(\.(php|asp|aspx|jsp)($|\?)|wp-admin|wp-login|wp-content|xmlrpc|phpinfo|phpunit|setup-config|eval-stdin)/i.test(req.path);
+
   // Critical files and path traversal attempts → immediate 1-strike ban
-  const isCriticalAttack = /(\.env|config\.json|passwd|shadow|\.\.\/|\.\.\\|%2e%2e)/i.test(payloadStr);
+  // Note: /etc/passwd and /etc/shadow use exact path checks so product names, slugs, and search queries containing "shadow" (e.g. "Sense 2 Shadow Grey") are never falsely blocked.
+  const isCriticalAttack =
+    isPhpBotProbe ||
+    /(\.env($|\?)|config\.json|\/etc\/passwd|\/etc\/shadow|\.\.\/|\.\.\\|%2e%2e)/i.test(payloadStr);
+
+  // Allow legitimate search engine bots (Googlebot, Bingbot, etc.) to index public pages,
+  // provided the request does NOT contain explicit critical attack payloads.
+  if (isLegitimateSearchBot(userAgent) && !isCriticalAttack && !isSuspicious) {
+    return next();
+  }
 
   if (isCriticalAttack || isSuspicious) {
     try {
@@ -113,7 +132,9 @@ export const attackDetectionMiddleware = async (req: Request, res: Response, nex
         incidentType: 'ATTACK_DETECTED',
         endpoint: req.originalUrl,
         ipAddress: ip,
-        reason: isCriticalAttack
+        reason: isPhpBotProbe
+          ? 'Immediate Block: Automated PHP/WordPress bot exploit probe'
+          : isCriticalAttack
           ? 'Immediate Block: Attempted to access sensitive system files or path traversal'
           : 'Suspicious payload matching known XSS/NoSQLi signatures',
         requestedFrom,
