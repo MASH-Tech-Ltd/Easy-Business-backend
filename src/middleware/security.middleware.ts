@@ -87,8 +87,8 @@ export const getRequestedFrom = (req: Request): string => {
 export const attackDetectionMiddleware = async (req: Request, res: Response, next: NextFunction) => {
   const ip = getClientIp(req);
 
-  // Never evaluate or block Cloudflare proxy node IPs
-  if (isCloudflareProxyIp(ip)) {
+  // Never evaluate or block Cloudflare proxy node IPs or internal Socket.IO polling
+  if (isCloudflareProxyIp(ip) || req.originalUrl.startsWith('/socket.io')) {
     return next();
   }
 

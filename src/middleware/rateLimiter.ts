@@ -105,6 +105,11 @@ const handleRateLimitViolation = async (
   maxStrikes: number,
   reason: string,
 ) => {
+  // Never track or count rate limit violations for internal Socket.IO polling
+  if (req.originalUrl.startsWith('/socket.io')) {
+    return;
+  }
+
   try {
     await SecurityLog.create({
       incidentType: 'RATE_LIMIT',
@@ -152,6 +157,7 @@ export const globalRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   store: new BoundedMemoryStore(50_000),
+  skip: (req: Request) => req.originalUrl.startsWith('/socket.io'),
   keyGenerator: (req: Request) => getClientIp(req),
 });
 
