@@ -37,11 +37,11 @@ const deleteOrder = asyncHandler(async (req: Request, res: Response) => {
 });
 
 const trackOrder = asyncHandler(async (req: Request, res: Response) => {
-  const tenantIdFromMiddleware = (req as any).tenantId;
-  const tenantIdFromQuery = req.query.tenantId as string;
+  // SECURITY: tenantId MUST come from the tenant middleware (resolved via Host header),
+  // NEVER from req.query — a client-supplied tenantId could enumerate orders across tenants.
+  const tenantId = (req as any).tenantId;
   const phone = req.query.phone as string;
-  const tenantId = tenantIdFromMiddleware || tenantIdFromQuery;
-  
+
   if (!tenantId) {
     return ApiResponse.sendError(res, 400, 'Tenant context could not be resolved');
   }

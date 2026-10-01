@@ -20,11 +20,14 @@ export interface IFooterSetting {
   copyrightText?: string;
 }
 
+export interface IBannerImage {
+  public_id: string;
+  secure_url: string;
+}
+
 export interface IBannerSetting {
-  image?: {
-    public_id: string;
-    secure_url: string;
-  };
+  images?: IBannerImage[];
+  image?: IBannerImage;
   title?: string;
   subtitle?: string;
   description?: string;
@@ -76,11 +79,14 @@ const footerSchema = new Schema<IFooterSetting>({
   copyrightText: { type: String, default: '' },
 }, { _id: false });
 
+const bannerImageSchema = new Schema<IBannerImage>({
+  public_id: { type: String, default: '' },
+  secure_url: { type: String, default: '' },
+}, { _id: false });
+
 const bannerSchema = new Schema<IBannerSetting>({
-  image: {
-    public_id: { type: String, default: '' },
-    secure_url: { type: String, default: '' },
-  },
+  images: { type: [bannerImageSchema], default: [] },
+  image: { type: bannerImageSchema, default: () => ({}) },
   title: { type: String, default: '' },
   subtitle: { type: String, default: '' },
   description: { type: String, default: '' },

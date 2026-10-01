@@ -35,6 +35,22 @@ const allowedOrigins = [
 
 const customDomainCache = new Map<string, { exists: boolean; timestamp: number }>();
 const CORS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const CORS_CACHE_MAX_SIZE = 1000;      // never hold more than 1 000 domains in memory
+
+// Purge stale or excess CORS domain cache entries every 10 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of customDomainCache.entries()) {
+    if (now - val.timestamp > CORS_CACHE_TTL) {
+      customDomainCache.delete(key);
+    }
+  }
+  // Safety valve: if cache still too large after TTL sweep, drop oldest half
+  if (customDomainCache.size > CORS_CACHE_MAX_SIZE) {
+    const keys = [...customDomainCache.keys()];
+    keys.slice(0, Math.floor(keys.length / 2)).forEach(k => customDomainCache.delete(k));
+  }
+}, 10 * 60 * 1000).unref(); // .unref() so this timer never blocks process shutdown
 
 app.use(
   cors({
@@ -108,25 +124,24 @@ app.use(morgan(':real-ip - :method :url HTTP/:http-version :status :res[content-
   skip: (req) => req.url.startsWith('/socket.io')
 }));
 
-// Production-only strict security layers
+// Production-only strict rate limiting (dev has no real traffic)
 if (config.app.env === "production") {
   app.use(globalRateLimiter);
-  
-  // Custom Mongo Sanitize wrapper to avoid "Cannot set property query" TypeError
-  // because req.query is a getter in some environments and cannot be reassigned directly.
-  app.use((req, res, next) => {
-    try {
-      if (req.body) mongoSanitize.sanitize(req.body);
-      if (req.params) mongoSanitize.sanitize(req.params);
-      if (req.query) mongoSanitize.sanitize(req.query);
-    } catch (e) {
-      console.warn("MongoSanitize error:", e);
-    }
-    next();
-  });
-  
-  app.use(hpp()); // Prevent HTTP Parameter Pollution
 }
+
+// Always sanitize against NoSQL injection and HTTP parameter pollution in all environments
+app.use((req, res, next) => {
+  try {
+    if (req.body) mongoSanitize.sanitize(req.body);
+    if (req.params) mongoSanitize.sanitize(req.params);
+    if (req.query) mongoSanitize.sanitize(req.query as Record<string, unknown>);
+  } catch (e) {
+    console.warn("MongoSanitize error:", e);
+  }
+  next();
+});
+
+app.use(hpp()); // Prevent HTTP Parameter Pollution
 
 // Development environment hostname logger
 if (config.app.env === "development") {

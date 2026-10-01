@@ -156,19 +156,21 @@ const getProducts = asyncHandler(async (req: Request, res: Response) => {
   const query: any = { tenantId, status: "ACTIVE" };
   if (categoryId) query.categoryId = categoryId;
   if (search) {
+    // Sanitize: cap length to 100 chars to prevent ReDoS on unbounded $regex patterns
+    const safeSearch = (search as string).slice(0, 100);
     const matchingCategories = await Category.find({
       tenantId,
-      name: { $regex: search as string, $options: "i" },
+      name: { $regex: safeSearch, $options: "i" },
     }).select("_id");
     const categoryIds = matchingCategories.map((c) => c._id);
 
     query.$or = [
-      { title: { $regex: search as string, $options: "i" } },
-      { brand: { $regex: search as string, $options: "i" } },
+      { title: { $regex: safeSearch, $options: "i" } },
+      { brand: { $regex: safeSearch, $options: "i" } },
       { categoryId: { $in: categoryIds } },
     ];
   }
-  if (brand) query.brand = { $regex: brand as string, $options: "i" };
+  if (brand) query.brand = { $regex: (brand as string).slice(0, 50), $options: "i" };
   if (inStock === "true") query.stock = { $gt: 0 };
   if (minPrice !== undefined || maxPrice !== undefined) {
     query.discountedPrice = {};
@@ -176,15 +178,19 @@ const getProducts = asyncHandler(async (req: Request, res: Response) => {
     if (maxPrice !== undefined) query.discountedPrice.$lte = Number(maxPrice);
   }
 
+  // Cap limit at 100 — prevents client from dumping entire catalog in one request
+  const rawPageLimit = parseInt((limit as string) || '20', 10);
+  const safeLimit = Math.min(Math.max(1, isNaN(rawPageLimit) ? 20 : rawPageLimit), 100);
   const {
     page: pageNum,
     limit: limitNum,
     skip,
-  } = paginationHelper(page as string, (limit as string) || 20);
+  } = paginationHelper(page as string, String(safeLimit));
 
   if (sort === "random") {
+    // FIX: Must cast tenantId to ObjectId — Mongoose does NOT auto-cast in aggregate pipeline $match
     const randomDocs = await Product.aggregate([
-      { $match: query },
+      { $match: { ...query, tenantId: new Types.ObjectId(tenantId) } },
       { $sample: { size: Number(limitNum) } },
     ]);
     const populatedDocs = await Product.populate(randomDocs, {
@@ -251,7 +257,10 @@ const getBestsellingProducts = asyncHandler(
         });
     }
 
-    const limitNum = req.query.limit ? parseInt(req.query.limit as string) : 8;
+    // Cap at 50 — prevents client from requesting arbitrarily large result sets
+    const rawLimit = parseInt((req.query.limit as string) || '8', 10);
+    const limitNum = Math.min(Math.max(1, isNaN(rawLimit) ? 8 : rawLimit), 50);
+
     const bestsellers = await Product.find({ tenantId, status: "ACTIVE" })
       .populate("categoryId")
       .sort({ salesCount: -1 })
@@ -283,9 +292,13 @@ const getJustForYouProducts = asyncHandler(
         });
     }
 
-    const limitNum = req.query.limit ? parseInt(req.query.limit as string) : 8;
+    // Cap at 50 — prevents client from requesting arbitrarily large result sets
+    const rawLimit = parseInt((req.query.limit as string) || '8', 10);
+    const limitNum = Math.min(Math.max(1, isNaN(rawLimit) ? 8 : rawLimit), 50);
+
+    // FIX: Cast tenantId to ObjectId — Mongoose does NOT auto-cast inside aggregate $match
     const randomDocs = await Product.aggregate([
-      { $match: { tenantId, status: "ACTIVE" } },
+      { $match: { tenantId: new Types.ObjectId(tenantId), status: "ACTIVE" } },
       { $sample: { size: limitNum } },
     ]);
     const populatedDocs = await Product.populate(randomDocs, {

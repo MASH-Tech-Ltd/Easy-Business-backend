@@ -3,7 +3,7 @@ import { Request } from 'express';
 /**
  * Normalizes IPv4 / IPv6 addresses and extracts IPv4 if IPv6-mapped (e.g. ::ffff:192.168.1.1)
  */
-const cleanIp = (ip: string): string => {
+export const cleanIp = (ip: string): string => {
   if (!ip) return '127.0.0.1';
   let cleaned = ip.trim();
   if (cleaned.includes(',')) {
@@ -14,6 +14,31 @@ const cleanIp = (ip: string): string => {
     cleaned = cleaned.replace('::ffff:', '');
   }
   return cleaned;
+};
+
+/**
+ * Checks if an IP address is a Cloudflare Pseudo IPv4 (dummy IPv4) address.
+ * When Cloudflare's "Pseudo IPv4" setting is enabled, IPv6 client addresses are converted
+ * into synthetic Class E (240.0.0.0/4) or CGNAT (100.64.0.0/10) IPv4 addresses.
+ * These synthetic addresses are invalid for IP geolocation lookups (e.g. ip-api.com returns reserved range).
+ */
+export const isPseudoIpv4 = (ip: string): boolean => {
+  if (!ip) return false;
+  const cleaned = cleanIp(ip);
+  const parts = cleaned.split('.').map(Number);
+  if (parts.length !== 4) return false;
+  const a = parts[0];
+  const b = parts[1];
+
+  if (a === undefined || b === undefined || isNaN(a) || isNaN(b)) return false;
+
+  // Class E experimental range (240.0.0.0 – 255.255.255.255)
+  if (a >= 240 && a <= 255) return true;
+
+  // Carrier-Grade NAT (CGNAT) range (100.64.0.0 – 100.127.255.255)
+  if (a === 100 && b >= 64 && b <= 127) return true;
+
+  return false;
 };
 
 /**
@@ -51,31 +76,14 @@ export const isCloudflareProxyIp = (ip: string): boolean => {
 
 /**
  * Retrieves the REAL end-user client IP address from incoming Express request headers.
- *
- * Priority order:
- *  1. `x-tenant-client-ip` — Custom header set by our Next.js SSR server.
- *     WHY NEEDED: The traffic path is Browser → Cloudflare → Next.js → Cloudflare → Backend.
- *     On the SECOND hop (Next.js → CF → Backend), Cloudflare overwrites `cf-connecting-ip`
- *     with the Next.js server IP. Standard headers like `x-forwarded-for` are also modified by CF.
- *     `x-tenant-client-ip` is a custom non-standard header that Cloudflare does NOT recognize
- *     and therefore does NOT overwrite — so it carries the original browser IP intact.
- *     SECURITY: This header is only trusted on storefront routes protected by
- *     `x-storefront-api-key` (storefrontAuth middleware), preventing IP spoofing from
- *     untrusted external callers who don't have the API key.
- *
- *  2. `cf-connecting-ip` — For direct browser requests: Browser → CF → Backend (no SSR hop).
- *
- *  3. `x-forwarded-for` — Standard reverse proxy fallback.
- *  4. `x-real-ip` — Nginx real IP header fallback.
- *  5. `req.ip` / socket address — Last resort.
+ * Bypasses Cloudflare's synthetic Pseudo IPv4 (dummy IPv4) addresses if present,
+ * preferring the visitor's real IPv6 (from cf-connecting-ipv6) or real IPv4.
  */
 export const getClientIp = (req: Request): string => {
-  // 1. Custom SSR-forwarded header (Next.js → CF → Backend path)
-  // CF does not overwrite unknown custom headers, so this arrives intact.
-  // Only trusted on API-key-protected storefront routes — not spoofable by external callers.
-  const tenantClientIp = req.headers['x-tenant-client-ip'];
-  if (tenantClientIp) {
-    const rawIp = Array.isArray(tenantClientIp) ? tenantClientIp[0] : tenantClientIp;
+  // 1. Cloudflare explicit real IPv6 header (sent when Pseudo IPv4 is enabled)
+  const cfIpv6 = req.headers['cf-connecting-ipv6'];
+  if (cfIpv6) {
+    const rawIp = Array.isArray(cfIpv6) ? cfIpv6[0] : cfIpv6;
     if (rawIp && typeof rawIp === 'string' && rawIp.trim()) {
       const cleaned = cleanIp(rawIp);
       if (cleaned && cleaned !== '127.0.0.1' && cleaned !== '::1') {
@@ -84,7 +92,19 @@ export const getClientIp = (req: Request): string => {
     }
   }
 
-  // 2. Standard X-Forwarded-For header (Provides original IP if passing through multiple proxies)
+  // 2. Custom SSR-forwarded header (Next.js → CF → Backend path)
+  const tenantClientIp = req.headers['x-tenant-client-ip'];
+  if (tenantClientIp) {
+    const rawIp = Array.isArray(tenantClientIp) ? tenantClientIp[0] : tenantClientIp;
+    if (rawIp && typeof rawIp === 'string' && rawIp.trim()) {
+      const cleaned = cleanIp(rawIp);
+      if (cleaned && cleaned !== '127.0.0.1' && cleaned !== '::1' && !isPseudoIpv4(cleaned)) {
+        return cleaned;
+      }
+    }
+  }
+
+  // 3. Standard X-Forwarded-For header (first non-proxy, non-pseudo IP)
   const forwarded = req.headers['x-forwarded-for'];
   if (forwarded) {
     const rawForwarded = Array.isArray(forwarded) ? forwarded[0] : forwarded;
@@ -92,38 +112,54 @@ export const getClientIp = (req: Request): string => {
       const parts = rawForwarded.split(',');
       for (const part of parts) {
         const clientIp = cleanIp(part);
-        if (clientIp && !isCloudflareProxyIp(clientIp) && clientIp !== '127.0.0.1' && clientIp !== '::1') {
+        if (
+          clientIp &&
+          !isCloudflareProxyIp(clientIp) &&
+          !isPseudoIpv4(clientIp) &&
+          clientIp !== '127.0.0.1' &&
+          clientIp !== '::1'
+        ) {
           return clientIp;
         }
       }
     }
   }
 
-  // 3. Cloudflare header (direct browser → CF → Backend)
+  // 4. Cloudflare cf-connecting-ip header
   const cfIp = req.headers['cf-connecting-ip'] || req.headers['x-client-ip'];
   if (cfIp) {
     const rawIp = Array.isArray(cfIp) ? cfIp[0] : cfIp;
     if (rawIp && typeof rawIp === 'string' && rawIp.trim()) {
       const cleaned = cleanIp(rawIp);
-      if (cleaned && cleaned !== '127.0.0.1' && cleaned !== '::1') {
+      if (cleaned && cleaned !== '127.0.0.1' && cleaned !== '::1' && !isPseudoIpv4(cleaned)) {
         return cleaned;
       }
     }
   }
 
-  // 4. X-Real-IP header
+  // 5. X-Real-IP header
   const realIp = req.headers['x-real-ip'];
   if (realIp) {
     const rawReal = Array.isArray(realIp) ? realIp[0] : realIp;
     if (rawReal && typeof rawReal === 'string' && rawReal.trim()) {
       const cleaned = cleanIp(rawReal);
-      if (cleaned && cleaned !== '127.0.0.1' && cleaned !== '::1') {
+      if (cleaned && cleaned !== '127.0.0.1' && cleaned !== '::1' && !isPseudoIpv4(cleaned)) {
         return cleaned;
       }
     }
   }
 
-  // 5. Express req.ip or socket address fallback
+  // Fallback: If only pseudo IPv4 or tenantClientIp exists, use tenantClientIp or cfIp
+  if (tenantClientIp) {
+    const rawIp = Array.isArray(tenantClientIp) ? tenantClientIp[0] : tenantClientIp;
+    if (rawIp && typeof rawIp === 'string' && rawIp.trim()) return cleanIp(rawIp);
+  }
+  if (cfIp) {
+    const rawIp = Array.isArray(cfIp) ? cfIp[0] : cfIp;
+    if (rawIp && typeof rawIp === 'string' && rawIp.trim()) return cleanIp(rawIp);
+  }
+
+  // 6. Express req.ip or socket address fallback
   const rawIp = req.ip || req.socket.remoteAddress || '127.0.0.1';
   return cleanIp(rawIp);
 };
