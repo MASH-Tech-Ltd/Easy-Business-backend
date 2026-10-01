@@ -55,6 +55,9 @@ const createProduct = asyncHandler(async (req: Request, res: Response) => {
 
   req.body.images = [];
   if (req.files && Array.isArray(req.files)) {
+    if (req.files.length > 4) {
+      return ApiResponse.sendError(res, 400, "You can upload a maximum of 4 images per product.");
+    }
     for (const file of req.files) {
       const uploadResult = await uploadCloudinary(file.path);
       req.body.images.push({
@@ -174,7 +177,11 @@ const updateProduct = asyncHandler(async (req: Request, res: Response) => {
   }
 
   if (req.body.existingImages !== undefined || newImages.length > 0) {
-    req.body.images = [...existingImages, ...newImages];
+    const combinedImages = [...existingImages, ...newImages];
+    if (combinedImages.length > 4) {
+      return ApiResponse.sendError(res, 400, "You can upload a maximum of 4 images per product.");
+    }
+    req.body.images = combinedImages;
   }
 
   // SECURITY FIX (IDOR): Pass tenantId so service scopes the query to caller's tenant
