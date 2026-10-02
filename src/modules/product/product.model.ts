@@ -65,5 +65,10 @@ productSchema.pre('validate', function() {
 });
 
 productSchema.index({ tenantId: 1, slug: 1 }, { unique: true });
+productSchema.index({ tenantId: 1, status: 1, stock: -1, createdAt: -1 });
+productSchema.index({ tenantId: 1, status: 1, categoryId: 1, stock: -1, createdAt: -1 });
+productSchema.index({ tenantId: 1, status: 1, salesCount: -1, createdAt: -1 });
+productSchema.index({ tenantId: 1, status: 1, brand: 1, createdAt: -1 });
+productSchema.index({ title: 'text', brand: 'text' });
 
 export const Product = model<IProduct>('Product', productSchema);

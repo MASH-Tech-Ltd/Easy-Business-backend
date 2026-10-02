@@ -130,10 +130,12 @@ const getProductsByTenant = async (tenantId: string, query: any): Promise<{ data
 const getBestsellingProducts = async (tenantId: string, limit: number = 8): Promise<IProduct[]> => {
   const result = await Product.find({ 
     tenantId: new Types.ObjectId(tenantId), 
-    status: 'ACTIVE' 
+    status: 'ACTIVE',
+    salesCount: { $gt: 20 },
+    stock: { $gt: 0 }
   })
     .populate('categoryId')
-    .sort({ salesCount: -1 })
+    .sort({ salesCount: -1, createdAt: -1 })
     .limit(limit);
   return result;
 };

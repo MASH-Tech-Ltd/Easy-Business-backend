@@ -67,20 +67,17 @@ const updateTheme = asyncHandler(async (req: Request, res: Response) => {
     fileCursor++;
   }
 
-  // Clean up removed images from Cloudinary
+  // Identify removed images for Cloudinary cleanup AFTER database update succeeds
   const oldImages: Array<{ public_id?: string }> = [
     ...(existingTheme?.banner?.images || []),
     ...(existingTheme?.banner?.image?.public_id ? [existingTheme.banner.image] : [])
   ];
   const retainedPublicIds = new Set(finalBannerImages.map(img => img.public_id).filter(Boolean));
+  const bannerImagesToDelete: string[] = [];
 
   for (const oldImg of oldImages) {
     if (oldImg?.public_id && !retainedPublicIds.has(oldImg.public_id)) {
-      try {
-        await deleteCloudinary(oldImg.public_id, 'image');
-      } catch (error) {
-        console.error('Failed to delete old banner image from Cloudinary:', error);
-      }
+      bannerImagesToDelete.push(oldImg.public_id);
     }
   }
 
@@ -102,6 +99,14 @@ const updateTheme = asyncHandler(async (req: Request, res: Response) => {
   }
   
   const result = await ThemeService.updateTheme(tenantId, payload);
+
+  // Delete old banner images ONLY AFTER successful database update
+  if (bannerImagesToDelete.length > 0) {
+    for (const publicId of bannerImagesToDelete) {
+      deleteCloudinary(publicId, 'image').catch((err) => console.error('Failed to delete old banner image from Cloudinary:', err));
+    }
+  }
+
   ApiResponse.sendSuccess(res, 200, 'Theme updated successfully', result);
 });
 

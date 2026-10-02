@@ -41,4 +41,8 @@ const orderSchema = new Schema<IOrder>(
   }
 );
 
+orderSchema.index({ tenantId: 1, createdAt: -1 });
+orderSchema.index({ tenantId: 1, status: 1, createdAt: -1 });
+orderSchema.index({ customerPhone: 1 });
+
 export const Order = model<IOrder>('Order', orderSchema);

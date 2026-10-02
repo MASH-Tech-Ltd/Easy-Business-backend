@@ -6,22 +6,28 @@ import { uploadCloudinary, deleteCloudinary } from "../../helpers/cloudinary";
 
 const updateProfile = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user._id;
+  let oldAvatarPublicId: string | null = null;
 
   if (req.file) {
     const oldUser = await UserService.getUserById(userId);
+    if (oldUser && oldUser.avatar && oldUser.avatar.public_id) {
+      oldAvatarPublicId = oldUser.avatar.public_id;
+    }
     
     const uploadResult = await uploadCloudinary(req.file.path);
     req.body.avatar = {
       public_id: uploadResult.public_id,
       secure_url: uploadResult.secure_url
     };
-
-    if (oldUser && oldUser.avatar && oldUser.avatar.public_id) {
-      await deleteCloudinary(oldUser.avatar.public_id).catch(err => console.error("Failed to delete old avatar", err));
-    }
   }
 
   const result = await UserService.updateProfile(userId, req.body);
+
+  // Delete old avatar ONLY AFTER successful database update
+  if (oldAvatarPublicId && req.file) {
+    deleteCloudinary(oldAvatarPublicId, 'image').catch(err => console.error("Failed to delete old avatar from Cloudinary:", err));
+  }
+
   ApiResponse.sendSuccess(res, 200, "Profile updated successfully", result);
 });
 

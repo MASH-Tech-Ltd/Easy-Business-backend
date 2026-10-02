@@ -132,3 +132,31 @@ export const deleteCloudinary = async (
     );
   }
 };
+
+export const extractPublicIdFromUrl = (url: string): string | null => {
+  if (!url || typeof url !== 'string' || !url.includes('cloudinary.com')) return null;
+  try {
+    const parts = url.split('/upload/');
+    if (parts.length < 2 || !parts[1]) return null;
+    let path: string = parts[1];
+    path = path.replace(/^v\d+\//, '');
+    const dotIdx = path.lastIndexOf('.');
+    if (dotIdx !== -1) {
+      path = path.substring(0, dotIdx);
+    }
+    return path || null;
+  } catch (e) {
+    return null;
+  }
+};
+
+export const deleteCloudinaryFromUrl = async (
+  url: string,
+  resourceType: CloudinaryResourceType = 'image',
+): Promise<unknown> => {
+  const publicId = extractPublicIdFromUrl(url);
+  if (publicId) {
+    return deleteCloudinary(publicId, resourceType);
+  }
+  return null;
+};

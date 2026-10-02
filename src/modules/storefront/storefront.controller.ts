@@ -154,7 +154,19 @@ const getProducts = asyncHandler(async (req: Request, res: Response) => {
   } = req.query;
 
   const query: any = { tenantId, status: "ACTIVE" };
-  if (categoryId) query.categoryId = categoryId;
+  if (categoryId) {
+    const rawCatStr = String(categoryId).trim();
+    if (Types.ObjectId.isValid(rawCatStr)) {
+      query.categoryId = new Types.ObjectId(rawCatStr);
+    } else {
+      const foundCat = await Category.findOne({ tenantId, slug: rawCatStr }).select("_id");
+      if (foundCat) {
+        query.categoryId = foundCat._id;
+      } else {
+        query.categoryId = rawCatStr;
+      }
+    }
+  }
   if (search) {
     // Sanitize: cap length to 100 chars to prevent ReDoS on unbounded $regex patterns
     const safeSearch = (search as string).slice(0, 100);
@@ -171,7 +183,11 @@ const getProducts = asyncHandler(async (req: Request, res: Response) => {
     ];
   }
   if (brand) query.brand = { $regex: (brand as string).slice(0, 50), $options: "i" };
-  if (inStock === "true") query.stock = { $gt: 0 };
+  if (inStock === "true") {
+    query.$expr = {
+      $gt: [{ $convert: { input: "$stock", to: "int", onError: 0, onNull: 0 } }, 0]
+    };
+  }
   if (minPrice !== undefined || maxPrice !== undefined) {
     query.discountedPrice = {};
     if (minPrice !== undefined) query.discountedPrice.$gte = Number(minPrice);
@@ -187,50 +203,110 @@ const getProducts = asyncHandler(async (req: Request, res: Response) => {
     skip,
   } = paginationHelper(page as string, String(safeLimit));
 
-  if (sort === "random") {
-    // FIX: Must cast tenantId to ObjectId — Mongoose does NOT auto-cast in aggregate pipeline $match
-    const randomDocs = await Product.aggregate([
-      { $match: { ...query, tenantId: new Types.ObjectId(tenantId) } },
-      { $sample: { size: Number(limitNum) } },
-    ]);
-    const populatedDocs = await Product.populate(randomDocs, {
-      path: "categoryId",
-    });
-    const total = await Product.countDocuments(query);
-
-    return ApiResponse.sendSuccess(
-      res,
-      200,
-      "Products retrieved successfully",
-      {
-        data: populatedDocs,
-        pagination: {
-          total,
-          page: pageNum,
-          totalPages: Math.ceil(total / limitNum),
-        },
-      },
-    );
+  const matchQuery: any = { ...query };
+  if (matchQuery.tenantId && typeof matchQuery.tenantId === 'string') {
+    matchQuery.tenantId = new Types.ObjectId(matchQuery.tenantId);
+  }
+  if (matchQuery.categoryId && typeof matchQuery.categoryId === 'string' && Types.ObjectId.isValid(matchQuery.categoryId)) {
+    matchQuery.categoryId = new Types.ObjectId(matchQuery.categoryId);
   }
 
-  let productsQuery = Product.find(query).populate("categoryId");
-  if (sort === "price_asc")
-    productsQuery = productsQuery.sort({ discountedPrice: 1 });
-  else if (sort === "price_desc")
-    productsQuery = productsQuery.sort({ discountedPrice: -1 });
-  else if (sort === "newest")
-    productsQuery = productsQuery.sort({ createdAt: -1 });
-  else if (sort === "discount_desc")
-    productsQuery = productsQuery.sort({ saveAmount: -1 });
-  else if (sort === "brand") productsQuery = productsQuery.sort({ brand: 1 });
-  else productsQuery = productsQuery.sort({ createdAt: -1 });
+  if (sort === "random") {
+    const inStockMatch = {
+      ...matchQuery,
+      $expr: {
+        $gt: [
+          { $convert: { input: "$stock", to: "int", onError: 0, onNull: 0 } },
+          0
+        ]
+      }
+    };
+    const outOfStockMatch = {
+      ...matchQuery,
+      $expr: {
+        $lte: [
+          { $convert: { input: "$stock", to: "int", onError: 0, onNull: 0 } },
+          0
+        ]
+      }
+    };
 
-  productsQuery = productsQuery.skip(skip).limit(limitNum);
+    const inStockCount = await Product.countDocuments(inStockMatch);
+    let sampleDocs: any[] = [];
 
-  const [products, total] = await Promise.all([
-    productsQuery,
+    if (inStockCount > 0) {
+      const inStockRandom = await Product.aggregate([
+        { $match: inStockMatch },
+        { $sample: { size: limitNum } }
+      ]);
+      sampleDocs = inStockRandom;
+    }
+
+    if (sampleDocs.length < limitNum) {
+      const needed = limitNum - sampleDocs.length;
+      const outOfStockRandom = await Product.aggregate([
+        { $match: outOfStockMatch },
+        { $sample: { size: needed } }
+      ]);
+      sampleDocs = [...sampleDocs, ...outOfStockRandom];
+    }
+
+    const populatedDocs = await Product.populate(sampleDocs, { path: "categoryId" });
+    const total = await Product.countDocuments(query);
+
+    return ApiResponse.sendSuccess(res, 200, "Products retrieved successfully", {
+      data: populatedDocs,
+      pagination: {
+        total,
+        page: pageNum,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    });
+  }
+
+  let secondarySort: any = { createdAt: -1 };
+  if (sort === "price_asc") secondarySort = { discountedPrice: 1 };
+  else if (sort === "price_desc") secondarySort = { discountedPrice: -1 };
+  else if (sort === "newest") secondarySort = { createdAt: -1 };
+  else if (sort === "discount_desc") secondarySort = { saveAmount: -1 };
+  else if (sort === "brand") secondarySort = { brand: 1 };
+
+  const pipeline: any[] = [
+    { $match: matchQuery },
+    {
+      $addFields: {
+        inStockSort: {
+          $cond: [
+            {
+              $gt: [
+                {
+                  $convert: {
+                    input: "$stock",
+                    to: "int",
+                    onError: 0,
+                    onNull: 0
+                  }
+                },
+                0
+              ]
+            },
+            1,
+            0
+          ]
+        }
+      }
+    },
+    { $sort: { inStockSort: -1, ...secondarySort } },
+    { $skip: skip },
+    { $limit: limitNum }
+  ];
+
+  const [rawProducts, total] = await Promise.all([
+    Product.aggregate(pipeline),
     Product.countDocuments(query),
   ]);
+
+  const products = await Product.populate(rawProducts, { path: "categoryId" });
 
   ApiResponse.sendSuccess(res, 200, "Products retrieved successfully", {
     data: products,
@@ -261,9 +337,19 @@ const getBestsellingProducts = asyncHandler(
     const rawLimit = parseInt((req.query.limit as string) || '8', 10);
     const limitNum = Math.min(Math.max(1, isNaN(rawLimit) ? 8 : rawLimit), 50);
 
-    const bestsellers = await Product.find({ tenantId, status: "ACTIVE" })
+    const bestsellers = await Product.find({ 
+      tenantId, 
+      status: "ACTIVE", 
+      salesCount: { $gt: 20 },
+      $expr: {
+        $gt: [
+          { $convert: { input: "$stock", to: "int", onError: 0, onNull: 0 } },
+          0
+        ]
+      }
+    })
       .populate("categoryId")
-      .sort({ salesCount: -1 })
+      .sort({ salesCount: -1, createdAt: -1 })
       .limit(limitNum);
 
     ApiResponse.sendSuccess(
@@ -272,6 +358,49 @@ const getBestsellingProducts = asyncHandler(
       "Bestselling products retrieved successfully",
       {
         data: bestsellers,
+      },
+    );
+  },
+);
+
+const getNewArrivals = asyncHandler(
+  async (req: Request, res: Response) => {
+    const tenantSlug = req.params.tenantSlug as string;
+    const tenantId = await resolveTenant(tenantSlug);
+    const { storeDown } = await checkStoreSubscription(tenantId);
+    if (storeDown) {
+      return res
+        .status(402)
+        .json({
+          success: false,
+          storeDown: true,
+          message: "Store subscription inactive or expired",
+        });
+    }
+
+    const rawLimit = parseInt((req.query.limit as string) || '8', 10);
+    const limitNum = Math.min(Math.max(1, isNaN(rawLimit) ? 8 : rawLimit), 50);
+
+    const newArrivals = await Product.find({
+      tenantId,
+      status: "ACTIVE",
+      $expr: {
+        $gt: [
+          { $convert: { input: "$stock", to: "int", onError: 0, onNull: 0 } },
+          0
+        ]
+      }
+    })
+      .populate("categoryId")
+      .sort({ createdAt: -1 })
+      .limit(limitNum);
+
+    ApiResponse.sendSuccess(
+      res,
+      200,
+      "New arrival products retrieved successfully",
+      {
+        data: newArrivals,
       },
     );
   },
@@ -296,11 +425,44 @@ const getJustForYouProducts = asyncHandler(
     const rawLimit = parseInt((req.query.limit as string) || '8', 10);
     const limitNum = Math.min(Math.max(1, isNaN(rawLimit) ? 8 : rawLimit), 50);
 
-    // FIX: Cast tenantId to ObjectId — Mongoose does NOT auto-cast inside aggregate $match
-    const randomDocs = await Product.aggregate([
-      { $match: { tenantId: new Types.ObjectId(tenantId), status: "ACTIVE" } },
+    const objectTenantId = new Types.ObjectId(tenantId);
+    const inStockDocs = await Product.aggregate([
+      {
+        $match: {
+          tenantId: objectTenantId,
+          status: "ACTIVE",
+          $expr: {
+            $gt: [
+              { $convert: { input: "$stock", to: "int", onError: 0, onNull: 0 } },
+              0
+            ]
+          }
+        }
+      },
       { $sample: { size: limitNum } },
     ]);
+    let randomDocs = inStockDocs;
+
+    if (randomDocs.length < limitNum) {
+      const needed = limitNum - randomDocs.length;
+      const outOfStockDocs = await Product.aggregate([
+        {
+          $match: {
+            tenantId: objectTenantId,
+            status: "ACTIVE",
+            $expr: {
+              $lte: [
+                { $convert: { input: "$stock", to: "int", onError: 0, onNull: 0 } },
+                0
+              ]
+            }
+          }
+        },
+        { $sample: { size: needed } },
+      ]);
+      randomDocs = [...randomDocs, ...outOfStockDocs];
+    }
+
     const populatedDocs = await Product.populate(randomDocs, {
       path: "categoryId",
     });
@@ -415,6 +577,7 @@ export const StorefrontController = {
   getTheme,
   getProducts,
   getBestsellingProducts,
+  getNewArrivals,
   getJustForYouProducts,
   getProductBySlug,
   getCategories,

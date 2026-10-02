@@ -19,6 +19,7 @@ router.get('/:tenantSlug/brands', storefrontPublicLimiter, StorefrontController.
 
 // ── Product listing / detail (high traffic — generous limit via storefrontPublicLimiter)
 router.get('/:tenantSlug/products/bestsellers', storefrontPublicLimiter, StorefrontController.getBestsellingProducts);
+router.get('/:tenantSlug/products/new-arrivals', storefrontPublicLimiter, StorefrontController.getNewArrivals);
 router.get('/:tenantSlug/products/just-for-you', storefrontPublicLimiter, StorefrontController.getJustForYouProducts);
 router.get('/:tenantSlug/products/:slug', storefrontPublicLimiter, StorefrontController.getProductBySlug);
 

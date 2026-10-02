@@ -24,4 +24,6 @@ const subscriptionSchema = new Schema<ISubscription>(
   }
 );
 
+subscriptionSchema.index({ tenantId: 1, status: 1, endDate: -1 });
+
 export const Subscription = model<ISubscription>('Subscription', subscriptionSchema);

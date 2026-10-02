@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { ProductService } from "./product.service";
 import ApiResponse from "../../utils/apiResponse";
 import { asyncHandler } from "../../utils/asyncHandler";
-import { uploadCloudinary } from "../../helpers/cloudinary";
+import { uploadCloudinary, deleteCloudinary } from "../../helpers/cloudinary";
 import { SubscriptionService } from "../subscription/subscription.service";
 import CustomError from "../../helpers/CustomError";
 import { Product } from "./product.model";
@@ -119,6 +119,7 @@ const getSingleProduct = asyncHandler(async (req: Request, res: Response) => {
 const updateProduct = asyncHandler(async (req: Request, res: Response) => {
   // SECURITY FIX (IDOR): Get tenantId from JWT, not from request body
   const tenantId = (req as any).user.tenantId;
+  const imagesToDelete: string[] = [];
 
   if (req.body.features && typeof req.body.features === "string") {
     try {
@@ -156,7 +157,7 @@ const updateProduct = asyncHandler(async (req: Request, res: Response) => {
     req.body.isAuthentic = req.body.isAuthentic === "true";
   }
 
-  let existingImages = [];
+  let existingImages: any[] = [];
   if (req.body.existingImages) {
     try {
       existingImages = JSON.parse(req.body.existingImages);
@@ -165,7 +166,16 @@ const updateProduct = asyncHandler(async (req: Request, res: Response) => {
     }
   }
 
-  let newImages = [];
+  let imageManifest: Array<{ type: 'existing' | 'new'; secure_url?: string; newIndex?: number }> | null = null;
+  if (req.body.imageManifest) {
+    try {
+      imageManifest = JSON.parse(req.body.imageManifest);
+    } catch (e) {
+      imageManifest = null;
+    }
+  }
+
+  let newImages: any[] = [];
   if (req.files && Array.isArray(req.files) && req.files.length > 0) {
     for (const file of req.files) {
       const uploadResult = await uploadCloudinary(file.path);
@@ -177,12 +187,63 @@ const updateProduct = asyncHandler(async (req: Request, res: Response) => {
   }
 
   if (req.body.existingImages !== undefined || newImages.length > 0) {
-    const combinedImages = [...existingImages, ...newImages];
+    let combinedImages: any[] = [];
+
+    if (imageManifest && Array.isArray(imageManifest) && imageManifest.length > 0) {
+      const existingMap = new Map<string, any>();
+      existingImages.forEach(img => {
+        if (img && img.secure_url) {
+          existingMap.set(img.secure_url, img);
+        }
+      });
+
+      imageManifest.forEach(item => {
+        if (item.type === 'existing' && item.secure_url && existingMap.has(item.secure_url)) {
+          combinedImages.push(existingMap.get(item.secure_url));
+        } else if (item.type === 'new' && typeof item.newIndex === 'number' && newImages[item.newIndex]) {
+          combinedImages.push(newImages[item.newIndex]);
+        }
+      });
+
+      // Append any remaining images just in case
+      existingImages.forEach(img => {
+        if (!combinedImages.some(ci => ci.secure_url === img.secure_url)) combinedImages.push(img);
+      });
+      newImages.forEach(img => {
+        if (!combinedImages.some(ci => ci.secure_url === img.secure_url)) combinedImages.push(img);
+      });
+    } else {
+      combinedImages = [...existingImages, ...newImages];
+    }
+
     if (combinedImages.length > 4) {
       return ApiResponse.sendError(res, 400, "You can upload a maximum of 4 images per product.");
     }
-    req.body.images = combinedImages;
+
+    // Identify replaced or removed images for Cloudinary cleanup AFTER database update succeeds
+    try {
+      const existingProduct = await Product.findById(req.params.id).select('images').lean();
+      if (existingProduct && existingProduct.images && existingProduct.images.length > 0) {
+        const retainedPublicIds = new Set(combinedImages.map((img: any) => img.public_id).filter(Boolean));
+        for (const oldImg of existingProduct.images) {
+          if (oldImg?.public_id && !retainedPublicIds.has(oldImg.public_id)) {
+            imagesToDelete.push(oldImg.public_id);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Error identifying images for Cloudinary cleanup:", e);
+    }
+
+    // CRITICAL FIX: Strip subdocument _id so Mongoose replaces array in exact order instead of matching subdocuments by _id in old slots
+    req.body.images = combinedImages.map((img: any) => ({
+      public_id: img.public_id,
+      secure_url: img.secure_url,
+    }));
   }
+
+  delete req.body.existingImages;
+  delete req.body.imageManifest;
 
   // SECURITY FIX (IDOR): Pass tenantId so service scopes the query to caller's tenant
   const result = await ProductService.updateProduct(
@@ -190,6 +251,14 @@ const updateProduct = asyncHandler(async (req: Request, res: Response) => {
     tenantId,
     req.body,
   );
+
+  // Delete removed old images ONLY AFTER successful database update
+  if (imagesToDelete.length > 0) {
+    for (const publicId of imagesToDelete) {
+      deleteCloudinary(publicId, 'image').catch((err: any) => console.error("Cloudinary delete error:", err));
+    }
+  }
+
   ApiResponse.sendSuccess(res, 200, "Product updated successfully", result);
 });
 

@@ -37,4 +37,7 @@ categorySchema.pre('findOneAndUpdate', function() {
   }
 });
 
+categorySchema.index({ tenantId: 1, slug: 1 }, { unique: true });
+categorySchema.index({ tenantId: 1, status: 1 });
+
 export const Category = model<ICategory>('Category', categorySchema);

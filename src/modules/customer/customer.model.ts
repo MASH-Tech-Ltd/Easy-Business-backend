@@ -15,4 +15,7 @@ const customerSchema = new Schema<ICustomer>(
   }
 );
 
+customerSchema.index({ tenantId: 1, createdAt: -1 });
+customerSchema.index({ tenantId: 1, phone: 1 });
+
 export const Customer = model<ICustomer>('Customer', customerSchema);

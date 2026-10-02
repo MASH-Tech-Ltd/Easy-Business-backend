@@ -33,6 +33,11 @@ export interface IBannerSetting {
   description?: string;
   buttonText?: string;
   buttonLink?: string;
+  showAnnouncement?: boolean;
+  announcementText?: string;
+  isSliding?: boolean;
+  announcementBgColor?: string;
+  announcementTextColor?: string;
 }
 
 export interface IShippingZone {
@@ -92,6 +97,11 @@ const bannerSchema = new Schema<IBannerSetting>({
   description: { type: String, default: '' },
   buttonText: { type: String, default: '' },
   buttonLink: { type: String, default: '' },
+  showAnnouncement: { type: Boolean, default: false },
+  announcementText: { type: String, default: '' },
+  isSliding: { type: Boolean, default: false },
+  announcementBgColor: { type: String, default: '#0f172a' },
+  announcementTextColor: { type: String, default: '#ffffff' },
 }, { _id: false });
 
 const themeSchema = new Schema<ITheme>(

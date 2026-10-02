@@ -1,5 +1,6 @@
 import { User } from '../auth/auth.model';
 import { IUser } from '../auth/auth.interface';
+import { deleteCloudinary } from '../../helpers/cloudinary';
 
 // SECURITY FIX (Mass Assignment): Whitelist only the fields a user can update on their own profile.
 // Prevents attackers from sending { "role": "super_admin", "tenantId": "..." } in the request body.
@@ -50,6 +51,9 @@ const updateUser = async (id: string, payload: Partial<IUser>): Promise<IUser | 
 
 const deleteUser = async (id: string): Promise<IUser | null> => {
   const result = await User.findByIdAndDelete(id);
+  if (result && result.avatar && result.avatar.public_id) {
+    await deleteCloudinary(result.avatar.public_id, 'image').catch(err => console.error("Failed to delete user avatar from Cloudinary:", err));
+  }
   return result;
 };
 
