@@ -9,7 +9,6 @@ import { Theme } from '../theme/theme.model';
 import { computeShipping } from '../../utils/computeShipping';
 import { paginationHelper } from '../../helpers/paginationHelper';
 import { User } from '../auth/auth.model';
-import mongoose from 'mongoose';
 
 const createOrder = async (payload: IOrder): Promise<IOrder> => {
   // ─── SECURITY: Recalculate shipping from the DB, ignore client-sent values ───
@@ -23,24 +22,29 @@ const createOrder = async (payload: IOrder): Promise<IOrder> => {
     const productIds = payload.items.map((item: any) => item.productId);
     const dbProducts = await Product.find(
       { _id: { $in: productIds }, tenantId: payload.tenantId },
-      { _id: 1, discountedPrice: 1, originalPrice: 1 }
+      { _id: 1, discountedPrice: 1, originalPrice: 1, stock: 1, title: 1 }
     );
 
-    // Build a map of productId → trusted price
-    const priceMap = new Map<string, number>(
-      dbProducts.map((p: any) => [p._id.toString(), p.discountedPrice ?? p.originalPrice])
+    // Build a map of productId → DB product doc
+    const productMap = new Map<string, any>(
+      dbProducts.map((p: any) => [p._id.toString(), p])
     );
 
-    // Override each item's price with the real DB value and reject unknown products
+    // Override each item's price with the real DB value and reject unknown or out-of-stock products
     for (const item of payload.items as any[]) {
-      const trustedPrice = priceMap.get(item.productId.toString());
-      if (trustedPrice === undefined) {
-        console.error('DEBUG priceMap keys:', Array.from(priceMap.keys()));
+      const dbProduct = productMap.get(item.productId.toString());
+      if (!dbProduct) {
+        console.error('DEBUG priceMap keys:', Array.from(productMap.keys()));
         console.error('DEBUG item.productId:', item.productId, typeof item.productId);
         console.error('DEBUG payload.tenantId:', payload.tenantId);
         throw new Error(`Product not found or does not belong to this tenant: ${item.productId}`);
       }
-      item.price = trustedPrice; // overwrite client-supplied price
+
+      if (typeof dbProduct.stock === 'number' && dbProduct.stock < item.quantity) {
+        throw new Error(`Product out of stock: ${item.productId}`);
+      }
+
+      item.price = dbProduct.discountedPrice ?? dbProduct.originalPrice; // overwrite client-supplied price
     }
 
     // ── Step 2: Recompute subTotal from now-trusted item prices ──────────────────
