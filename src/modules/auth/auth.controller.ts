@@ -4,12 +4,17 @@ import ApiResponse from '../../utils/apiResponse';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { VisitorLog } from '../system/security.model';
 import { getClientIp } from '../../utils/ipHelper';
+import config from '../../config';
+
+const isProduction = process.env.NODE_ENV === 'production';
 
 const COOKIE_OPTIONS = {
   path: '/',
-  secure: process.env.NODE_ENV === 'production',
+  secure: isProduction,
   httpOnly: true,
-  sameSite: 'lax' as const,
+  sameSite: (isProduction ? 'none' : 'lax') as 'none' | 'lax',
+  maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days persistent cookie
+  ...(isProduction && config.app.baseDomain ? { domain: `.${config.app.baseDomain}` } : {}),
 };
 
 const ALL_COOKIE_NAMES = [
@@ -23,11 +28,28 @@ const ALL_COOKIE_NAMES = [
   '_merchant_x_tkn',
 ];
 
-const clearAllAuthCookies = (res: Response) => {
-  ALL_COOKIE_NAMES.forEach((cookieName) => {
-    res.clearCookie(cookieName, COOKIE_OPTIONS);
-    res.clearCookie(cookieName);
-  });
+const clearAllAuthCookies = (res: Response, role?: string) => {
+  if (role === 'super_admin') {
+    res.clearCookie('_super_r_tkn', COOKIE_OPTIONS);
+    res.clearCookie('_super_x_tkn', COOKIE_OPTIONS);
+    res.clearCookie('_super_r_tkn', { path: '/' });
+    res.clearCookie('_super_x_tkn', { path: '/' });
+  } else if (role === 'tenant_admin' || role === 'user') {
+    res.clearCookie('_merchant_r_tkn', COOKIE_OPTIONS);
+    res.clearCookie('_merchant_x_tkn', COOKIE_OPTIONS);
+    res.clearCookie('refreshToken', COOKIE_OPTIONS);
+    res.clearCookie('accessToken', COOKIE_OPTIONS);
+    res.clearCookie('_merchant_r_tkn', { path: '/' });
+    res.clearCookie('_merchant_x_tkn', { path: '/' });
+    res.clearCookie('refreshToken', { path: '/' });
+    res.clearCookie('accessToken', { path: '/' });
+  } else {
+    ALL_COOKIE_NAMES.forEach((cookieName) => {
+      res.clearCookie(cookieName, COOKIE_OPTIONS);
+      res.clearCookie(cookieName, { path: '/' });
+      res.clearCookie(cookieName);
+    });
+  }
 };
 
 const register = asyncHandler(async (req: Request, res: Response) => {
@@ -48,12 +70,12 @@ const login = asyncHandler(async (req: Request, res: Response) => {
 
   const { refreshToken, ...others } = result;
 
-  // Clean up all stale cookies from any previous session/role
-  clearAllAuthCookies(res);
-
   const isSuperAdmin = others.user.role === 'super_admin';
   const rCookieName = isSuperAdmin ? '_super_r_tkn' : '_merchant_r_tkn';
   const xCookieName = isSuperAdmin ? '_super_x_tkn' : '_merchant_x_tkn';
+
+  // Clean up only previous cookies for this specific role
+  clearAllAuthCookies(res, others.user.role);
 
   res.cookie(rCookieName, refreshToken, COOKIE_OPTIONS);
   res.cookie(xCookieName, others.accessToken, COOKIE_OPTIONS);
@@ -108,8 +130,9 @@ const logout = asyncHandler(async (req: Request, res: Response) => {
     await AuthService.logout(token);
   }
 
-  // Clean up all possible role cookies
-  clearAllAuthCookies(res);
+  // Determine which role is logging out and only clear that role's cookies
+  const isSuper = Boolean(req.cookies._super_r_tkn || req.cookies._super_x_tkn);
+  clearAllAuthCookies(res, isSuper ? 'super_admin' : 'tenant_admin');
 
   ApiResponse.sendSuccess(res, 200, 'User logged out successfully', null);
 });
@@ -160,13 +183,12 @@ const verify2FALogin = asyncHandler(async (req: Request, res: Response) => {
   const { twoFactorToken, code } = req.body;
   const result = await AuthService.verify2FALogin(twoFactorToken, code);
   const { refreshToken, ...others } = result;
-
-  // Clean up all stale cookies from any previous session/role
-  clearAllAuthCookies(res);
-
   const isSuperAdmin = others.user.role === 'super_admin';
   const rCookieName = isSuperAdmin ? '_super_r_tkn' : '_merchant_r_tkn';
   const xCookieName = isSuperAdmin ? '_super_x_tkn' : '_merchant_x_tkn';
+
+  // Clean up only previous cookies for this specific role
+  clearAllAuthCookies(res, others.user.role);
 
   res.cookie(rCookieName, refreshToken, COOKIE_OPTIONS);
   res.cookie(xCookieName, others.accessToken, COOKIE_OPTIONS);
