@@ -8,14 +8,41 @@ import config from '../../config';
 
 const isProduction = process.env.NODE_ENV === 'production';
 
+// NOTE: cookies are intentionally host-only (no `domain`). A shared parent-domain
+// cookie would be visible to every subdomain app (admin, merchant, storefronts),
+// which caused the apps to shadow/overwrite each other's tokens.
 const COOKIE_OPTIONS = {
   path: '/',
   secure: isProduction,
   httpOnly: true,
   sameSite: (isProduction ? 'none' : 'lax') as 'none' | 'lax',
   maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days persistent cookie
-  ...(isProduction && config.app.baseDomain ? { domain: `.${config.app.baseDomain}` } : {}),
 };
+
+// Expire old domain-wide cookies (Domain=.baseDomain) created by previous versions,
+// otherwise they coexist with the new host-only cookies under the same name and
+// the stale copy gets read first.
+const clearLegacyDomainCookies = (res: Response) => {
+  if (!isProduction || !config.app.baseDomain) return;
+  const legacyOpts = {
+    path: '/',
+    secure: true,
+    httpOnly: true,
+    sameSite: 'none' as const,
+    domain: `.${config.app.baseDomain}`,
+  };
+  [
+    'refreshToken',
+    'accessToken',
+    '_r_sess_tkn',
+    '_x_sess_tkn',
+    '_super_r_tkn',
+    '_merchant_r_tkn',
+    '_super_x_tkn',
+    '_merchant_x_tkn',
+  ].forEach((name) => res.clearCookie(name, legacyOpts));
+};
+
 
 const ALL_COOKIE_NAMES = [
   'refreshToken',
@@ -74,6 +101,7 @@ const login = asyncHandler(async (req: Request, res: Response) => {
   const rCookieName = isSuperAdmin ? '_super_r_tkn' : '_merchant_r_tkn';
   const xCookieName = isSuperAdmin ? '_super_x_tkn' : '_merchant_x_tkn';
 
+  clearLegacyDomainCookies(res);
   res.cookie(rCookieName, refreshToken, COOKIE_OPTIONS);
   res.cookie(xCookieName, others.accessToken, COOKIE_OPTIONS);
 
@@ -116,6 +144,7 @@ const refreshToken = asyncHandler(async (req: Request, res: Response) => {
   const xCookieName = isSuperAdmin ? '_super_x_tkn' : '_merchant_x_tkn';
 
   // Set BOTH regenerated refresh token AND new access token in HttpOnly cookies
+  clearLegacyDomainCookies(res);
   res.cookie(rCookieName, result.refreshToken, COOKIE_OPTIONS);
   res.cookie(xCookieName, result.accessToken, COOKIE_OPTIONS);
 
@@ -189,6 +218,7 @@ const verify2FALogin = asyncHandler(async (req: Request, res: Response) => {
   const rCookieName = isSuperAdmin ? '_super_r_tkn' : '_merchant_r_tkn';
   const xCookieName = isSuperAdmin ? '_super_x_tkn' : '_merchant_x_tkn';
 
+  clearLegacyDomainCookies(res);
   res.cookie(rCookieName, refreshToken, COOKIE_OPTIONS);
   res.cookie(xCookieName, others.accessToken, COOKIE_OPTIONS);
 
