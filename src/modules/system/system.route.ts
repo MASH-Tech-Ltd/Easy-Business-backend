@@ -21,4 +21,9 @@ router.get('/security/visitor-logs', authMiddleware('super_admin'), SystemContro
 router.post('/security/visitor-logs', SystemController.createVisitorLog);
 router.delete('/security/visitor-logs', authMiddleware('super_admin'), SystemController.clearVisitorLogs);
 
+// Global Settings & Platform Configuration
+router.get('/global-settings', authMiddleware('super_admin'), SystemController.getGlobalSettings);
+router.put('/global-settings', authMiddleware('super_admin'), SystemController.updateGlobalSettings);
+router.get('/theme-previews', SystemController.getThemePreviews);
+
 export const SystemRoutes = router;

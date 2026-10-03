@@ -5,7 +5,53 @@ import os from 'os';
 import mongoose from 'mongoose';
 import v8 from 'v8';
 import { SecurityLog, BlockedIp, VisitorLog } from './security.model';
+import { GlobalSetting } from './globalSetting.model';
 import { isCloudflareProxyIp, getClientIp } from '../../utils/ipHelper';
+
+const getGlobalSettings = asyncHandler(async (req: Request, res: Response) => {
+  let settings = await GlobalSetting.findOne();
+  if (!settings) {
+    settings = await GlobalSetting.create({});
+  }
+  ApiResponse.sendSuccess(res, 200, 'Global settings retrieved', settings);
+});
+
+const updateGlobalSettings = asyncHandler(async (req: Request, res: Response) => {
+  const payload = req.body;
+  let settings = await GlobalSetting.findOne();
+  if (!settings) {
+    settings = new GlobalSetting();
+  }
+
+  if (payload.platformName !== undefined) settings.platformName = payload.platformName;
+  if (payload.supportEmail !== undefined) settings.supportEmail = payload.supportEmail;
+  if (payload.currency !== undefined) settings.currency = payload.currency;
+  if (payload.timezone !== undefined) settings.timezone = payload.timezone;
+  if (payload.maintenanceMode !== undefined) settings.maintenanceMode = payload.maintenanceMode;
+  if (payload.maxTenants !== undefined) settings.maxTenants = payload.maxTenants;
+  if (payload.allowRegistration !== undefined) settings.allowRegistration = payload.allowRegistration;
+  if (payload.themePreviews !== undefined) {
+    settings.themePreviews = {
+      ...(settings.themePreviews || {}),
+      ...payload.themePreviews,
+    };
+  }
+
+  await settings.save();
+  ApiResponse.sendSuccess(res, 200, 'Global settings updated successfully', settings);
+});
+
+const getThemePreviews = asyncHandler(async (req: Request, res: Response) => {
+  const settings = await GlobalSetting.findOne();
+  const themePreviews = settings?.themePreviews || {
+    'design-01': '',
+    'design-02': '',
+    'design-03': '',
+    'design-04': '',
+    'design-05': '',
+  };
+  ApiResponse.sendSuccess(res, 200, 'Theme preview links retrieved', themePreviews);
+});
 
 const getHealthStats = asyncHandler(async (req: Request, res: Response) => {
   const osUptime = os.uptime();
@@ -300,6 +346,9 @@ const clearVisitorLogs = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const SystemController = {
+  getGlobalSettings,
+  updateGlobalSettings,
+  getThemePreviews,
   getHealthStats,
   getLogs,
   getDatabaseStats,

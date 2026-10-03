@@ -116,7 +116,21 @@ const getMyTheme = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 200, 'Theme retrieved successfully', result);
 });
 
+const getThemePreviews = asyncHandler(async (req: Request, res: Response) => {
+  const { GlobalSetting } = await import('../system/globalSetting.model');
+  const settings = await GlobalSetting.findOne();
+  const themePreviews = settings?.themePreviews || {
+    'design-01': '',
+    'design-02': '',
+    'design-03': '',
+    'design-04': '',
+    'design-05': '',
+  };
+  ApiResponse.sendSuccess(res, 200, 'Theme preview links retrieved', themePreviews);
+});
+
 export const ThemeController = {
   updateTheme,
   getMyTheme,
+  getThemePreviews,
 };
