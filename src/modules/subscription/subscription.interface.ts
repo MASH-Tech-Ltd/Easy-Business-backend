@@ -14,6 +14,7 @@ export interface ISubscription extends Document {
     used: number;
     isActive: boolean;
     status?: 'pending' | 'active' | 'rejected' | 'inactive' | 'terminated';
+    requestedAt?: Date;
   }[];
   createdAt?: Date;
   updatedAt?: Date;

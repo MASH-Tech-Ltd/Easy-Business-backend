@@ -16,6 +16,7 @@ const subscriptionSchema = new Schema<ISubscription>(
         used: { type: Number, default: 0 },
         isActive: { type: Boolean, default: false },
         status: { type: String, enum: ['pending', 'active', 'rejected', 'inactive', 'terminated'], default: 'pending' },
+        requestedAt: { type: Date, default: Date.now },
       },
     ],
   },

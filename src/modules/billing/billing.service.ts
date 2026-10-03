@@ -4,6 +4,7 @@ import CustomError from '../../helpers/CustomError';
 import { Tenant } from '../tenant/tenant.model';
 import { notificationService } from '../notification/notification.service';
 import { User } from '../auth/auth.model';
+import { paginationHelper } from '../../helpers/paginationHelper';
 
 const getPlatformPaymentSettings = async () => {
   let settings = await PlatformPaymentSettings.findOne();
@@ -116,11 +117,64 @@ const getMyPaymentSubmissions = async (tenantId: string) => {
   return PlatformPaymentSubmission.find({ tenantId }).sort({ createdAt: -1 }).lean();
 };
 
-const getAllPaymentSubmissions = async () => {
-  return PlatformPaymentSubmission.find()
-    .populate('tenantId', 'name domain slug')
-    .sort({ createdAt: -1 })
-    .lean();
+const getAllPaymentSubmissions = async (query: any = {}) => {
+  const { page, limit, skip } = paginationHelper(query?.page, query?.limit);
+  const { search, status, provider } = query || {};
+
+  const filter: any = {};
+  if (status && status !== 'all') {
+    filter.status = status;
+  }
+  if (provider && provider !== 'all') {
+    filter.provider = { $regex: new RegExp(`^${provider}$`, 'i') };
+  }
+
+  if (search) {
+    const searchRegex = { $regex: search, $options: 'i' };
+    const matchingTenants = await Tenant.find({
+      $or: [{ name: searchRegex }, { domain: searchRegex }],
+    }).select('_id').lean();
+    const matchingTenantIds = matchingTenants.map((t) => t._id);
+
+    filter.$or = [
+      { transactionId: searchRegex },
+      { senderNumber: searchRegex },
+      { purposeTitle: searchRegex },
+      { tenantId: { $in: matchingTenantIds } },
+    ];
+  }
+
+  const [allSubmissions, data, total] = await Promise.all([
+    PlatformPaymentSubmission.find().lean(),
+    PlatformPaymentSubmission.find(filter)
+      .populate('tenantId', 'name domain slug')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    PlatformPaymentSubmission.countDocuments(filter),
+  ]);
+
+  const stats = {
+    totalCount: allSubmissions.length,
+    pendingCount: allSubmissions.filter((p) => p.status === 'pending').length,
+    approvedCount: allSubmissions.filter((p) => p.status === 'approved').length,
+    rejectedCount: allSubmissions.filter((p) => p.status === 'rejected').length,
+    approvedRevenue: allSubmissions
+      .filter((p) => p.status === 'approved')
+      .reduce((sum, p) => sum + (p.amount || 0), 0),
+  };
+
+  return {
+    data,
+    meta: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1,
+    },
+    stats,
+  };
 };
 
 const verifyPaymentSubmission = async (id: string, status: 'approved' | 'rejected', adminFeedback?: string) => {

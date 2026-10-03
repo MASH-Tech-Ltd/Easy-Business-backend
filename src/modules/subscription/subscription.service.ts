@@ -369,12 +369,14 @@ const purchaseAddon = async (tenantId: string, payload: { addonId: string }): Pr
       existing.isActive = false;
       existing.used = 0;
       existing.limit = addon.defaultLimit;
+      existing.requestedAt = new Date();
       
       await subscription.save();
       return subscription;
     } else if (existing.status === 'active' && existing.used >= existing.limit && existing.limit > 0) {
       existing.status = 'pending';
       existing.isActive = false; // Temporarily disable until approved
+      existing.requestedAt = new Date();
       
       await subscription.save();
       return subscription;
@@ -391,6 +393,7 @@ const purchaseAddon = async (tenantId: string, payload: { addonId: string }): Pr
     used: 0,
     isActive: false,
     status: 'pending',
+    requestedAt: new Date(),
   });
 
   await subscription.save();
@@ -431,22 +434,42 @@ const getAllAddonRequests = async (query: any): Promise<{ data: any[]; meta: any
     'purchasedAddons': { $exists: true, $not: { $size: 0 } }
   })
     .populate('tenantId', 'name domain slug')
-    .populate('purchasedAddons.addonId')
+    .populate('purchasedAddons.addonId', '-createdAt -updatedAt -__v')
     .lean();
     
   let allAddons: any[] = [];
   
   subscriptions.forEach(sub => {
     sub.purchasedAddons?.forEach((addon: any) => {
+      let requestedAt = addon.requestedAt;
+      if (!requestedAt && addon._id) {
+        const idStr = addon._id.toString();
+        if (idStr.length === 24) {
+          const ts = parseInt(idStr.substring(0, 8), 16) * 1000;
+          if (!isNaN(ts) && ts > 0) {
+            requestedAt = new Date(ts);
+          }
+        }
+      }
+      if (!requestedAt) {
+        requestedAt = sub.updatedAt || sub.createdAt || new Date();
+      }
+
+      let addonDetails = addon.addonId;
+      if (addonDetails && typeof addonDetails === 'object') {
+        const { createdAt, updatedAt, __v, ...cleanDetails } = addonDetails;
+        addonDetails = cleanDetails;
+      }
+
       allAddons.push({
         subscriptionId: sub._id,
         tenant: sub.tenantId,
         addonId: addon._id,
-        addonDetails: addon.addonId,
+        addonDetails,
         limit: addon.limit || 0,
         used: addon.used || 0,
         status: addon.status || (addon.isActive ? 'active' : 'pending'),
-        requestedAt: addon.requestedAt || addon.createdAt || sub.updatedAt || sub.createdAt,
+        requestedAt,
       });
     });
   });
@@ -474,11 +497,20 @@ const getAllAddonRequests = async (query: any): Promise<{ data: any[]; meta: any
     );
   }
 
-  if (sortBy === 'oldest') {
-    allAddons.sort((a, b) => new Date(a.requestedAt).getTime() - new Date(b.requestedAt).getTime());
-  } else {
-    allAddons.sort((a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime());
-  }
+  const getTimestamp = (val: any): number => {
+    if (!val) return 0;
+    const time = new Date(val).getTime();
+    return isNaN(time) ? 0 : time;
+  };
+
+  allAddons.sort((a, b) => {
+    const timeA = getTimestamp(a.requestedAt);
+    const timeB = getTimestamp(b.requestedAt);
+    if (sortBy === 'oldest') {
+      return timeA - timeB;
+    }
+    return timeB - timeA; // Default: newest first
+  });
 
   const total = allAddons.length;
   const paginatedData = allAddons.slice(skip, skip + limit);

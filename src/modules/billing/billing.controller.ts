@@ -83,8 +83,8 @@ const updateMyPaymentSubmission = asyncHandler(async (req: Request, res: Respons
 });
 
 const getAllPaymentSubmissions = asyncHandler(async (req: Request, res: Response) => {
-  const result = await BillingService.getAllPaymentSubmissions();
-  ApiResponse.sendSuccess(res, 200, 'All payment submissions retrieved', result);
+  const result = await BillingService.getAllPaymentSubmissions(req.query);
+  ApiResponse.sendSuccess(res, 200, 'All payment submissions retrieved successfully', result);
 });
 
 const verifyPaymentSubmission = asyncHandler(async (req: Request, res: Response) => {
