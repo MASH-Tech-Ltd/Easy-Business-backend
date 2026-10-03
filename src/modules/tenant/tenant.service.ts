@@ -2,7 +2,7 @@ import { ITenant } from "./tenant.interface";
 import { Tenant } from "./tenant.model";
 import { User } from "../auth/auth.model";
 import CustomError from "../../helpers/CustomError";
-import { deleteCloudinary } from '../../helpers/cloudinary';
+import { deleteCloudinary, deleteMultipleCloudinary } from '../../helpers/cloudinary';
 import { paginationHelper } from "../../helpers/paginationHelper";
 import { Subscription } from "../subscription/subscription.model";
 import { Order } from "../order/order.model";
@@ -127,15 +127,34 @@ const getAllTenants = async (
   ]);
 
   const tenantIds = data.map((t) => t._id);
-  const subscriptions = await Subscription.find({
-    tenantId: { $in: tenantIds },
-    status: 'active'
-  }).populate('packageId');
+  const [subscriptions, productCounts, categoryCounts] = await Promise.all([
+    Subscription.find({
+      tenantId: { $in: tenantIds },
+      status: 'active'
+    }).populate('packageId'),
+    Product.aggregate([
+      { $match: { tenantId: { $in: tenantIds } } },
+      { $group: { _id: '$tenantId', count: { $sum: 1 } } }
+    ]),
+    Category.aggregate([
+      { $match: { tenantId: { $in: tenantIds } } },
+      { $group: { _id: '$tenantId', count: { $sum: 1 } } }
+    ])
+  ]);
+
+  const productMap = new Map<string, number>();
+  productCounts.forEach((p) => productMap.set(p._id.toString(), p.count));
+
+  const categoryMap = new Map<string, number>();
+  categoryCounts.forEach((c) => categoryMap.set(c._id.toString(), c.count));
 
   const dataWithPackages = data.map((tenant) => {
-    const sub = subscriptions.find((s) => s.tenantId.toString() === tenant._id.toString());
+    const tIdStr = tenant._id.toString();
+    const sub = subscriptions.find((s) => s.tenantId.toString() === tIdStr);
     return {
       ...tenant,
+      totalProducts: productMap.get(tIdStr) || 0,
+      totalCategories: categoryMap.get(tIdStr) || 0,
       package: sub && sub.packageId ? sub.packageId : null,
       subscription: sub || null
     };
@@ -508,63 +527,68 @@ const getTenantMetrics = async (tenantId: string, query?: any) => {
 const deleteTenant = async (id: string) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-  
+
   try {
-    const tenant = await Tenant.findByIdAndDelete(id, { session });
+    const tenant = await Tenant.findById(id).session(session);
     if (!tenant) {
       throw new CustomError(404, 'Tenant not found');
     }
     
-    // Find the user to delete their avatar
-    const adminUser = await User.findOne({ tenantId: id }, null, { session });
-    if (adminUser && adminUser.avatar && adminUser.avatar.public_id) {
-      const { deleteCloudinary } = require('../../helpers/cloudinary');
-      await deleteCloudinary(adminUser.avatar.public_id, 'image').catch((err: any) => console.error("Cloudinary delete error:", err));
+    // Find products, categories, and admin user before deleting to gather image public IDs
+    const [adminUser, products, categories] = await Promise.all([
+      User.findOne({ tenantId: id }, null, { session }),
+      Product.find({ tenantId: id }, 'images', { session }),
+      Category.find({ tenantId: id }, 'image', { session })
+    ]);
+
+    const publicIdsToDelete: string[] = [];
+
+    if (adminUser?.avatar?.public_id) {
+      publicIdsToDelete.push(adminUser.avatar.public_id);
     }
-    
-    // Also delete the associated admin user
-    if (adminUser) {
-      await User.findByIdAndDelete(adminUser._id, { session });
-    }
-    
-    // Cascading deletes for all tenant data
-    
-    // 1. Delete product images from Cloudinary
-    const products = await Product.find({ tenantId: id }, null, { session });
-    if (products.length > 0) {
-      const { deleteCloudinary } = require('../../helpers/cloudinary');
-      for (const product of products) {
-        if (product.images && product.images.length > 0) {
-          for (const image of product.images) {
-            if (image.public_id) {
-              await deleteCloudinary(image.public_id, 'image').catch((err: any) => console.error("Cloudinary delete error:", err));
-            }
-          }
-        }
+
+    if (tenant.logo && typeof tenant.logo === 'string') {
+      const parts = tenant.logo.split('/');
+      const filename = parts.pop();
+      if (filename) {
+        const publicId = filename.split('.')[0];
+        if (publicId) publicIdsToDelete.push(publicId);
       }
     }
 
-    // 2. Delete tenant logo from Cloudinary
-    if (tenant.logo && typeof tenant.logo === 'string') {
-       const parts = tenant.logo.split('/');
-       const filename = parts.pop();
-       if (filename) {
-         const publicId = filename.split('.')[0];
-         if (publicId) {
-           await deleteCloudinary(publicId, 'image').catch((err: any) => console.error("Cloudinary delete error:", err));
-         }
-       }
-    }
-    
+    products.forEach((product) => {
+      product.images?.forEach((img) => {
+        if (img.public_id) publicIdsToDelete.push(img.public_id);
+      });
+    });
+
+    categories.forEach((cat: any) => {
+      if (cat.image?.public_id) {
+        publicIdsToDelete.push(cat.image.public_id);
+      }
+    });
+
+    // Sequential ACID cascading deletes on the active session (prevents MongoDB transaction write conflicts)
+    await Tenant.findByIdAndDelete(id, { session });
+    await User.deleteMany({ tenantId: id }, { session });
     await Product.deleteMany({ tenantId: id }, { session });
     await Category.deleteMany({ tenantId: id }, { session });
     await Order.deleteMany({ tenantId: id }, { session });
     await Subscription.deleteMany({ tenantId: id }, { session });
     await FraudCheck.deleteMany({ tenantId: id }, { session });
     await Courier.deleteMany({ tenantId: id }, { session });
-    
+
     await session.commitTransaction();
     session.endSession();
+
+    // Perform Cloudinary image deletions reliably
+    if (publicIdsToDelete.length > 0) {
+      deleteMultipleCloudinary(publicIdsToDelete, 'image').catch((err) =>
+        console.error('Background Cloudinary cleanup error on deleteTenant:', err)
+      );
+    }
+
+    await notifyTenantUpdate(id);
     return tenant;
   } catch (error) {
     await session.abortTransaction();

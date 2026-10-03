@@ -4,7 +4,7 @@ import { Types } from 'mongoose';
 import { paginationHelper } from '../../helpers/paginationHelper';
 import { Category } from '../category/category.model';
 import CustomError from '../../helpers/CustomError';
-import { deleteCloudinary } from '../../helpers/cloudinary';
+import { deleteCloudinary, deleteMultipleCloudinary } from '../../helpers/cloudinary';
 import { Subscription } from '../subscription/subscription.model';  
 
 
@@ -166,10 +166,9 @@ const deleteProduct = async (id: string, tenantId: string): Promise<IProduct | n
   }
   
   if (result.images && result.images.length > 0) {
-    for (const image of result.images) {
-      if (image.public_id) {
-        await deleteCloudinary(image.public_id, 'image').catch((err: any) => console.error("Cloudinary delete error:", err));
-      }
+    const publicIds = result.images.map((img) => img.public_id).filter(Boolean);
+    if (publicIds.length > 0) {
+      deleteMultipleCloudinary(publicIds, 'image').catch((err) => console.error('Cloudinary product delete error:', err));
     }
   }
   
@@ -179,34 +178,31 @@ const deleteProduct = async (id: string, tenantId: string): Promise<IProduct | n
 // FEATURE: Delete all products by tenant (for super admin)
 const deleteAllProductsByTenant = async (tenantId: string): Promise<any> => {
   // Use lean() and select() to prevent Out of Memory (OOM) on large catalogs
-  const products = await Product.find({ tenantId: new Types.ObjectId(tenantId) }).select('images').lean();
-  const categories = await Category.find({ tenantId: new Types.ObjectId(tenantId) }).select('image').lean();
-  
-  // Delete products and categories from database immediately to prevent API timeout
+  const [products, categories] = await Promise.all([
+    Product.find({ tenantId: new Types.ObjectId(tenantId) }).select('images').lean(),
+    Category.find({ tenantId: new Types.ObjectId(tenantId) }).select('image').lean()
+  ]);
+
+  const publicIds: string[] = [];
+  products.forEach((p) => {
+    p.images?.forEach((img) => {
+      if (img.public_id) publicIds.push(img.public_id);
+    });
+  });
+
+  categories.forEach((c: any) => {
+    if (c.image?.public_id) publicIds.push(c.image.public_id);
+  });
+
+  // Delete products and categories from database
   const result = await Product.deleteMany({ tenantId: new Types.ObjectId(tenantId) });
   await Category.deleteMany({ tenantId: new Types.ObjectId(tenantId) });
   
-  // Delete images from Cloudinary in the background
-  if (products.length > 0 || categories.length > 0) {
-
-    
-    // Background task (IIFE)
-    (async () => {
-      for (const product of products) {
-        if (product.images && product.images.length > 0) {
-          for (const image of product.images) {
-            if (image.public_id) {
-              await deleteCloudinary(image.public_id, 'image').catch((err: any) => console.error("Cloudinary delete error:", err));
-            }
-          }
-        }
-      }
-      for (const category of categories as any[]) {
-        if (category.image && category.image.public_id) {
-          await deleteCloudinary(category.image.public_id, 'image').catch((err: any) => console.error("Cloudinary delete error:", err));
-        }
-      }
-    })();
+  // Delete all collected images from Cloudinary
+  if (publicIds.length > 0) {
+    deleteMultipleCloudinary(publicIds, 'image').catch((err) =>
+      console.error('Background Cloudinary bulk delete error:', err)
+    );
   }
   
   return result;

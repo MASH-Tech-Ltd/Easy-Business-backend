@@ -133,6 +133,33 @@ export const deleteCloudinary = async (
   }
 };
 
+export const deleteMultipleCloudinary = async (
+  publicIds: string[],
+  resourceType: CloudinaryResourceType = 'image',
+): Promise<void> => {
+  if (!publicIds || publicIds.length === 0) return;
+
+  const validIds = publicIds.filter((id) => typeof id === 'string' && id.trim().length > 0);
+  if (validIds.length === 0) return;
+
+  const formattedIds = validIds.map((pid) => getDestroyPublicId(pid.trim(), resourceType));
+
+  const chunkSize = 100;
+  for (let i = 0; i < formattedIds.length; i += chunkSize) {
+    const chunk = formattedIds.slice(i, i + chunkSize);
+    try {
+      await cloudinary.api.delete_resources(chunk, { resource_type: resourceType });
+    } catch (err: any) {
+      // Fallback: individual destroy
+      await Promise.allSettled(
+        chunk.map((id) =>
+          cloudinary.uploader.destroy(id, { resource_type: resourceType }).catch((e) => console.error(`Failed to destroy Cloudinary image ${id}:`, e))
+        )
+      );
+    }
+  }
+};
+
 export const extractPublicIdFromUrl = (url: string): string | null => {
   if (!url || typeof url !== 'string' || !url.includes('cloudinary.com')) return null;
   try {
