@@ -3,13 +3,13 @@ import { Document, Types } from 'mongoose';
 export interface ITenant extends Document {
   name: string;
   tenetId: string;
-  domain: string;
+  domain?: string | undefined;
   slug: string;
-  customDomain?: string;
+  customDomain?: string | undefined;
   logo?: string;
   ownerId?: Types.ObjectId;
   status: 'active' | 'suspended' | 'pending';
-  domainStatus?: 'pending' | 'active' | 'failed';
+  domainStatus?: 'pending' | 'active' | 'failed' | undefined;
   sslValidationRecords?: any[];
   contactEmail?: string;
   contactPhone?: string;
