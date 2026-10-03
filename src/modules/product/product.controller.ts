@@ -17,6 +17,34 @@ const createProduct = asyncHandler(async (req: Request, res: Response) => {
     throw new CustomError(403, 'You do not have an active subscription. Please upgrade your plan to add products.');
   }
 
+  if (req.body.name && !req.body.title) {
+    req.body.title = req.body.name;
+  }
+
+  if (req.body.price !== undefined) {
+    if (req.body.discountedPrice === undefined) req.body.discountedPrice = Number(req.body.price);
+    if (req.body.originalPrice === undefined) req.body.originalPrice = Number(req.body.price);
+  }
+
+  if (req.body.discountedPrice !== undefined) {
+    req.body.discountedPrice = Number(req.body.discountedPrice);
+  }
+  if (req.body.originalPrice !== undefined) {
+    req.body.originalPrice = Number(req.body.originalPrice);
+  }
+  if (req.body.saveAmount !== undefined) {
+    req.body.saveAmount = Number(req.body.saveAmount);
+  } else if (req.body.originalPrice !== undefined && req.body.discountedPrice !== undefined) {
+    req.body.saveAmount = Math.max(0, req.body.originalPrice - req.body.discountedPrice);
+  }
+
+  if (req.body.stock !== undefined) {
+    req.body.stock = Number(req.body.stock) || 0;
+  }
+  if (req.body.weight !== undefined) {
+    req.body.weight = Number(req.body.weight) || 0;
+  }
+
   if (req.body.features && typeof req.body.features === "string") {
     try {
       req.body.features = JSON.parse(req.body.features);
@@ -120,6 +148,34 @@ const updateProduct = asyncHandler(async (req: Request, res: Response) => {
   // SECURITY FIX (IDOR): Get tenantId from JWT, not from request body
   const tenantId = (req as any).user.tenantId;
   const imagesToDelete: string[] = [];
+
+  if (req.body.name && !req.body.title) {
+    req.body.title = req.body.name;
+  }
+
+  if (req.body.price !== undefined) {
+    if (req.body.discountedPrice === undefined) req.body.discountedPrice = Number(req.body.price);
+    if (req.body.originalPrice === undefined) req.body.originalPrice = Number(req.body.price);
+  }
+
+  if (req.body.discountedPrice !== undefined) {
+    req.body.discountedPrice = Number(req.body.discountedPrice);
+  }
+  if (req.body.originalPrice !== undefined) {
+    req.body.originalPrice = Number(req.body.originalPrice);
+  }
+  if (req.body.saveAmount !== undefined) {
+    req.body.saveAmount = Number(req.body.saveAmount);
+  } else if (req.body.originalPrice !== undefined && req.body.discountedPrice !== undefined) {
+    req.body.saveAmount = Math.max(0, req.body.originalPrice - req.body.discountedPrice);
+  }
+
+  if (req.body.stock !== undefined) {
+    req.body.stock = Number(req.body.stock) || 0;
+  }
+  if (req.body.weight !== undefined) {
+    req.body.weight = Number(req.body.weight) || 0;
+  }
 
   if (req.body.features && typeof req.body.features === "string") {
     try {

@@ -3,10 +3,36 @@ import { UserService } from "./user.service";
 import ApiResponse from "../../utils/apiResponse";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { uploadCloudinary, deleteCloudinary } from "../../helpers/cloudinary";
+import CustomError from "../../helpers/CustomError";
+
+const isValidBDPhone = (phone?: string): boolean => {
+  if (!phone || !phone.trim()) return true;
+  const cleanPhone = phone.replace(/[\s\-\(\)]/g, '');
+  return /^(?:\+?88|88)?01[3-9]\d{8}$/.test(cleanPhone);
+};
 
 const updateProfile = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user._id;
   let oldAvatarPublicId: string | null = null;
+
+  // Validate personal phone
+  if (req.body.phone && !isValidBDPhone(req.body.phone)) {
+    throw new CustomError(400, "Invalid Bangladeshi phone number for Personal Phone. Must be a valid 11-digit BD number (e.g. 01XXXXXXXXXX).");
+  }
+
+  // Validate support phone in details
+  if (req.body.details) {
+    try {
+      const parsedDetails = typeof req.body.details === 'string' && req.body.details.startsWith('{') 
+        ? JSON.parse(req.body.details) 
+        : req.body.details;
+      if (parsedDetails?.supportPhone && !isValidBDPhone(parsedDetails.supportPhone)) {
+        throw new CustomError(400, "Invalid Bangladeshi phone number for Support Phone. Must be a valid 11-digit BD number (e.g. 01XXXXXXXXXX).");
+      }
+    } catch (e: any) {
+      if (e instanceof CustomError) throw e;
+    }
+  }
 
   if (req.file) {
     const oldUser = await UserService.getUserById(userId);

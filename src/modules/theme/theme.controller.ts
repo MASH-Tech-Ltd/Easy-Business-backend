@@ -5,9 +5,21 @@ import { asyncHandler } from '../../utils/asyncHandler';
 import { uploadCloudinary, deleteCloudinary } from '../../helpers/cloudinary';
 import CustomError from '../../helpers/CustomError';
 
+const isValidBDPhone = (phone?: string): boolean => {
+  if (!phone || !phone.trim()) return true;
+  const cleanPhone = phone.replace(/[\s\-\(\)]/g, '');
+  return /^(?:\+?88|88)?01[3-9]\d{8}$/.test(cleanPhone);
+};
+
 const updateTheme = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = (req as any).user.tenantId;
   const payload = typeof req.body.data === 'string' ? JSON.parse(req.body.data) : req.body;
+
+  // Validate footer contact phone
+  if (payload.footer?.contactInfo?.phone && !isValidBDPhone(payload.footer.contactInfo.phone)) {
+    throw new CustomError(400, "Invalid Bangladeshi phone number in Footer Contact Info. Must be a valid 11-digit BD number (e.g. 01XXXXXXXXXX).");
+  }
+
   const existingTheme = await ThemeService.getTheme(tenantId);
   
   // Extract files from upload.fields
