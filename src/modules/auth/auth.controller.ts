@@ -74,9 +74,6 @@ const login = asyncHandler(async (req: Request, res: Response) => {
   const rCookieName = isSuperAdmin ? '_super_r_tkn' : '_merchant_r_tkn';
   const xCookieName = isSuperAdmin ? '_super_x_tkn' : '_merchant_x_tkn';
 
-  // Clean up only previous cookies for this specific role
-  clearAllAuthCookies(res, others.user.role);
-
   res.cookie(rCookieName, refreshToken, COOKIE_OPTIONS);
   res.cookie(xCookieName, others.accessToken, COOKIE_OPTIONS);
 
@@ -94,7 +91,10 @@ const login = asyncHandler(async (req: Request, res: Response) => {
     console.error('Failed to record visitor log:', err);
   }
 
-  ApiResponse.sendSuccess(res, 200, 'User logged in successfully', others);
+  ApiResponse.sendSuccess(res, 200, 'User logged in successfully', {
+    ...others,
+    refreshToken,
+  });
 });
 
 const forgotPassword = asyncHandler(async (req: Request, res: Response) => {
@@ -121,6 +121,8 @@ const refreshToken = asyncHandler(async (req: Request, res: Response) => {
 
   ApiResponse.sendSuccess(res, 200, 'Token refreshed successfully', {
     accessToken: result.accessToken,
+    refreshToken: result.refreshToken,
+    user: result.user,
   });
 });
 
@@ -187,9 +189,6 @@ const verify2FALogin = asyncHandler(async (req: Request, res: Response) => {
   const rCookieName = isSuperAdmin ? '_super_r_tkn' : '_merchant_r_tkn';
   const xCookieName = isSuperAdmin ? '_super_x_tkn' : '_merchant_x_tkn';
 
-  // Clean up only previous cookies for this specific role
-  clearAllAuthCookies(res, others.user.role);
-
   res.cookie(rCookieName, refreshToken, COOKIE_OPTIONS);
   res.cookie(xCookieName, others.accessToken, COOKIE_OPTIONS);
 
@@ -207,7 +206,10 @@ const verify2FALogin = asyncHandler(async (req: Request, res: Response) => {
     console.error('Failed to record visitor log on 2FA login:', err);
   }
 
-  ApiResponse.sendSuccess(res, 200, '2FA login verified successfully', others);
+  ApiResponse.sendSuccess(res, 200, '2FA login verified successfully', {
+    ...others,
+    refreshToken,
+  });
 });
 
 export const AuthController = {

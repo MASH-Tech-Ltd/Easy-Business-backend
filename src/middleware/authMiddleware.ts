@@ -26,6 +26,9 @@ export const authMiddleware = (...requiredRoles: string[]) => {
         else if (req.cookies._super_x_tkn) {
           token = `Bearer ${req.cookies._super_x_tkn}`;
         }
+        else if (req.cookies.accessToken) {
+          token = `Bearer ${req.cookies.accessToken}`;
+        }
       }
       
       if (!token) {
