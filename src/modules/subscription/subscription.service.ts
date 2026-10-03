@@ -446,7 +446,7 @@ const getAllAddonRequests = async (query: any): Promise<{ data: any[]; meta: any
         limit: addon.limit || 0,
         used: addon.used || 0,
         status: addon.status || (addon.isActive ? 'active' : 'pending'),
-        requestedAt: sub.updatedAt,
+        requestedAt: addon.requestedAt || addon.createdAt || sub.updatedAt || sub.createdAt,
       });
     });
   });
