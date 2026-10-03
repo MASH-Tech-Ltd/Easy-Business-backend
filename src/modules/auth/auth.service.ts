@@ -17,7 +17,7 @@ import { Tenant } from '../tenant/tenant.model';
 import slugify from 'slugify';
 import { Subscription } from '../subscription/subscription.model';
 
-const register = async (payload: Partial<IUser>): Promise<Omit<IUser, 'password'>> => {
+const register = async (payload: Partial<IUser> & { storeName?: string }): Promise<Omit<IUser, 'password'>> => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -31,18 +31,28 @@ const register = async (payload: Partial<IUser>): Promise<Omit<IUser, 'password'
     // All registrations via public endpoint default to tenant_admin (new merchant)
     payload.role = 'tenant_admin';
 
+    // Distinguish between Store/Business Name and Owner/User Name
+    const rawStoreName = payload.storeName?.trim() || '';
+    const rawOwnerName = payload.name?.trim() || '';
+    const storeName = rawStoreName || rawOwnerName || 'My Store';
+    const ownerName = rawOwnerName || rawStoreName || 'Store Owner';
+
+    delete payload.storeName;
+    payload.name = ownerName;
+
     // Prepare tenant creation
     let tenantId = null;
     let createdTenant = null;
 
-    const baseSlug = slugify(payload.name || 'store', { lower: true, strict: true });
+    const baseSlug = slugify(storeName, { lower: true, strict: true }) || 'store';
     const uniqueSuffix = Math.floor(1000 + Math.random() * 9000);
     const slug = `${baseSlug}-${uniqueSuffix}`;
 
     const tenant = new Tenant({
-      name: `${payload.name || 'My Store'}`,
+      name: storeName,
       slug: slug,
       domain: undefined,
+      customDomain: undefined,
       status: 'active',
     });
 
