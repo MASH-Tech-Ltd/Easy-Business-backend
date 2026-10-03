@@ -826,9 +826,27 @@ const removeAddon = async (subscriptionId: string, addonId: string) => {
   const addonIndex = subscription.purchasedAddons?.findIndex(a => a._id?.toString() === addonId);
   if (addonIndex === undefined || addonIndex === -1) throw new CustomError(404, 'Addon request not found');
 
+  const removedAddon = subscription.purchasedAddons![addonIndex];
   subscription.purchasedAddons?.splice(addonIndex, 1);
 
   await subscription.save();
+
+  // If the removed addon has an addonId, clean up any associated payment submissions
+  if (removedAddon?.addonId) {
+    try {
+      const addonDoc = await Addon.findById(removedAddon.addonId);
+      if (addonDoc) {
+        await PlatformPaymentSubmission.deleteMany({
+          tenantId: subscription.tenantId,
+          purpose: 'addon',
+          purposeTitle: { $regex: new RegExp(`^${addonDoc.name.trim()}$`, 'i') },
+        });
+      }
+    } catch (e) {
+      // Ignore cleanup error if already removed
+    }
+  }
+
   await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
   return subscription;
 };
