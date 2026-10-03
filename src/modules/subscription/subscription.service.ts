@@ -7,6 +7,7 @@ import CustomError from '../../helpers/CustomError';
 import { paginationHelper } from '../../helpers/paginationHelper';
 import { notificationService } from '../notification/notification.service';
 import { User } from '../auth/auth.model';
+import { PlatformPaymentSubmission } from '../billing/billing.model';
 
 
 const notifySubscriptionUpdate = async (tenantId?: string) => {
@@ -433,9 +434,11 @@ const getAllAddonRequests = async (query: any): Promise<{ data: any[]; meta: any
   const subscriptions = await Subscription.find({
     'purchasedAddons': { $exists: true, $not: { $size: 0 } }
   })
-    .populate('tenantId', 'name domain slug')
+    .populate('tenantId', 'name domain slug customDomain domainStatus')
     .populate('purchasedAddons.addonId', '-createdAt -updatedAt -__v')
     .lean();
+    
+  const payments = await PlatformPaymentSubmission.find({ purpose: 'addon' }).sort({ createdAt: -1 }).lean();
     
   let allAddons: any[] = [];
   
@@ -461,6 +464,16 @@ const getAllAddonRequests = async (query: any): Promise<{ data: any[]; meta: any
         addonDetails = cleanDetails;
       }
 
+      const tenantObj: any = sub.tenantId;
+      const tenantIdStr = tenantObj?._id?.toString() || tenantObj?.toString() || '';
+      const addonName = addonDetails?.name || '';
+      const matchingPayment = payments.find(p => 
+        p.tenantId?.toString() === tenantIdStr &&
+        addonName &&
+        (p.purposeTitle?.trim().toLowerCase().includes(addonName.trim().toLowerCase()) ||
+         addonName.trim().toLowerCase().includes(p.purposeTitle?.trim().toLowerCase()))
+      );
+
       allAddons.push({
         subscriptionId: sub._id,
         tenant: sub.tenantId,
@@ -470,6 +483,16 @@ const getAllAddonRequests = async (query: any): Promise<{ data: any[]; meta: any
         used: addon.used || 0,
         status: addon.status || (addon.isActive ? 'active' : 'pending'),
         requestedAt,
+        paymentStatus: matchingPayment?.status || 'none',
+        paymentInfo: matchingPayment ? {
+          _id: matchingPayment._id,
+          transactionId: matchingPayment.transactionId,
+          provider: matchingPayment.provider,
+          senderNumber: matchingPayment.senderNumber,
+          amount: matchingPayment.amount,
+          status: matchingPayment.status,
+          createdAt: matchingPayment.createdAt
+        } : null,
       });
     });
   });
@@ -539,6 +562,37 @@ const approveAddonRequest = async (subscriptionId: string, addonId: string) => {
 
   const addonDoc = await Addon.findById(addon.addonId);
   if (!addonDoc) throw new CustomError(404, 'Addon details not found');
+
+  // Ensure add-on approval is NOT possible without an approved/confirmed payment
+  const latestPayment = await PlatformPaymentSubmission.findOne({
+    tenantId: subscription.tenantId,
+    purpose: 'addon',
+    $or: [
+      { purposeTitle: { $regex: new RegExp(`^${addonDoc.name.trim()}$`, 'i') } },
+      { purposeTitle: { $regex: new RegExp(addonDoc.name.trim(), 'i') } },
+    ]
+  }).sort({ createdAt: -1 });
+
+  if (!latestPayment || latestPayment.status !== 'approved') {
+    if (!latestPayment) {
+      throw new CustomError(
+        400,
+        'Cannot approve add-on request without payment confirmation. No payment proof has been submitted yet for this add-on.'
+      );
+    }
+    if (latestPayment.status === 'pending') {
+      throw new CustomError(
+        400,
+        'Cannot approve add-on request while payment verification is pending. Please verify and approve the payment proof under Payment Proof Verifications (TrxID) first.'
+      );
+    }
+    if (latestPayment.status === 'rejected') {
+      throw new CustomError(
+        400,
+        'Cannot approve add-on request because its payment proof was rejected. The merchant must submit a valid payment proof first.'
+      );
+    }
+  }
 
   // If the addon was repurchased (limit exceeded), add the new limit
   if (addon.used >= addon.limit && addon.limit > 0) {
@@ -610,6 +664,24 @@ const reactivateAddonRequest = async (subscriptionId: string, addonId: string) =
   if (!addon) throw new CustomError(404, 'Addon not found');
 
   const addonDoc = await Addon.findById(addon.addonId);
+
+  if (addonDoc) {
+    const latestPayment = await PlatformPaymentSubmission.findOne({
+      tenantId: subscription.tenantId,
+      purpose: 'addon',
+      $or: [
+        { purposeTitle: { $regex: new RegExp(`^${addonDoc.name.trim()}$`, 'i') } },
+        { purposeTitle: { $regex: new RegExp(addonDoc.name.trim(), 'i') } },
+      ]
+    }).sort({ createdAt: -1 });
+
+    if (!latestPayment || latestPayment.status !== 'approved') {
+      throw new CustomError(
+        400,
+        'Cannot reactivate add-on without payment confirmation. No approved payment proof found for this add-on.'
+      );
+    }
+  }
 
   addon.status = 'active';
   addon.isActive = true;
@@ -714,6 +786,22 @@ const rejectAddonRequest = async (subscriptionId: string, addonId: string) => {
   addon.isActive = false;
 
   await subscription.save();
+
+  // Automatically mark any pending payment submission for this addon as rejected
+  if (addon.addonId) {
+    const addonDoc = await Addon.findById(addon.addonId);
+    if (addonDoc) {
+      await PlatformPaymentSubmission.updateMany(
+        {
+          tenantId: subscription.tenantId,
+          purpose: 'addon',
+          purposeTitle: { $regex: new RegExp(`^${addonDoc.name.trim()}$`, 'i') },
+          status: 'pending',
+        },
+        { status: 'rejected' }
+      );
+    }
+  }
 
   const tenant = await Tenant.findById(subscription.tenantId);
   if (tenant && tenant.ownerId) {

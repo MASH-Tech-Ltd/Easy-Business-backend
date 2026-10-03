@@ -2,6 +2,8 @@ import { PlatformPaymentSettings, PlatformPaymentSubmission } from './billing.mo
 import { IPlatformPaymentAccount } from './billing.interface';
 import CustomError from '../../helpers/CustomError';
 import { Tenant } from '../tenant/tenant.model';
+import { Subscription } from '../subscription/subscription.model';
+import { Addon } from '../addon/addon.model';
 import { notificationService } from '../notification/notification.service';
 import { User } from '../auth/auth.model';
 import { paginationHelper } from '../../helpers/paginationHelper';
@@ -147,7 +149,7 @@ const getAllPaymentSubmissions = async (query: any = {}) => {
   const [allSubmissions, data, total] = await Promise.all([
     PlatformPaymentSubmission.find().lean(),
     PlatformPaymentSubmission.find(filter)
-      .populate('tenantId', 'name domain slug')
+      .populate('tenantId', 'name domain slug customDomain domainStatus')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -185,6 +187,51 @@ const verifyPaymentSubmission = async (id: string, status: 'approved' | 'rejecte
   if (adminFeedback) submission.adminFeedback = adminFeedback;
   await submission.save();
 
+  // If this payment submission was for an addon, sync the purchasedAddons array in the tenant's Subscription
+  if (submission.purpose === 'addon' && submission.tenantId) {
+    const subscriptions = await Subscription.find({
+      tenantId: submission.tenantId,
+    }).populate('purchasedAddons.addonId');
+
+    for (const subscription of subscriptions) {
+      if (!subscription.purchasedAddons) continue;
+      let modified = false;
+
+      for (const pa of subscription.purchasedAddons as any[]) {
+        const addonName = pa.addonId?.name || '';
+        const addonIdStr = pa.addonId?._id?.toString() || pa.addonId?.toString() || '';
+        const purposeTitleLower = (submission.purposeTitle || '').trim().toLowerCase();
+        const addonNameLower = addonName.trim().toLowerCase();
+
+        const matchesName =
+          purposeTitleLower &&
+          (addonNameLower === purposeTitleLower ||
+           purposeTitleLower.includes(addonNameLower) ||
+           addonNameLower.includes(purposeTitleLower) ||
+           addonIdStr === purposeTitleLower);
+
+        if (matchesName) {
+          if (status === 'approved') {
+            pa.status = 'active';
+            pa.isActive = true;
+            if (pa.used >= pa.limit && pa.limit > 0) {
+              const addonDoc: any = pa.addonId;
+              pa.limit += addonDoc?.defaultLimit || 50;
+            }
+          } else if (status === 'rejected') {
+            pa.status = 'rejected';
+            pa.isActive = false;
+          }
+          modified = true;
+        }
+      }
+
+      if (modified) {
+        await subscription.save();
+      }
+    }
+  }
+
   const tenant = await Tenant.findById(submission.tenantId);
   if (tenant && tenant.ownerId) {
     await notificationService.createNotification(
@@ -196,6 +243,20 @@ const verifyPaymentSubmission = async (id: string, status: 'approved' | 'rejecte
       submission.tenantId
     );
   }
+
+  try {
+    const io = require('../../socket').getIO();
+    if (tenant && tenant.ownerId) {
+      io.to('user_' + tenant.ownerId.toString()).emit('refresh_subscriptions');
+    }
+    if (submission.tenantId) {
+      io.to('tenant_' + submission.tenantId.toString()).emit('refresh_subscriptions');
+    }
+    const superAdmins = await User.find({ role: 'super_admin' });
+    for (const admin of superAdmins) {
+      io.to('user_' + admin._id.toString()).emit('refresh_subscriptions');
+    }
+  } catch (error) {}
 
   return submission;
 };
