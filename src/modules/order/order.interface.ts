@@ -20,7 +20,7 @@ export interface IOrder extends Document {
   shippingCharge: number;
   totalPrice: number;
   isDeliveryChargePaid?: boolean;
-  paymentStatus: 'unpaid' | 'paid';
+  paymentStatus: 'unpaid' | 'paid' | 'failed' | 'refunded';
   status: 'pending' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled' | 'returned';
   courierProvider?: string;
   consignmentId?: string;

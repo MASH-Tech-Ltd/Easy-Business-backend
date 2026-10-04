@@ -31,8 +31,8 @@ export const updateOrderValidation = z.object({
     id: z.string({ message: 'Order ID is required' }).min(1),
   }),
   body: z.object({
-    orderStatus: z.enum(['pending', 'processing', 'shipped', 'delivered', 'cancelled', 'returned']).optional(),
-    paymentStatus: z.enum(['pending', 'paid', 'failed', 'refunded']).optional(),
+    status: z.enum(['pending', 'confirmed', 'shipped', 'delivered', 'cancelled', 'returned']).optional(),
+    paymentStatus: z.enum(['unpaid', 'paid', 'failed', 'refunded']).optional(),
   }),
 });
 

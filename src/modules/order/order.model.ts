@@ -24,7 +24,7 @@ const orderSchema = new Schema<IOrder>(
     isDeliveryChargePaid: { type: Boolean, default: false },
     paymentStatus: {
       type: String,
-      enum: ['unpaid', 'paid'],
+      enum: ['unpaid', 'paid', 'failed', 'refunded'],
       default: 'unpaid',
     },
     status: {
