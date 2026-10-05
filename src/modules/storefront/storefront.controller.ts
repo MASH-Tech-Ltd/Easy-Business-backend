@@ -39,6 +39,16 @@ const resolveTenant = async (slugOrDomain: string) => {
  * Returns { storeDown, daysLeft, isTrial, reason }
  */
 const checkStoreSubscription = async (tenantId: Types.ObjectId) => {
+  const tenant = await Tenant.findById(tenantId).select("isOnline");
+  if (!tenant || tenant.isOnline === false) {
+    return {
+      storeDown: true,
+      daysLeft: 0,
+      isTrial: false,
+      reason: "Store is offline",
+    };
+  }
+
   const sub = await Subscription.findOne(
     { tenantId, status: { $in: ["active", "pending"] } },
     null,
@@ -96,6 +106,17 @@ const getStatus = asyncHandler(async (req: Request, res: Response) => {
         daysLeft: 0,
         isTrial: false,
         reason: "Store not found",
+      },
+    });
+  }
+  if (tenant.isOnline === false) {
+    return res.status(200).json({
+      success: true,
+      data: {
+        storeDown: true,
+        daysLeft: 0,
+        isTrial: false,
+        reason: "Store is offline",
       },
     });
   }

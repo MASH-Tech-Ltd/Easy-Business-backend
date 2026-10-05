@@ -464,7 +464,7 @@ const updateTenant = async (id: string, payload: Partial<ITenant>) => {
   if (payload.status === 'banned') {
     await User.updateMany({ tenantId: id }, { $set: { refreshTokens: [] } });
   }
-  if (payload.status) {
+  if (payload.status || payload.isOnline !== undefined) {
     await notifyTenantUpdate(id);
   }
   return updatedTenant;
