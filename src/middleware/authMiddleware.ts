@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import config from '../config';
 import { roleBasedRateLimiter } from './rateLimiter';
+import { Tenant } from '../modules/tenant/tenant.model';
 
 export const authMiddleware = (...requiredRoles: string[]) => {
   return async (req: Request, res: Response, next: NextFunction) => {
@@ -39,6 +40,38 @@ export const authMiddleware = (...requiredRoles: string[]) => {
 
       if (requiredRoles.length && !requiredRoles.includes(verifiedUser.role)) {
         return res.status(403).json({ success: false, message: 'Forbidden access' });
+      }
+
+      // Enforce merchant store status (see tenant status policy)
+      if (verifiedUser.role === 'tenant_admin') {
+        // Match by the token's tenantId OR by ownership, in case user.tenantId and tenant.ownerId diverge
+        const tenant: any = await Tenant.findOne({
+          $or: [
+            ...(verifiedUser.tenantId ? [{ _id: verifiedUser.tenantId }] : []),
+            { ownerId: verifiedUser._id },
+          ],
+          status: { $in: ['banned', 'suspended'] },
+        }).select('status').lean();
+        if (tenant?.status === 'banned') {
+          return res.status(403).json({
+            success: false,
+            code: 'ACCOUNT_BANNED',
+            message: 'Your merchant account has been banned. Please contact support.',
+          });
+        }
+        // Suspended: read-only, except support/billing/subscription so the merchant can resolve the issue
+        if (tenant?.status === 'suspended') {
+          const isReadOnly = ['GET', 'HEAD', 'OPTIONS'].includes(req.method);
+          const url = req.originalUrl || '';
+          const isResolutionRoute = /\/(support|billing|subscriptions|auth)(\/|\?|$)/.test(url);
+          if (!isReadOnly && !isResolutionRoute) {
+            return res.status(403).json({
+              success: false,
+              code: 'ACCOUNT_SUSPENDED',
+              message: 'Your account is suspended. You have read-only access. Please contact support.',
+            });
+          }
+        }
       }
 
       req.user = verifiedUser;

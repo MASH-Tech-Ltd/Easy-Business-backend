@@ -24,8 +24,14 @@ const notifyTenantUpdate = async (tenantId?: string) => {
     }
     if (tenantId) {
       const tenant = await Tenant.findById(tenantId);
+      const event = tenant?.status === 'banned' ? 'account_banned' : 'account_status_changed';
       if (tenant && tenant.ownerId) {
-        io.to('user_' + tenant.ownerId.toString()).emit('account_status_changed');
+        io.to('user_' + tenant.ownerId.toString()).emit(event);
+      }
+      // ownerId is not always set on tenants, so also notify every user of this tenant
+      const tenantUsers = await User.find({ tenantId }).select('_id').lean();
+      for (const u of tenantUsers) {
+        io.to('user_' + u._id.toString()).emit(event);
       }
     }
   } catch (error) {}
@@ -129,9 +135,8 @@ const getAllTenants = async (
   const tenantIds = data.map((t) => t._id);
   const [subscriptions, productCounts, categoryCounts] = await Promise.all([
     Subscription.find({
-      tenantId: { $in: tenantIds },
-      status: 'active'
-    }).populate('packageId'),
+      tenantId: { $in: tenantIds }
+    }).sort({ createdAt: -1 }).populate('packageId').lean(),
     Product.aggregate([
       { $match: { tenantId: { $in: tenantIds } } },
       { $group: { _id: '$tenantId', count: { $sum: 1 } } }
@@ -150,13 +155,23 @@ const getAllTenants = async (
 
   const dataWithPackages = data.map((tenant) => {
     const tIdStr = tenant._id.toString();
-    const sub = subscriptions.find((s) => s.tenantId.toString() === tIdStr);
+    const tenantSubs = subscriptions.filter((s) => s.tenantId?.toString() === tIdStr);
+    // Prefer active subscription if available, else latest subscription
+    const sub = tenantSubs.find((s) => s.status === 'active') || tenantSubs[0];
     return {
       ...tenant,
+      isOnline: tenant.isOnline !== false,
       totalProducts: productMap.get(tIdStr) || 0,
       totalCategories: categoryMap.get(tIdStr) || 0,
       package: sub && sub.packageId ? sub.packageId : null,
-      subscription: sub || null
+      subscription: sub ? {
+        _id: sub._id,
+        status: sub.status,
+        isTrial: sub.isTrial,
+        startDate: sub.startDate,
+        endDate: sub.endDate,
+        packageName: (sub.packageId as any)?.name || (sub.isTrial ? 'Free Trial' : 'Custom Plan')
+      } : null
     };
   });
 
@@ -417,6 +432,14 @@ const updateTenant = async (id: string, payload: Partial<ITenant>) => {
   const updatedTenant = await Tenant.findByIdAndUpdate(id, updateQuery, { returnDocument: 'after', strict: false });
   if (!updatedTenant) {
     throw new CustomError(404, 'Tenant not found');
+  }
+
+  // A banned merchant loses all active sessions immediately
+  if (payload.status === 'banned') {
+    await User.updateMany({ tenantId: id }, { $set: { refreshTokens: [] } });
+  }
+  if (payload.status) {
+    await notifyTenantUpdate(id);
   }
   return updatedTenant;
 };

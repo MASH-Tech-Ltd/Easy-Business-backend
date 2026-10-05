@@ -94,11 +94,11 @@ export const tenantMiddleware = async (
       tenant = await Tenant.findOne({ slug: bare, status: "active" });
     }
 
-    if (!tenant) {
+    if (!tenant || tenant.isOnline === false) {
       console.log(
-        `[TenantMiddleware] Store not found for slug/domain: ${slugOrDomain}`,
+        `[TenantMiddleware] Store not found or offline for domain: ${slugOrDomain}`,
       );
-      return ApiResponse.sendError(res, 404, "Store not found or suspended");
+      return ApiResponse.sendError(res, 404, "Store not found or currently unavailable");
     }
 
     // Attach tenant info to request

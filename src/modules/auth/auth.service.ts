@@ -17,6 +17,21 @@ import { Tenant } from '../tenant/tenant.model';
 import slugify from 'slugify';
 import { Subscription } from '../subscription/subscription.model';
 
+const assertMerchantNotBanned = async (user: any) => {
+  if (user.role === 'tenant_admin') {
+    const tenant = await Tenant.findOne({
+      $or: [
+        ...(user.tenantId ? [{ _id: user.tenantId }] : []),
+        { ownerId: user._id },
+      ],
+      status: 'banned',
+    }).select('status').lean();
+    if (tenant) {
+      throw new CustomError(403, 'Your merchant account has been banned. Please contact support.');
+    }
+  }
+};
+
 const register = async (payload: Partial<IUser> & { storeName?: string }): Promise<Omit<IUser, 'password'>> => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -117,6 +132,8 @@ const login = async (payload: Partial<IUser>): Promise<any> => {
   if (!isPasswordMatch) {
     throw new CustomError(401, 'Invalid email or password');
   }
+
+  await assertMerchantNotBanned(user);
 
   // Check 2FA requirement
   if (user.twoFactorEnabled) {
@@ -278,6 +295,8 @@ const refreshToken = async (token: string) => {
   if (!user) {
     throw new CustomError(401, 'User not found');
   }
+
+  await assertMerchantNotBanned(user);
 
   const tokenExists = user.refreshTokens && user.refreshTokens.some(rt => rt.token === token);
   

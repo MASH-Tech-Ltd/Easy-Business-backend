@@ -8,7 +8,8 @@ export interface ITenant extends Document {
   customDomain?: string | undefined;
   logo?: string;
   ownerId?: Types.ObjectId;
-  status: 'active' | 'suspended' | 'pending';
+  status: 'active' | 'inactive' | 'suspended' | 'pending' | 'banned';
+  isOnline?: boolean;
   domainStatus?: 'pending' | 'active' | 'failed' | undefined;
   sslValidationRecords?: any[];
   contactEmail?: string;
