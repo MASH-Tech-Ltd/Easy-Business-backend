@@ -11,6 +11,7 @@ const tenantSchema = new Schema<ITenant>(
     ownerId: { type: Schema.Types.ObjectId, ref: 'User' },
     status: { type: String, enum: ['active', 'inactive', 'suspended', 'pending', 'banned'], default: 'pending' },
     isOnline: { type: Boolean, default: true },
+    isOnlineByAdmin: { type: Boolean, default: true },
     domainStatus: { type: String, enum: ['pending', 'active', 'failed'], default: 'pending' },
     sslValidationRecords: [{ type: Schema.Types.Mixed }],
     contactEmail: { type: String },

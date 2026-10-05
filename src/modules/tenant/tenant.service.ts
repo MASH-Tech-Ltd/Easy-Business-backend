@@ -161,6 +161,7 @@ const getAllTenants = async (
     return {
       ...tenant,
       isOnline: tenant.isOnline !== false,
+      isOnlineByAdmin: tenant.isOnlineByAdmin !== false,
       totalProducts: productMap.get(tIdStr) || 0,
       totalCategories: categoryMap.get(tIdStr) || 0,
       package: sub && sub.packageId ? sub.packageId : null,
@@ -224,6 +225,27 @@ const getMyStore = async (tenantId: string) => {
 };
 
 const updateMyStore = async (tenantId: string, payload: any) => {
+  const existingStore = await Tenant.findById(tenantId);
+  if (!existingStore) {
+    throw new CustomError(404, 'Store not found');
+  }
+
+  let targetOnline: boolean | undefined = undefined;
+  if (payload.isOnline !== undefined) {
+    targetOnline = payload.isOnline === true || payload.isOnline === 'true';
+  }
+
+  if (targetOnline !== undefined) {
+    const isOnlineByAdmin = existingStore.isOnlineByAdmin !== false;
+    if (!isOnlineByAdmin && targetOnline === true) {
+      throw new CustomError(
+        403,
+        'Your store has been set offline by Super Admin. Please contact support to reactivate your storefront.'
+      );
+    }
+    payload.isOnline = targetOnline;
+  }
+
   const updatedStore = await Tenant.findByIdAndUpdate(tenantId, payload, { returnDocument: 'after', strict: false });
   if (!updatedStore) {
     throw new CustomError(404, 'Store not found');
@@ -413,6 +435,10 @@ const getStoreInfoByDomain = async (domain: string) => {
 };
 
 const updateTenant = async (id: string, payload: Partial<ITenant>) => {
+  if (payload.isOnline !== undefined) {
+    (payload as any).isOnlineByAdmin = payload.isOnline;
+  }
+
   const updateQuery: any = { $set: { ...payload } };
   const unsetQuery: any = {};
 

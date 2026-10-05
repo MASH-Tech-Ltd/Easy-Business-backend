@@ -10,6 +10,7 @@ export interface ITenant extends Document {
   ownerId?: Types.ObjectId;
   status: 'active' | 'inactive' | 'suspended' | 'pending' | 'banned';
   isOnline?: boolean;
+  isOnlineByAdmin?: boolean;
   domainStatus?: 'pending' | 'active' | 'failed' | undefined;
   sslValidationRecords?: any[];
   contactEmail?: string;
