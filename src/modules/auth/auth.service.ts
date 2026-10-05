@@ -9,6 +9,7 @@ import otpGenerator from 'otp-generator';
 import { sendEmail } from '../../utils/sendEmail';
 import { resetPasswordTemplate } from '../../templates/resetPassword';
 import { newRegistrationTemplate } from '../../templates/newRegistration';
+import { welcomeUserTemplate } from '../../templates/welcomeUser';
 import speakeasy from 'speakeasy';
 import QRCode from 'qrcode';
 
@@ -102,10 +103,17 @@ const register = async (payload: Partial<IUser> & { storeName?: string }): Promi
     session.endSession();
 
     try {
-      const emailContent = newRegistrationTemplate(user.email as string, user.name || '');
-      await sendEmail('sabbir00921@gmail.com', 'New User Registration Notification', emailContent);
+      // Send welcome email to newly registered user
+      if (user.email) {
+        const welcomeContent = welcomeUserTemplate(user.name || '');
+        await sendEmail(user.email, 'MASH ECO-তে আপনাকে স্বাগতম!', welcomeContent);
+      }
+
+      // Send registration notification to admin
+      const adminEmailContent = newRegistrationTemplate(user.email as string, user.name || '');
+      await sendEmail('sabbir00921@gmail.com', 'New User Registration Notification', adminEmailContent);
     } catch (err) {
-      console.error('Failed to send registration notification email:', err);
+      console.error('Failed to send registration email:', err);
     }
 
     const userObj = user.toObject();
