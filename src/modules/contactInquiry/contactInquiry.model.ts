@@ -5,7 +5,8 @@ const contactInquirySchema = new Schema<IContactInquiry>(
   {
     firstName: { type: String, required: true },
     lastName: { type: String, required: true },
-    email: { type: String, required: true },
+    phone: { type: String, required: true },
+    email: { type: String, required: false, default: '' },
     topic: { type: String, required: true },
     message: { type: String, required: true },
     status: { type: String, enum: ['pending', 'resolved'], default: 'pending' },
