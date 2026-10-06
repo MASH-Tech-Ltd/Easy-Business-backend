@@ -322,7 +322,7 @@ const deleteProduct = asyncHandler(async (req: Request, res: Response) => {
   // SECURITY FIX (IDOR): Scope delete to caller's tenantId from JWT
   const tenantId = (req as any).user.tenantId;
   const result = await ProductService.deleteProduct(req.params.id as string, tenantId);
-  ApiResponse.sendSuccess(res, 200, "Product deleted successfully", result);
+  ApiResponse.sendSuccess(res, 200, "Product deleted successfully");
 });
 
 const checkProductLimit = asyncHandler(async (req: Request, res: Response) => {
@@ -341,7 +341,7 @@ const checkProductLimit = asyncHandler(async (req: Request, res: Response) => {
 const deleteAllProductsByTenant = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = req.params.tenantId;
   const result = await ProductService.deleteAllProductsByTenant(tenantId as string);
-  ApiResponse.sendSuccess(res, 200, "All products for the store have been deleted successfully", result);
+  ApiResponse.sendSuccess(res, 200, "All products for the store have been deleted successfully");
 });
 
 export const ProductController = {

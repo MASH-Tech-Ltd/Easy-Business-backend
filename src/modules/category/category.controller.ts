@@ -94,7 +94,7 @@ const deleteCategory = asyncHandler(async (req: Request, res: Response) => {
   if (!result) {
     return ApiResponse.sendError(res, 404, 'Category not found or unauthorized');
   }
-  ApiResponse.sendSuccess(res, 200, 'Category deleted successfully', result);
+  ApiResponse.sendSuccess(res, 200, 'Category deleted successfully');
 });
 
 export const CategoryController = {

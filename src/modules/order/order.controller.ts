@@ -32,8 +32,8 @@ const updateOrder = asyncHandler(async (req: Request, res: Response) => {
 const deleteOrder = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = (req as any).user.tenantId;
   const { id } = req.params;
-  const result = await OrderService.deleteOrder(id as string, tenantId);
-  ApiResponse.sendSuccess(res, 200, 'Order deleted successfully', result);
+  await OrderService.deleteOrder(id as string, tenantId);
+  ApiResponse.sendSuccess(res, 200, 'Order deleted successfully');
 });
 
 const trackOrder = asyncHandler(async (req: Request, res: Response) => {
