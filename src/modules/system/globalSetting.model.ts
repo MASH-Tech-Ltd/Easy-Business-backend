@@ -16,6 +16,18 @@ export interface IGlobalSettings extends Document {
     'design-05'?: string;
     [key: string]: string | undefined;
   };
+  couriers: {
+    id: string;
+    isActive: boolean;
+    badge: 'none' | 'new' | 'beta';
+    message?: string;
+  }[];
+  sidebarMenu: {
+    id: string;
+    isActive: boolean;
+    badge: 'none' | 'new' | 'beta';
+    message?: string;
+  }[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -35,6 +47,37 @@ const globalSettingsSchema = new Schema<IGlobalSettings>(
       'design-03': { type: String, default: '' },
       'design-04': { type: String, default: '' },
       'design-05': { type: String, default: '' },
+    },
+    couriers: {
+      type: [
+        {
+          id: { type: String, required: true },
+          isActive: { type: Boolean, default: true },
+          badge: { type: String, enum: ['none', 'new', 'beta'], default: 'none' },
+          message: { type: String, default: '' },
+        }
+      ],
+      default: [
+        { id: 'pathao', isActive: true, badge: 'none', message: '' },
+        { id: 'steadfast', isActive: true, badge: 'none', message: '' },
+        { id: 'redx', isActive: true, badge: 'none', message: '' },
+      ],
+    },
+    sidebarMenu: {
+      type: [
+        {
+          id: { type: String, required: true },
+          isActive: { type: Boolean, default: true },
+          badge: { type: String, enum: ['none', 'new', 'beta'], default: 'none' },
+          message: { type: String, default: '' },
+        }
+      ],
+      default: [
+        { id: 'courier', isActive: true, badge: 'beta', message: '' },
+        { id: 'fraudCheck', isActive: true, badge: 'beta', message: '' },
+        { id: 'checkoutLeads', isActive: true, badge: 'beta', message: '' },
+        { id: 'apiKeys', isActive: true, badge: 'beta', message: '' },
+      ],
     },
   },
   { timestamps: true }

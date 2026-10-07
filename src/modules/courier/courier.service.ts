@@ -235,16 +235,26 @@ const checkCourierAddonLimit = async (tenantId: string) => {
 
   const courierConfig = await Courier.findOne({ tenantId });
   let configuredProviders: string[] = [];
+  let providerDetails: Record<string, { isConfigured: boolean; isActive: boolean }> = {};
+  
   if (courierConfig?.providers) {
     configuredProviders = Object.keys(courierConfig.providers).filter(
       (k) =>
         (courierConfig.providers as any)[k]?.isActive &&
         (courierConfig.providers as any)[k]?.clientId,
     );
+    
+    Object.keys(courierConfig.providers).forEach((k) => {
+      const p = (courierConfig.providers as any)[k];
+      if (p?.clientId) {
+        providerDetails[k] = { isConfigured: true, isActive: !!p.isActive };
+      }
+    });
   } else if (courierConfig?.provider) {
     configuredProviders = [courierConfig.provider];
+    providerDetails[courierConfig.provider] = { isConfigured: true, isActive: true };
   }
-  return { allowed: true, configuredProviders };
+  return { allowed: true, configuredProviders, providerDetails };
 };
 
 const forwardOrder = async (

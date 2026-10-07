@@ -42,6 +42,12 @@ const updateGlobalSettings = asyncHandler(
         ...payload.themePreviews,
       };
     }
+    if (payload.couriers !== undefined) {
+      settings.couriers = payload.couriers;
+    }
+    if (payload.sidebarMenu !== undefined) {
+      settings.sidebarMenu = payload.sidebarMenu;
+    }
 
     await settings.save();
     ApiResponse.sendSuccess(
@@ -68,6 +74,23 @@ const getThemePreviews = asyncHandler(async (req: Request, res: Response) => {
     "Theme preview links retrieved",
     themePreviews,
   );
+});
+
+const getPublicSettings = asyncHandler(async (req: Request, res: Response) => {
+  let settings = await GlobalSetting.findOne();
+  if (!settings) {
+    settings = await GlobalSetting.create({});
+  }
+  
+  const publicData = {
+    platformName: settings.platformName,
+    maintenanceMode: settings.maintenanceMode,
+    allowRegistration: settings.allowRegistration,
+    couriers: settings.couriers,
+    sidebarMenu: settings.sidebarMenu,
+  };
+  
+  ApiResponse.sendSuccess(res, 200, "Public settings retrieved", publicData);
 });
 
 const getHealthStats = asyncHandler(async (req: Request, res: Response) => {
@@ -446,4 +469,5 @@ export const SystemController = {
   getVisitorLogs,
   createVisitorLog,
   clearVisitorLogs,
+  getPublicSettings,
 };
