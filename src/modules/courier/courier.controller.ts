@@ -41,11 +41,11 @@ const checkAddonLimit = asyncHandler(async (req: Request, res: Response) => {
 
 const forwardOrder = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = (req as any).user?.tenantId;
-  const { orderId, providerId } = req.body;
-  if (!orderId || !providerId) {
-    return ApiResponse.sendError(res, 400, 'Order ID and Provider ID are required');
+  const { orderId, provider } = req.body;
+  if (!orderId || !provider) {
+    return ApiResponse.sendError(res, 400, 'Order ID and Provider are required');
   }
-  const result = await CourierService.forwardOrder(orderId, tenantId, providerId);
+  const result = await CourierService.forwardOrder(orderId, tenantId, provider);
   ApiResponse.sendSuccess(res, 200, 'Order forwarded successfully', result);
 });
 
