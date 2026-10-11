@@ -10,7 +10,7 @@ const categorySchema = new Schema<ICategory>(
       public_id: { type: String },
       secure_url: { type: String }
     },
-    status: { type: String, enum: ['ACTIVE', 'DRAFT'], default: 'ACTIVE' },
+    status: { type: String, enum: ['ACTIVE', 'DRAFT', 'INACTIVE'], default: 'ACTIVE' },
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true },
   },
   {

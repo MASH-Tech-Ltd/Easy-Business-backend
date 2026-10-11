@@ -92,6 +92,19 @@ const checkStoreSubscription = async (tenantId: Types.ObjectId) => {
   };
 };
 
+/**
+ * Returns IDs of all ACTIVE categories for a tenant.
+ * Any category with status === 'DRAFT' or 'INACTIVE' is excluded.
+ * If status is missing/undefined, it defaults to ACTIVE.
+ */
+const getActiveCategoryIds = async (tenantId: Types.ObjectId): Promise<Types.ObjectId[]> => {
+  const activeCategories = await Category.find({
+    tenantId,
+    status: { $nin: ['DRAFT', 'INACTIVE'] },
+  }).select('_id');
+  return activeCategories.map((c) => c._id as Types.ObjectId);
+};
+
 // ── Controllers ───────────────────────────────────────────────────────────────
 
 const getStatus = asyncHandler(async (req: Request, res: Response) => {
@@ -174,34 +187,61 @@ const getProducts = asyncHandler(async (req: Request, res: Response) => {
     brand,
   } = req.query;
 
-  const query: any = { tenantId, status: "ACTIVE" };
+  // For storefront only: get IDs of all ACTIVE categories
+  const activeCategoryIds = await getActiveCategoryIds(tenantId);
+
+  // If no categories are active, no products under active categories can be shown
+  const query: any = {
+    tenantId,
+    status: "ACTIVE",
+    categoryId: { $in: activeCategoryIds },
+  };
+
   if (categoryId) {
     const rawCatStr = String(categoryId).trim();
+    let requestedCatId: Types.ObjectId | null = null;
     if (Types.ObjectId.isValid(rawCatStr)) {
-      query.categoryId = new Types.ObjectId(rawCatStr);
+      requestedCatId = new Types.ObjectId(rawCatStr);
     } else {
-      const foundCat = await Category.findOne({ tenantId, slug: rawCatStr }).select("_id");
+      const foundCat = await Category.findOne({
+        tenantId,
+        slug: rawCatStr,
+        status: { $nin: ['DRAFT', 'INACTIVE'] },
+      }).select("_id");
       if (foundCat) {
-        query.categoryId = foundCat._id;
-      } else {
-        query.categoryId = rawCatStr;
+        requestedCatId = foundCat._id as Types.ObjectId;
       }
     }
+
+    if (requestedCatId && activeCategoryIds.some((id) => id.equals(requestedCatId!))) {
+      query.categoryId = requestedCatId;
+    } else {
+      // Requested category is either inactive, nonexistent, or invalid -> return 0 products
+      query.categoryId = new Types.ObjectId();
+    }
   }
+
   if (search) {
     // Sanitize: cap length to 100 chars to prevent ReDoS on unbounded $regex patterns
     const safeSearch = (search as string).slice(0, 100);
     const matchingCategories = await Category.find({
       tenantId,
+      status: { $nin: ['DRAFT', 'INACTIVE'] },
       name: { $regex: safeSearch, $options: "i" },
     }).select("_id");
-    const categoryIds = matchingCategories.map((c) => c._id);
+    const categoryIds = matchingCategories.map((c) => c._id as Types.ObjectId);
 
-    query.$or = [
-      { title: { $regex: safeSearch, $options: "i" } },
-      { brand: { $regex: safeSearch, $options: "i" } },
-      { categoryId: { $in: categoryIds } },
+    query.$and = [
+      { categoryId: { $in: activeCategoryIds } },
+      {
+        $or: [
+          { title: { $regex: safeSearch, $options: "i" } },
+          { brand: { $regex: safeSearch, $options: "i" } },
+          { categoryId: { $in: categoryIds } },
+        ],
+      },
     ];
+    delete query.categoryId;
   }
   if (brand) query.brand = { $regex: (brand as string).slice(0, 50), $options: "i" };
   if (inStock === "true") {
@@ -358,9 +398,13 @@ const getBestsellingProducts = asyncHandler(
     const rawLimit = parseInt((req.query.limit as string) || '8', 10);
     const limitNum = Math.min(Math.max(1, isNaN(rawLimit) ? 8 : rawLimit), 50);
 
+    // For storefront only: exclude products whose category is DRAFT or INACTIVE
+    const activeCategoryIds = await getActiveCategoryIds(tenantId);
+
     const bestsellers = await Product.find({ 
       tenantId, 
       status: "ACTIVE", 
+      categoryId: { $in: activeCategoryIds },
       salesCount: { $gt: 20 },
       $expr: {
         $gt: [
@@ -402,9 +446,13 @@ const getNewArrivals = asyncHandler(
     const rawLimit = parseInt((req.query.limit as string) || '8', 10);
     const limitNum = Math.min(Math.max(1, isNaN(rawLimit) ? 8 : rawLimit), 50);
 
+    // For storefront only: exclude products whose category is DRAFT or INACTIVE
+    const activeCategoryIds = await getActiveCategoryIds(tenantId);
+
     const newArrivals = await Product.find({
       tenantId,
       status: "ACTIVE",
+      categoryId: { $in: activeCategoryIds },
       $expr: {
         $gt: [
           { $convert: { input: "$stock", to: "int", onError: 0, onNull: 0 } },
@@ -446,12 +494,16 @@ const getJustForYouProducts = asyncHandler(
     const rawLimit = parseInt((req.query.limit as string) || '8', 10);
     const limitNum = Math.min(Math.max(1, isNaN(rawLimit) ? 8 : rawLimit), 50);
 
+    // For storefront only: exclude products whose category is DRAFT or INACTIVE
+    const activeCategoryIds = await getActiveCategoryIds(tenantId);
+
     const objectTenantId = new Types.ObjectId(tenantId);
     const inStockDocs = await Product.aggregate([
       {
         $match: {
           tenantId: objectTenantId,
           status: "ACTIVE",
+          categoryId: { $in: activeCategoryIds },
           $expr: {
             $gt: [
               { $convert: { input: "$stock", to: "int", onError: 0, onNull: 0 } },
@@ -471,6 +523,7 @@ const getJustForYouProducts = asyncHandler(
           $match: {
             tenantId: objectTenantId,
             status: "ACTIVE",
+            categoryId: { $in: activeCategoryIds },
             $expr: {
               $lte: [
                 { $convert: { input: "$stock", to: "int", onError: 0, onNull: 0 } },
@@ -513,10 +566,15 @@ const getProductBySlug = asyncHandler(async (req: Request, res: Response) => {
         message: "Store subscription inactive or expired",
       });
   }
+
+  // For storefront only: product must belong to an active category
+  const activeCategoryIds = await getActiveCategoryIds(tenantId);
+
   const product = await Product.findOne({
     tenantId,
     slug,
     status: "ACTIVE",
+    categoryId: { $in: activeCategoryIds },
   }).populate("categoryId");
   if (!product) {
     return ApiResponse.sendError(res, 404, "Product not found");
@@ -537,7 +595,11 @@ const getCategories = asyncHandler(async (req: Request, res: Response) => {
         message: "Store subscription inactive or expired",
       });
   }
-  const categories = await Category.find({ tenantId });
+  // Storefront only: return only ACTIVE categories (exclude DRAFT and INACTIVE)
+  const categories = await Category.find({
+    tenantId,
+    status: { $nin: ['DRAFT', 'INACTIVE'] },
+  });
   ApiResponse.sendSuccess(
     res,
     200,
@@ -560,12 +622,23 @@ const getBrands = asyncHandler(async (req: Request, res: Response) => {
         message: "Store subscription inactive or expired",
       });
   }
+
+  const activeCategoryIds = await getActiveCategoryIds(tenantId);
+
   const query: any = {
     tenantId,
     status: "ACTIVE",
+    categoryId: { $in: activeCategoryIds },
     brand: { $nin: [null, ""] },
   };
-  if (categoryId) query.categoryId = categoryId;
+  if (categoryId) {
+    const rawCatStr = String(categoryId).trim();
+    if (Types.ObjectId.isValid(rawCatStr) && activeCategoryIds.some((id) => id.toString() === rawCatStr)) {
+      query.categoryId = new Types.ObjectId(rawCatStr);
+    } else {
+      query.categoryId = new Types.ObjectId();
+    }
+  }
   const brands = await Product.distinct("brand", query);
   brands.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   ApiResponse.sendSuccess(res, 200, "Brands retrieved successfully", brands);
@@ -575,7 +648,7 @@ const getInfo = asyncHandler(async (req: Request, res: Response) => {
   const tenantSlug = req.params.tenantSlug as string;
   const query = normalizeTenantQuery(tenantSlug);
   const tenant = await Tenant.findOne({ ...query, status: 'active' })
-    .select('name logo slug customDomain settings description');
+    .select('name logo slug customDomain domainStatus settings description');
   if (!tenant) {
     // We MUST return 200 here. Next.js ISR ignores 404s and will keep the stale cache!
     return res
