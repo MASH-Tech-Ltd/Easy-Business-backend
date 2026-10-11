@@ -345,7 +345,8 @@ const forwardOrder = async (
     const provider = new SteadfastProvider(clientId, apiSecret);
     result = await provider.createOrder(order);
   } else if (providerId === "redx") {
-    const provider = new RedxProvider(clientId, apiSecret);
+    const tenant = await Tenant.findById(tenantId);
+    const provider = new RedxProvider(clientId, apiSecret, false, tenant);
     result = await provider.createOrder(order);
   } else {
     throw new CustomError(400, "Unsupported courier provider");
@@ -355,7 +356,7 @@ const forwardOrder = async (
   order.consignmentId = result.consignmentId;
   order.trackingUrl = result.trackingUrl;
   order.courierProvider = providerId;
-  order.status = "shipped"; // Automatically mark as shipped? (Optional, kept original status logic unless asked)
+  order.status = "shipped";
   await order.save();
 
   // 6. Increment Usage

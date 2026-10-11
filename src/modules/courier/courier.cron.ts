@@ -167,13 +167,15 @@ export const runCourierStatusSync = async (): Promise<SyncResult> => {
               courierStatus.includes('delivered') || 
               courierStatus.includes('delivery_successful') || 
               courierStatus.includes('successful') || 
-              courierStatus.includes('package delivered')
+              courierStatus.includes('package delivered') ||
+              courierStatus === 'paid'
             ) {
               newStatus = 'delivered';
             } else if (
               courierStatus.includes('returned') || 
               courierStatus.includes('return_successful') ||
               courierStatus.includes('returned_to_merchant') ||
+              courierStatus.includes('agent-returning') ||
               courierStatus.includes('return')
             ) {
               newStatus = 'returned';
@@ -193,7 +195,11 @@ export const runCourierStatusSync = async (): Promise<SyncResult> => {
               courierStatus.includes('in_review') ||
               courierStatus.includes('package created') ||
               courierStatus.includes('picked up') ||
-              courierStatus.includes('in_transit')
+              courierStatus.includes('in_transit') ||
+              courierStatus.includes('ready-for-delivery') ||
+              courierStatus.includes('delivery-in-progress') ||
+              courierStatus.includes('agent-hold') ||
+              courierStatus.includes('agent-area-change')
             ) {
               newStatus = 'shipped';
             }
