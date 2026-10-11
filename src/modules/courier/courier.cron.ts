@@ -181,6 +181,7 @@ export const runCourierStatusSync = async (): Promise<SyncResult> => {
               newStatus = 'returned';
             } else if (
               courierStatus.includes('cancel') || 
+              courierStatus.includes('delete') ||
               courierStatus.includes('delivery_failed') ||
               courierStatus === 'hold'
             ) {
