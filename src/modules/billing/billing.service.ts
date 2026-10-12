@@ -7,6 +7,9 @@ import { Addon } from '../addon/addon.model';
 import { notificationService } from '../notification/notification.service';
 import { User } from '../auth/auth.model';
 import { paginationHelper } from '../../helpers/paginationHelper';
+import { ReferralService } from '../referral/referral.service';
+import { Package } from '../package/package.model';
+import { SubscriptionService } from '../subscription/subscription.service';
 
 const getPlatformPaymentSettings = async () => {
   let settings = await PlatformPaymentSettings.findOne();
@@ -81,6 +84,45 @@ const submitPaymentProof = async (tenantId: string, payload: {
   const existingTrx = await PlatformPaymentSubmission.findOne({ transactionId: payload.transactionId.trim() });
   if (existingTrx) {
     throw new CustomError(400, 'This Transaction ID (TrxID) has already been submitted');
+  }
+
+  // Backend verification of amount for subscription packages
+  if (payload.purpose === 'package' || payload.purpose === 'renewal') {
+    const tenant = await Tenant.findById(tenantId);
+    // Find matching package by purposeTitle
+    const cleanTitle = (payload.purposeTitle || '').trim().toLowerCase();
+    const pkg = await Package.findOne({
+      $or: [
+        { name: { $regex: new RegExp(`^${cleanTitle}$`, 'i') } },
+        { name: cleanTitle }
+      ]
+    });
+
+    if (pkg) {
+      let expectedPrice = pkg.price;
+
+      // Apply first-time referral discount if tenant has an unused discount
+      if (
+        tenant?.referralDiscount &&
+        !tenant.referralDiscount.used &&
+        tenant.referralDiscount.discountValue > 0
+      ) {
+        if (tenant.referralDiscount.discountType === 'percentage') {
+          const discountAmt = Math.round((expectedPrice * tenant.referralDiscount.discountValue) / 100);
+          expectedPrice = Math.max(0, expectedPrice - discountAmt);
+        } else if (tenant.referralDiscount.discountType === 'fixed') {
+          expectedPrice = Math.max(0, expectedPrice - tenant.referralDiscount.discountValue);
+        }
+      }
+
+      // If merchant sent significantly less than the discounted expected price, reject
+      if (Number(payload.amount) < expectedPrice) {
+        throw new CustomError(
+          400,
+          `Invalid payment amount: ৳${payload.amount}. The required amount for plan "${pkg.name}" is ৳${expectedPrice}.`
+        );
+      }
+    }
   }
 
   const submissionData: any = {
@@ -229,6 +271,63 @@ const verifyPaymentSubmission = async (id: string, status: 'approved' | 'rejecte
       if (modified) {
         await subscription.save();
       }
+    }
+  }
+
+  // If subscription/package/renewal payment is verified and approved, unlock referrer points & mark first-time discount as used
+  if (status === 'approved' && (submission.purpose === 'package' || submission.purpose === 'renewal') && submission.tenantId) {
+    try {
+      await ReferralService.unlockReferralPointsForSubscription(submission.tenantId.toString());
+      // Mark referral discount as used
+      await Tenant.findByIdAndUpdate(submission.tenantId, {
+        $set: { 'referralDiscount.used': true },
+      });
+    } catch (err) {
+      console.error('Failed to unlock referral points upon payment verification:', err);
+    }
+
+    // Automatically approve related pending subscription for this tenant
+    try {
+      let pendingSub = null;
+      if (submission.purposeTitle) {
+        const allPendingSubs = await Subscription.find({
+          tenantId: submission.tenantId,
+          status: 'pending',
+        }).populate('packageId').sort({ createdAt: -1 });
+
+        const titleLower = submission.purposeTitle.trim().toLowerCase();
+        pendingSub = allPendingSubs.find((sub: any) => {
+          const pkgName = (sub.packageId?.name || '').trim().toLowerCase();
+          return pkgName && (titleLower.includes(pkgName) || pkgName.includes(titleLower));
+        }) || allPendingSubs[0];
+      } else {
+        pendingSub = await Subscription.findOne({
+          tenantId: submission.tenantId,
+          status: 'pending',
+        }).sort({ createdAt: -1 });
+      }
+
+      if (pendingSub) {
+        await SubscriptionService.approveSubscription(pendingSub._id.toString());
+      }
+    } catch (err) {
+      console.error('Failed to auto-approve related subscription on payment verification:', err);
+    }
+  }
+
+  // If subscription/package/renewal payment is rejected, also reject any pending subscription request for this tenant
+  if (status === 'rejected' && (submission.purpose === 'package' || submission.purpose === 'renewal') && submission.tenantId) {
+    try {
+      const pendingSub = await Subscription.findOne({
+        tenantId: submission.tenantId,
+        status: 'pending',
+      }).sort({ createdAt: -1 });
+
+      if (pendingSub) {
+        await SubscriptionService.rejectSubscription(pendingSub._id.toString());
+      }
+    } catch (err) {
+      console.error('Failed to auto-reject related subscription on payment rejection:', err);
     }
   }
 

@@ -81,6 +81,37 @@ const clearAllAuthCookies = (res: Response, role?: string) => {
 
 const register = asyncHandler(async (req: Request, res: Response) => {
   const result = await AuthService.register(req.body);
+
+  if (result.accessToken && result.refreshToken) {
+    const { refreshToken, ...others } = result;
+
+    const isSuperAdmin = others.user?.role === 'super_admin';
+    const rCookieName = isSuperAdmin ? '_super_r_tkn' : '_merchant_r_tkn';
+    const xCookieName = isSuperAdmin ? '_super_x_tkn' : '_merchant_x_tkn';
+
+    clearLegacyDomainCookies(res);
+    res.cookie(rCookieName, refreshToken, COOKIE_OPTIONS);
+    res.cookie(xCookieName, others.accessToken, COOKIE_OPTIONS);
+
+    try {
+      const roleName = isSuperAdmin ? 'Super Admin' : (others.user?.role === 'tenant_admin' ? 'Merchant' : 'Customer');
+      await VisitorLog.create({
+        role: roleName,
+        ipAddress: getClientIp(req),
+        userAgent: req.headers['user-agent'] || 'Unknown',
+        storeName: (others.user as any)?.storeName || others.user?.name || 'Platform',
+        ownerName: others.user?.name || others.user?.email,
+      });
+    } catch (err) {
+      console.error('Failed to record visitor log on register:', err);
+    }
+
+    return ApiResponse.sendSuccess(res, 201, 'User registered and logged in successfully', {
+      ...others,
+      refreshToken,
+    });
+  }
+
   ApiResponse.sendSuccess(res, 201, 'User registered successfully', result);
 });
 

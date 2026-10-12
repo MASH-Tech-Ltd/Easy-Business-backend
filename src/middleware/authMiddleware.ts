@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import config from '../config';
 import { roleBasedRateLimiter } from './rateLimiter';
 import { Tenant } from '../modules/tenant/tenant.model';
+import { User } from '../modules/auth/auth.model';
 
 export const authMiddleware = (...requiredRoles: string[]) => {
   return async (req: Request, res: Response, next: NextFunction) => {
@@ -44,15 +45,26 @@ export const authMiddleware = (...requiredRoles: string[]) => {
 
       // Enforce merchant store status (see tenant status policy)
       if (verifiedUser.role === 'tenant_admin') {
-        // Match by the token's tenantId OR by ownership, in case user.tenantId and tenant.ownerId diverge
-        const tenant: any = await Tenant.findOne({
-          $or: [
-            ...(verifiedUser.tenantId ? [{ _id: verifiedUser.tenantId }] : []),
-            { ownerId: verifiedUser._id },
-          ],
-          status: { $in: ['banned', 'suspended'] },
-        }).select('status').lean();
-        if (tenant?.status === 'banned') {
+        const [tenant, userExists] = await Promise.all([
+          Tenant.findOne({
+            $or: [
+              ...(verifiedUser.tenantId ? [{ _id: verifiedUser.tenantId }] : []),
+              { ownerId: verifiedUser._id },
+            ],
+          }).select('status').lean(),
+          User.exists({ _id: verifiedUser._id }),
+        ]);
+
+        // If merchant tenant or merchant user was deleted, reject immediately
+        if (!tenant || !userExists) {
+          return res.status(401).json({
+            success: false,
+            code: 'ACCOUNT_DELETED',
+            message: 'Your merchant account or store no longer exists. Please contact support.',
+          });
+        }
+
+        if (tenant.status === 'banned') {
           return res.status(403).json({
             success: false,
             code: 'ACCOUNT_BANNED',

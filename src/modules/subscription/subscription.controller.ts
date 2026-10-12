@@ -49,7 +49,7 @@ const getMySubscription = asyncHandler(async (req: Request, res: Response) => {
 
 const requestPackage = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = (req as any).user.tenantId;
-  const result = await SubscriptionService.requestPackage(tenantId, req.body.packageId);
+  const result = await SubscriptionService.requestPackage(tenantId, req.body.packageId, req.body.activationType);
   ApiResponse.sendSuccess(res, 201, 'Package requested successfully', result);
 });
 

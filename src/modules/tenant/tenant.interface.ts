@@ -21,4 +21,12 @@ export interface ITenant extends Document {
   settings?: Record<string, any>;
   showDemoSeed?: boolean;
   slugChanges?: Date[];
+  referralCodeUsed?: string;
+  referredBy?: string;
+  referralDiscount?: {
+    referralCode: string;
+    discountType: 'percentage' | 'fixed';
+    discountValue: number;
+    used: boolean;
+  };
 }

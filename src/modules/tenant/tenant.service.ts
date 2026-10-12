@@ -10,11 +10,12 @@ import { Courier } from "../courier/courier.model";
 import { FraudCheck } from "../fraudCheck/fraudCheck.model";
 import { Category } from "../category/category.model";
 import { Product } from "../product/product.model";
+import { Referral, ReferralUsage, ReferralReward, ReferralWithdrawal } from "../referral/referral.model";
 import mongoose from "mongoose";
 import axios from "axios";
 import config from "../../config";
 
-const notifyTenantUpdate = async (tenantId?: string) => {
+const notifyTenantUpdate = async (tenantId?: string, deletedUserIds: string[] = []) => {
   try {
     const io = require('../../socket').getIO();
     const { User } = require('../auth/auth.model');
@@ -23,15 +24,23 @@ const notifyTenantUpdate = async (tenantId?: string) => {
       io.to('user_' + admin._id.toString()).emit('refresh_tenants');
     }
     if (tenantId) {
-      const tenant = await Tenant.findById(tenantId);
-      const event = tenant?.status === 'banned' ? 'account_banned' : 'account_status_changed';
-      if (tenant && tenant.ownerId) {
-        io.to('user_' + tenant.ownerId.toString()).emit(event);
+      // If merchant was deleted, immediately inform their users and tenant socket room
+      for (const uid of deletedUserIds) {
+        io.to('user_' + uid).emit('account_deleted');
       }
-      // ownerId is not always set on tenants, so also notify every user of this tenant
-      const tenantUsers = await User.find({ tenantId }).select('_id').lean();
-      for (const u of tenantUsers) {
-        io.to('user_' + u._id.toString()).emit(event);
+      io.to('tenant_' + tenantId).emit('account_deleted');
+
+      const tenant = await Tenant.findById(tenantId);
+      if (tenant) {
+        const event = tenant?.status === 'banned' ? 'account_banned' : 'account_status_changed';
+        if (tenant.ownerId) {
+          io.to('user_' + tenant.ownerId.toString()).emit(event);
+        }
+        // ownerId is not always set on tenants, so also notify every user of this tenant
+        const tenantUsers = await User.find({ tenantId }).select('_id').lean();
+        for (const u of tenantUsers) {
+          io.to('user_' + u._id.toString()).emit(event);
+        }
       }
     }
   } catch (error) {}
@@ -617,6 +626,13 @@ const deleteTenant = async (id: string) => {
       }
     });
 
+    // Identify tenant user IDs prior to deletion so we can send instant real-time socket events
+    const existingTenantUsers = await User.find({ tenantId: id }).select('_id').lean();
+    const deletedUserIds = existingTenantUsers.map((u: any) => u._id.toString());
+    if (tenant.ownerId) {
+      deletedUserIds.push(tenant.ownerId.toString());
+    }
+
     // Sequential ACID cascading deletes on the active session (prevents MongoDB transaction write conflicts)
     await Tenant.findByIdAndDelete(id, { session });
     await User.deleteMany({ tenantId: id }, { session });
@@ -626,6 +642,10 @@ const deleteTenant = async (id: string) => {
     await Subscription.deleteMany({ tenantId: id }, { session });
     await FraudCheck.deleteMany({ tenantId: id }, { session });
     await Courier.deleteMany({ tenantId: id }, { session });
+    await Referral.deleteMany({ referrerTenantId: id }, { session });
+    await ReferralUsage.deleteMany({ $or: [{ referrerTenantId: id }, { referredTenantId: id }] }, { session });
+    await ReferralReward.deleteMany({ tenantId: id }, { session });
+    await ReferralWithdrawal.deleteMany({ tenantId: id }, { session });
 
     await session.commitTransaction();
     session.endSession();
@@ -637,7 +657,7 @@ const deleteTenant = async (id: string) => {
       );
     }
 
-    await notifyTenantUpdate(id);
+    await notifyTenantUpdate(id, deletedUserIds);
     return tenant;
   } catch (error) {
     await session.abortTransaction();

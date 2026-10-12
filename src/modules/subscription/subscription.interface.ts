@@ -6,7 +6,16 @@ export interface ISubscription extends Document {
   startDate: Date;
   endDate: Date;
   status: 'pending' | 'active' | 'expired' | 'cancelled';
+  activationType?: 'immediate' | 'queue';
   isTrial?: boolean;
+  originalPrice?: number;
+  paidAmount?: number;
+  discountApplied?: {
+    discountType?: 'percentage' | 'fixed';
+    discountValue?: number;
+    discountAmount?: number;
+    reason?: string;
+  };
   purchasedAddons?: {
     _id?: Types.ObjectId;
     addonId: Types.ObjectId | string;

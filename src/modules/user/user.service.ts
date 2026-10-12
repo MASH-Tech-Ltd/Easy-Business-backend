@@ -1,6 +1,7 @@
 import { User } from '../auth/auth.model';
 import { IUser } from '../auth/auth.interface';
 import { deleteCloudinary } from '../../helpers/cloudinary';
+import { Referral, ReferralUsage, ReferralReward, ReferralWithdrawal } from '../referral/referral.model';
 
 // SECURITY FIX (Mass Assignment): Whitelist only the fields a user can update on their own profile.
 // Prevents attackers from sending { "role": "super_admin", "tenantId": "..." } in the request body.
@@ -53,6 +54,12 @@ const deleteUser = async (id: string): Promise<IUser | null> => {
   const result = await User.findByIdAndDelete(id);
   if (result && result.avatar && result.avatar.public_id) {
     await deleteCloudinary(result.avatar.public_id, 'image').catch(err => console.error("Failed to delete user avatar from Cloudinary:", err));
+  }
+  if (result) {
+    await Referral.deleteMany({ referrerUserId: id });
+    await ReferralUsage.deleteMany({ referrerUserId: id });
+    await ReferralReward.deleteMany({ userId: id });
+    await ReferralWithdrawal.deleteMany({ userId: id });
   }
   return result;
 };

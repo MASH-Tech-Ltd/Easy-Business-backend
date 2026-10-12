@@ -17,6 +17,8 @@ import mongoose from 'mongoose';
 import { Tenant } from '../tenant/tenant.model';
 import slugify from 'slugify';
 import { Subscription } from '../subscription/subscription.model';
+import { Referral, ReferralUsage, ReferralReward } from '../referral/referral.model';
+import { notificationService } from '../notification/notification.service';
 
 const assertMerchantNotBanned = async (user: any) => {
   if (user.role === 'tenant_admin') {
@@ -33,7 +35,7 @@ const assertMerchantNotBanned = async (user: any) => {
   }
 };
 
-const register = async (payload: Partial<IUser> & { storeName?: string }): Promise<Omit<IUser, 'password'>> => {
+const register = async (payload: Partial<IUser> & { storeName?: string; referralCode?: string }): Promise<{ user: any; accessToken: string; refreshToken: string }> => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -46,6 +48,39 @@ const register = async (payload: Partial<IUser> & { storeName?: string }): Promi
 
     // All registrations via public endpoint default to tenant_admin (new merchant)
     payload.role = 'tenant_admin';
+
+    // Optional Referral Code handling
+    const rawReferralCode = typeof payload.referralCode === 'string' ? payload.referralCode.trim().toUpperCase() : '';
+    delete payload.referralCode;
+
+    let referralDoc: any = null;
+    let extraTrialDays = 0;
+
+    if (rawReferralCode) {
+      referralDoc = await Referral.findOne({ code: rawReferralCode });
+
+      if (!referralDoc) {
+        throw new CustomError(400, `Invalid referral code "${rawReferralCode}". Please check the code or leave it empty.`);
+      }
+
+      if (!referralDoc.isActive) {
+        throw new CustomError(400, `The referral code "${rawReferralCode}" is no longer active.`);
+      }
+
+      if (referralDoc.expiresAt && new Date(referralDoc.expiresAt).getTime() < Date.now()) {
+        throw new CustomError(400, `The referral code "${rawReferralCode}" has expired.`);
+      }
+
+      if (typeof referralDoc.maxUses === 'number' && referralDoc.maxUses > 0 && referralDoc.usedCount >= referralDoc.maxUses) {
+        throw new CustomError(400, `The referral code "${rawReferralCode}" has reached its maximum redemption limit.`);
+      }
+
+      if (referralDoc.offerType === 'subscription_discount') {
+        extraTrialDays = 0; // standard trial only, discount is for subscription
+      } else {
+        extraTrialDays = Number(referralDoc.extraDays) >= 0 ? Number(referralDoc.extraDays) : 10;
+      }
+    }
 
     // Distinguish between Store/Business Name and Owner/User Name
     const rawStoreName = payload.storeName?.trim() || '';
@@ -70,6 +105,17 @@ const register = async (payload: Partial<IUser> & { storeName?: string }): Promi
       domain: undefined,
       customDomain: undefined,
       status: 'active',
+      referralCodeUsed: referralDoc ? referralDoc.code : undefined,
+      referredBy: referralDoc ? (referralDoc.referrerName || 'Referral Partner') : undefined,
+      referralDiscount:
+        referralDoc && (referralDoc.offerType === 'subscription_discount' || referralDoc.offerType === 'both')
+          ? {
+              referralCode: referralDoc.code,
+              discountType: referralDoc.discountType || 'percentage',
+              discountValue: referralDoc.discountValue || 0,
+              used: false,
+            }
+          : undefined,
     });
 
     createdTenant = await tenant.save({ session });
@@ -83,10 +129,14 @@ const register = async (payload: Partial<IUser> & { storeName?: string }): Promi
       createdTenant.ownerId = user._id;
       await createdTenant.save({ session });
 
-      // Always create a 5-day free trial for every new merchant
+      // Create free trial subscription
+      // Standard trial is 5 days. If a referral code is used, add extra trial days (default +10 days -> 15 days total!)
+      const baseTrialDays = 5;
+      const totalTrialDays = baseTrialDays + extraTrialDays;
+
       const trialStart = new Date();
       const trialEnd = new Date();
-      trialEnd.setDate(trialEnd.getDate() + 5);
+      trialEnd.setDate(trialEnd.getDate() + totalTrialDays);
 
       const freeSubscription = new Subscription({
         tenantId: createdTenant._id,
@@ -97,6 +147,56 @@ const register = async (payload: Partial<IUser> & { storeName?: string }): Promi
         isTrial: true,
       });
       await freeSubscription.save({ session });
+
+      // If a valid referral was applied, record usage and increment count
+      if (referralDoc) {
+        referralDoc.usedCount = (referralDoc.usedCount || 0) + 1;
+        await referralDoc.save({ session });
+
+        // Only award referral points if the code was created by an existing merchant
+        const isMerchantReferrer = Boolean(referralDoc.isMerchantCode && referralDoc.referrerTenantId);
+        const pointsToAward = isMerchantReferrer ? (Number(referralDoc.pointsPerReferral) || 20) : 0;
+
+        await ReferralUsage.create(
+          [
+            {
+              referralId: referralDoc._id,
+              referralCode: referralDoc.code,
+              referrerUserId: referralDoc.referrerUserId || null,
+              referrerTenantId: referralDoc.referrerTenantId || null,
+              referredUserId: user._id,
+              referredTenantId: createdTenant._id,
+              referredEmail: user.email || '',
+              referredStoreName: storeName,
+              extraDaysAwarded: extraTrialDays,
+              pointsAwarded: pointsToAward,
+              pointsStatus: isMerchantReferrer ? 'pending' : 'usable',
+              createdAt: new Date(),
+            },
+          ],
+          { session }
+        );
+
+        // If the referral belongs to an existing merchant, add pending points to their wallet
+        if (referralDoc.referrerTenantId) {
+          let referrerReward = await ReferralReward.findOne({ tenantId: referralDoc.referrerTenantId }).session(session);
+          if (!referrerReward) {
+            referrerReward = new ReferralReward({
+              tenantId: referralDoc.referrerTenantId,
+              userId: referralDoc.referrerUserId || user._id,
+              totalPoints: pointsToAward,
+              pendingPoints: pointsToAward,
+              usablePoints: 0,
+              withdrawnPoints: 0,
+              totalTakaWithdrawn: 0,
+            });
+          } else {
+            referrerReward.totalPoints = (referrerReward.totalPoints || 0) + pointsToAward;
+            referrerReward.pendingPoints = (referrerReward.pendingPoints || 0) + pointsToAward;
+          }
+          await referrerReward.save({ session });
+        }
+      }
     }
 
     await session.commitTransaction();
@@ -109,16 +209,97 @@ const register = async (payload: Partial<IUser> & { storeName?: string }): Promi
         await sendEmail(user.email, 'MASH ECO-তে আপনাকে স্বাগতম!', welcomeContent);
       }
 
-      // Send registration notification to admin
-      const adminEmailContent = newRegistrationTemplate(user.email as string, user.name || '');
-      await sendEmail('sabbir00921@gmail.com', 'New User Registration Notification', adminEmailContent);
+      // Send in-app notification to user about referral benefits if applied
+      if (referralDoc) {
+        let notifTitle = '🎉 Referral Offer Applied!';
+        let notifMessage = '';
+
+        if (referralDoc.offerType === 'both') {
+          const discountStr = `${referralDoc.discountValue}${referralDoc.discountType === 'fixed' ? '৳' : '%'}`;
+          notifMessage = `Congratulations! You received ${extraTrialDays} days extra free trial (total ${5 + extraTrialDays} days) and a ${discountStr} discount on your first subscription plan!`;
+        } else if (referralDoc.offerType === 'subscription_discount') {
+          const discountStr = `${referralDoc.discountValue}${referralDoc.discountType === 'fixed' ? '৳' : '%'}`;
+          notifMessage = `Congratulations! You received a ${discountStr} discount on your first subscription package!`;
+        } else {
+          notifMessage = `Congratulations! You received ${extraTrialDays} days extra free trial (total ${5 + extraTrialDays} days free) to build and launch your store!`;
+        }
+
+        await notificationService.createNotification(
+          user._id,
+          'REFERRAL_REWARD',
+          notifTitle,
+          notifMessage,
+          createdTenant?._id,
+          createdTenant?._id
+        );
+      } else {
+        // Welcome notification for standard registration
+        await notificationService.createNotification(
+          user._id,
+          'WELCOME',
+          '👋 Welcome to MASH ECO!',
+          'Your online store is ready. Enjoy your 5-day free trial to set up products and start selling.',
+          createdTenant?._id,
+          createdTenant?._id
+        );
+      }
+
+      // Send registration notification to admin only in production (skip in local/development)
+      if (config.app.env === 'production') {
+        const adminEmailContent = newRegistrationTemplate(user.email as string, user.name || '');
+        await sendEmail('sabbir00921@gmail.com', 'New User Registration Notification', adminEmailContent);
+      }
     } catch (err) {
-      console.error('Failed to send registration email:', err);
+      console.error('Failed to send registration notification / email:', err);
     }
+
+    const familyId = crypto.randomBytes(8).toString('hex');
+
+    const jwtPayload = {
+      _id: user._id,
+      email: user.email,
+      role: user.role,
+      tenantId: user.tenantId,
+      familyId,
+    };
+
+    const accessToken = jwt.sign(jwtPayload, config.jwt.accessSecret, {
+      expiresIn: config.jwt.accessExpiresIn as any,
+    });
+
+    const refreshToken = jwt.sign(jwtPayload, config.jwt.refreshSecret, {
+      expiresIn: config.jwt.refreshExpiresIn as any,
+    });
 
     const userObj = user.toObject();
     delete userObj.password;
-    return userObj;
+    delete userObj.twoFactorSecret;
+    delete userObj.twoFactorRecoveryCodes;
+
+    if (createdTenant) {
+      (userObj as any).storeName = createdTenant.name;
+      (userObj as any).tenantSlug = createdTenant.slug;
+      (userObj as any).storeLogo = createdTenant.logo;
+    }
+
+    await User.updateOne(
+      { _id: user._id },
+      {
+        $push: {
+          refreshTokens: {
+            token: refreshToken,
+            familyId,
+            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          },
+        },
+      }
+    );
+
+    return {
+      user: userObj,
+      accessToken,
+      refreshToken,
+    };
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
@@ -202,6 +383,19 @@ const login = async (payload: Partial<IUser>): Promise<any> => {
   delete userObj.password;
   delete userObj.twoFactorSecret;
   delete userObj.twoFactorRecoveryCodes;
+
+  if (user.tenantId) {
+    try {
+      const tenant = await Tenant.findById(user.tenantId).select('name slug logo');
+      if (tenant) {
+        (userObj as any).storeName = tenant.name;
+        (userObj as any).tenantSlug = tenant.slug;
+        (userObj as any).storeLogo = tenant.logo;
+      }
+    } catch (err) {
+      console.error('Failed to attach tenant name in login:', err);
+    }
+  }
 
   await User.updateOne(
     { _id: user._id },

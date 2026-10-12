@@ -8,6 +8,7 @@ import { paginationHelper } from '../../helpers/paginationHelper';
 import { notificationService } from '../notification/notification.service';
 import { User } from '../auth/auth.model';
 import { PlatformPaymentSubmission } from '../billing/billing.model';
+import { ReferralService } from '../referral/referral.service';
 
 
 const notifySubscriptionUpdate = async (tenantId?: string) => {
@@ -122,22 +123,75 @@ const getTenantSubscription = async (tenantId: string): Promise<ISubscription | 
     }
   }
 
-  if (validSub) {
-    return validSub;
-  }
-
-  // If no currently valid subscription exists, return the closest future one (if any)
-  // This allows the UI to show upcoming renewals even if there's a temporary gap
-  const futureSub = await Subscription.findOne(
+  const targetSub = validSub || (await Subscription.findOne(
     { tenantId, status: { $in: ['active', 'pending'] }, startDate: { $gt: now } },
     null,
     { sort: { startDate: 1 } }
-  ).populate('packageId');
+  ).populate('packageId'));
 
-  return futureSub;
+  if (!targetSub) {
+    return null;
+  }
+
+  // If already populated with paidAmount, return as is
+  if (targetSub.paidAmount !== undefined || targetSub.isTrial) {
+    return targetSub;
+  }
+
+  // Fallback enrichment for existing subscriptions
+  try {
+    const pkgPrice = (targetSub.packageId as any)?.price || 0;
+    const payment = await PlatformPaymentSubmission.findOne({
+      tenantId,
+      purpose: { $in: ['package', 'renewal'] },
+      status: 'approved',
+    }).sort({ createdAt: -1 });
+
+    const tenant = await Tenant.findById(tenantId);
+    let paidAmount = payment ? payment.amount : pkgPrice;
+    let originalPrice = pkgPrice;
+    let discountApplied: any = undefined;
+
+    if (payment && payment.amount < pkgPrice) {
+      const discountAmount = pkgPrice - payment.amount;
+      const refDiscount = tenant?.referralDiscount;
+      discountApplied = {
+        discountType: refDiscount?.discountType || 'percentage',
+        discountValue: refDiscount?.discountValue || Math.round((discountAmount / pkgPrice) * 100),
+        discountAmount,
+        reason: 'Referral Discount',
+      };
+    } else if (tenant?.referralDiscount && tenant.referralDiscount.discountValue) {
+      const rd = tenant.referralDiscount;
+      const discountAmount =
+        rd.discountType === 'percentage'
+          ? Math.round((pkgPrice * rd.discountValue) / 100)
+          : rd.discountValue;
+      paidAmount = Math.max(0, pkgPrice - discountAmount);
+      discountApplied = {
+        discountType: rd.discountType,
+        discountValue: rd.discountValue,
+        discountAmount,
+        reason: 'Referral Discount',
+      };
+    }
+
+    targetSub.paidAmount = paidAmount;
+    targetSub.originalPrice = originalPrice;
+    if (discountApplied) targetSub.discountApplied = discountApplied;
+    await targetSub.save();
+  } catch (err) {
+    console.error('Error enriching tenant subscription:', err);
+  }
+
+  return targetSub;
 };
 
-const requestPackage = async (tenantId: string, packageId: string): Promise<ISubscription> => {
+const requestPackage = async (
+  tenantId: string,
+  packageId: string,
+  activationType: 'immediate' | 'queue' = 'immediate'
+): Promise<ISubscription> => {
   const selectedPackage = await Package.findById(packageId);
   if (!selectedPackage) {
     throw new CustomError(404, 'Package not found');
@@ -148,15 +202,38 @@ const requestPackage = async (tenantId: string, packageId: string): Promise<ISub
     throw new CustomError(400, 'You already have a pending subscription request');
   }
 
+  const tenant = await Tenant.findById(tenantId);
+  let paidAmount = selectedPackage.price;
+  let originalPrice = selectedPackage.price;
+  let discountApplied: any = undefined;
+
+  if (tenant?.referralDiscount && !tenant.referralDiscount.used && tenant.referralDiscount.discountValue) {
+    const rd = tenant.referralDiscount;
+    const discountAmount =
+      rd.discountType === 'percentage'
+        ? Math.round((selectedPackage.price * rd.discountValue) / 100)
+        : rd.discountValue;
+    paidAmount = Math.max(0, selectedPackage.price - discountAmount);
+    discountApplied = {
+      discountType: rd.discountType,
+      discountValue: rd.discountValue,
+      discountAmount,
+      reason: 'Referral Discount',
+    };
+  }
+
   const subscription = await Subscription.create({
     tenantId,
     packageId,
     startDate: new Date(),
     endDate: new Date(),
     status: 'pending',
+    activationType: activationType === 'queue' ? 'queue' : 'immediate',
+    originalPrice,
+    paidAmount,
+    discountApplied,
   });
 
-  const tenant = await Tenant.findById(tenantId);
   if (tenant && tenant.ownerId) {
     await notificationService.createNotification(
       tenant.ownerId,
@@ -195,20 +272,31 @@ const approveSubscription = async (subscriptionId: string): Promise<ISubscriptio
 
   const selectedPackage = subscription.packageId as any;
 
-  // Find the most recent non-pending subscription (active or expired) to determine
-  // the correct start date. New period always begins from where the last one ended.
+  // Find currently active or latest subscription
   const lastSub = await Subscription.findOne(
     { tenantId: subscription.tenantId, status: { $in: ['active', 'expired', 'cancelled'] } },
     null,
     { sort: { endDate: -1 } }
   );
 
-  let startDate = (lastSub && lastSub.endDate) ? new Date(lastSub.endDate) : new Date();
+  // Check if this approval is for the SAME package or a DIFFERENT package
+  const lastPackageIdStr = (lastSub?.packageId as any)?._id?.toString() || lastSub?.packageId?.toString() || '';
+  const selectedPackageIdStr = (selectedPackage as any)?._id?.toString() || selectedPackage?.toString() || '';
+  const isSamePackage = Boolean(lastPackageIdStr && selectedPackageIdStr && lastPackageIdStr === selectedPackageIdStr);
 
-  // If the last subscription was a free trial, start the new paid one immediately
-  if (lastSub && lastSub.isTrial) {
+  let startDate = new Date();
+  // Same package renewals always queue up to extend the remaining period.
+  // Different package upgrades honor the merchant's choice (instant vs queue).
+  const isQueue = isSamePackage || subscription.activationType === 'queue';
+
+  if (isQueue && lastSub && lastSub.endDate && new Date(lastSub.endDate) > new Date() && !lastSub.isTrial) {
+    // Option: Queue after the current active subscription ends
+    startDate = new Date(lastSub.endDate);
+  } else {
+    // Option: Immediate upgrade from today (different package)
     startDate = new Date();
-    if (lastSub.status === 'active') {
+    // If there is an active previous subscription, expire it so new upgraded features take effect right away
+    if (lastSub && lastSub.status === 'active') {
       lastSub.status = 'expired';
       await lastSub.save();
     }
@@ -221,8 +309,6 @@ const approveSubscription = async (subscriptionId: string): Promise<ISubscriptio
   } else {
     endDate.setMonth(endDate.getMonth() + 1);
   }
-
-  // We preserve the existing active subscriptions so they can run their course.
 
   subscription.startDate = startDate;
   subscription.endDate = endDate;
@@ -241,6 +327,45 @@ const approveSubscription = async (subscriptionId: string): Promise<ISubscriptio
     );
   }
 
+  // Unlock referral points for the referrer now that the merchant has purchased a paid subscription
+  if (subscription.tenantId) {
+    try {
+      await ReferralService.unlockReferralPointsForSubscription(subscription.tenantId.toString());
+    } catch (err) {
+      console.error('Failed to unlock referral points:', err);
+    }
+
+    // Also sync and approve any related pending payment proof for this tenant
+    try {
+      const pendingPayment = await PlatformPaymentSubmission.findOne({
+        tenantId: subscription.tenantId,
+        purpose: { $in: ['package', 'renewal'] },
+        status: 'pending',
+      }).sort({ createdAt: -1 });
+
+      if (pendingPayment) {
+        pendingPayment.status = 'approved';
+        pendingPayment.adminFeedback = 'Approved along with subscription activation';
+        await pendingPayment.save();
+
+        subscription.paidAmount = pendingPayment.amount;
+        subscription.originalPrice = selectedPackage.price;
+        if (pendingPayment.amount < selectedPackage.price) {
+          const diff = selectedPackage.price - pendingPayment.amount;
+          subscription.discountApplied = {
+            discountType: 'percentage',
+            discountValue: Math.round((diff / selectedPackage.price) * 100),
+            discountAmount: diff,
+            reason: 'Referral Discount',
+          };
+        }
+        await subscription.save();
+      }
+    } catch (err) {
+      console.error('Failed to sync payment submission on subscription approval:', err);
+    }
+  }
+
   await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
   return subscription;
 };
@@ -256,6 +381,25 @@ const rejectSubscription = async (subscriptionId: string): Promise<ISubscription
 
   subscription.status = 'cancelled';
   await subscription.save();
+
+  // Also sync and reject any related pending payment proof for this tenant
+  if (subscription.tenantId) {
+    try {
+      const pendingPayment = await PlatformPaymentSubmission.findOne({
+        tenantId: subscription.tenantId,
+        purpose: { $in: ['package', 'renewal'] },
+        status: 'pending',
+      }).sort({ createdAt: -1 });
+
+      if (pendingPayment) {
+        pendingPayment.status = 'rejected';
+        pendingPayment.adminFeedback = 'Rejected along with subscription rejection';
+        await pendingPayment.save();
+      }
+    } catch (err) {
+      console.error('Failed to sync payment submission on subscription rejection:', err);
+    }
+  }
 
   const tenant = await Tenant.findById(subscription.tenantId);
   if (tenant && tenant.ownerId) {
@@ -311,8 +455,60 @@ const getAllSubscriptions = async (query: any): Promise<{ data: any[]; meta: any
     Subscription.countDocuments(filter)
   ]);
 
+  // Enrich legacy or existing subscriptions with paidAmount and discountApplied
+  const tenantIds = data.map((s: any) => s.tenantId?._id).filter(Boolean);
+  const paymentSubmissions = await PlatformPaymentSubmission.find({
+    tenantId: { $in: tenantIds },
+    purpose: { $in: ['package', 'renewal'] },
+    status: 'approved',
+  }).lean();
+
+  const enrichedData = data.map((sub: any) => {
+    if (sub.isTrial) return sub;
+
+    const pkgPrice = sub.packageId?.price || 0;
+    const matchingPayment = paymentSubmissions.find(
+      (p: any) => p.tenantId?.toString() === sub.tenantId?._id?.toString()
+    );
+
+    let paidAmount = sub.paidAmount ?? (matchingPayment ? matchingPayment.amount : pkgPrice);
+    let originalPrice = sub.originalPrice ?? pkgPrice;
+    let discountApplied = sub.discountApplied;
+
+    if (!discountApplied && matchingPayment && matchingPayment.amount < pkgPrice) {
+      const discountAmount = pkgPrice - matchingPayment.amount;
+      const refDiscount = sub.tenantId?.referralDiscount;
+      discountApplied = {
+        discountType: refDiscount?.discountType || 'percentage',
+        discountValue: refDiscount?.discountValue || Math.round((discountAmount / pkgPrice) * 100),
+        discountAmount,
+        reason: 'Referral Discount',
+      };
+    } else if (!discountApplied && sub.tenantId?.referralDiscount && sub.tenantId.referralDiscount.discountValue) {
+      const rd = sub.tenantId.referralDiscount;
+      const discountAmount =
+        rd.discountType === 'percentage'
+          ? Math.round((pkgPrice * rd.discountValue) / 100)
+          : rd.discountValue;
+      paidAmount = Math.max(0, pkgPrice - discountAmount);
+      discountApplied = {
+        discountType: rd.discountType,
+        discountValue: rd.discountValue,
+        discountAmount,
+        reason: 'Referral Discount',
+      };
+    }
+
+    return {
+      ...sub,
+      paidAmount,
+      originalPrice,
+      discountApplied,
+    };
+  });
+
   return {
-    data,
+    data: enrichedData,
     meta: {
       page,
       limit,

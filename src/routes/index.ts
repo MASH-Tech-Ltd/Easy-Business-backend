@@ -24,6 +24,7 @@ import { CheckoutLeadRoutes } from '../modules/checkoutLead/checkoutLead.route';
 import { ContactInquiryRoutes } from '../modules/contactInquiry/contactInquiry.route';
 import { TrackingRoutes } from '../modules/analytics/tracking.route';
 import { CourierSyncRoutes } from '../modules/courierSync/courierSync.route';
+import { ReferralRoutes } from '../modules/referral/referral.route';
 
 
 const router = Router();
@@ -124,6 +125,10 @@ const moduleRoutes = [
   {
     path: '/courier-sync',
     route: CourierSyncRoutes,
+  },
+  {
+    path: '/referrals',
+    route: ReferralRoutes,
   },
 ];
 

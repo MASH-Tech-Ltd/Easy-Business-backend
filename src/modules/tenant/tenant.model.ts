@@ -22,6 +22,14 @@ const tenantSchema = new Schema<ITenant>(
     settings: { type: Schema.Types.Mixed },
     showDemoSeed: { type: Boolean, default: true },
     slugChanges: [{ type: Date }],
+    referralCodeUsed: { type: String, trim: true },
+    referredBy: { type: String, trim: true },
+    referralDiscount: {
+      referralCode: { type: String },
+      discountType: { type: String, enum: ['percentage', 'fixed'], default: 'percentage' },
+      discountValue: { type: Number, default: 0 },
+      used: { type: Boolean, default: false },
+    },
   },
   {
     timestamps: true,

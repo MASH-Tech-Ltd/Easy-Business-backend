@@ -61,7 +61,7 @@ export const newRegistrationTemplate = (userEmail: string, userName: string): st
               <tr>
                 <td style="background-color: #f8fafc; padding: 24px 40px; border-top: 1px solid #e2e8f0; text-align: center;">
                   <p style="margin: 0; font-size: 14px; color: #64748b;">
-                    &copy; ${new Date().getFullYear()} Platform Admin. All rights reserved.
+                    &copy; ${new Date().getFullYear()} MASH ECO. All rights reserved.
                   </p>
                 </td>
               </tr>

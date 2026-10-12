@@ -8,7 +8,16 @@ const subscriptionSchema = new Schema<ISubscription>(
     startDate: { type: Date, required: true },
     endDate: { type: Date, required: true },
     status: { type: String, enum: ['active', 'expired', 'cancelled', 'pending'], default: 'active' },
+    activationType: { type: String, enum: ['immediate', 'queue'], default: 'immediate' },
     isTrial: { type: Boolean, default: false },
+    originalPrice: { type: Number, default: null },
+    paidAmount: { type: Number, default: null },
+    discountApplied: {
+      discountType: { type: String, enum: ['percentage', 'fixed'], default: null },
+      discountValue: { type: Number, default: null },
+      discountAmount: { type: Number, default: null },
+      reason: { type: String, default: null },
+    },
     purchasedAddons: [
       {
         addonId: { type: Schema.Types.ObjectId, ref: 'Addon' },

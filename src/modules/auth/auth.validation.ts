@@ -35,6 +35,11 @@ export const registerSchema = z.object({
     .trim()
     .max(29, 'Phone number too long')
     .optional(),
+  referralCode: z
+    .string()
+    .trim()
+    .max(50, 'Referral code too long')
+    .optional(),
 });
 
 export const loginSchema = z.object({
