@@ -33,24 +33,23 @@ const assignPackage = async (payload: { tenantId: string, packageId: string }): 
     throw new CustomError(404, 'Package not found');
   }
 
-  // Find the most recent subscription (any status) to calculate the baseline.
-  // If renewing before expiry: startDate = previous endDate (seamless extension, no gap).
-  // If renewing after expiry:  startDate = previous endDate (credit from when the last period ended).
-  // If no prior subscription at all: startDate = now.
-  const lastSub = await Subscription.findOne(
-    { tenantId: payload.tenantId, status: { $in: ['active', 'expired', 'cancelled'] } },
+  // Find the currently active subscription that ends in the future
+  const lastActiveSub = await Subscription.findOne(
+    { tenantId: payload.tenantId, status: 'active', endDate: { $gt: new Date() } },
     null,
     { sort: { endDate: -1 } }
   );
 
-  let startDate = (lastSub && lastSub.endDate) ? new Date(lastSub.endDate) : new Date();
-
-  // If the last subscription was a free trial, start the new paid one immediately
-  if (lastSub && lastSub.isTrial) {
+  let startDate = new Date();
+  if (lastActiveSub && !lastActiveSub.isTrial && lastActiveSub.endDate) {
+    // Seamless extension: start exactly at current active sub's endDate (0 gap)
+    startDate = new Date(lastActiveSub.endDate);
+  } else {
+    // If no active sub, or last was free trial, or last was cancelled/expired:
     startDate = new Date();
-    if (lastSub.status === 'active') {
-      lastSub.status = 'expired';
-      await lastSub.save();
+    if (lastActiveSub && lastActiveSub.isTrial) {
+      lastActiveSub.status = 'expired';
+      await lastActiveSub.save();
     }
   }
 
@@ -64,8 +63,8 @@ const assignPackage = async (payload: { tenantId: string, packageId: string }): 
 
   // We preserve the existing active subscriptions so they can run their course.
 
-  // Extract inherited addons from last sub to carry them over
-  const inheritedAddons = lastSub?.purchasedAddons?.map(addon => ({
+  // Extract inherited addons from last active sub to carry them over
+  const inheritedAddons = (lastActiveSub as any)?.purchasedAddons?.map((addon: any) => ({
     addonId: addon.addonId,
     limit: addon.limit,
     used: addon.used,
@@ -82,6 +81,11 @@ const assignPackage = async (payload: { tenantId: string, packageId: string }): 
     purchasedAddons: inheritedAddons,
   });
 
+  // When assigning a paid package directly, mark any first-time referral discount as used
+  await Tenant.findByIdAndUpdate(payload.tenantId, {
+    $set: { 'referralDiscount.used': true },
+  });
+
   await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
   return subscription;
 };
@@ -92,9 +96,12 @@ const getTenantSubscription = async (tenantId: string): Promise<ISubscription | 
   // Find all active or pending subscriptions, sorted by start date
   const subs = await Subscription.find({ tenantId, status: { $in: ['active', 'pending'] } })
     .populate('packageId')
+    .populate('purchasedAddons.addonId')
     .sort({ startDate: 1 });
 
-  let validSub = null;
+  let validSub: any = null;
+  let futureSub: any = null;
+  let maxFutureEndDate: any = null;
 
   for (const sub of subs) {
     const start = new Date(sub.startDate).getTime();
@@ -117,74 +124,93 @@ const getTenantSubscription = async (tenantId: string): Promise<ISubscription | 
       if (!validSub) {
         validSub = sub;
       }
-    } else if (start > nowTime && sub.status === 'active') {
-      // If it's in the future and marked active, we might want to change it to pending? 
-      // Actually we can just leave it active, but we won't select it as the *current* valid sub.
+    } else if (start > nowTime && (sub.status === 'active' || sub.status === 'pending')) {
+      if (!futureSub) {
+        futureSub = sub;
+      }
+      if (!maxFutureEndDate || end > new Date(maxFutureEndDate).getTime()) {
+        maxFutureEndDate = sub.endDate;
+      }
     }
   }
 
-  const targetSub = validSub || (await Subscription.findOne(
-    { tenantId, status: { $in: ['active', 'pending'] }, startDate: { $gt: now } },
+  const targetSub = validSub || futureSub || (await Subscription.findOne(
+    { tenantId, status: { $in: ['active', 'pending'] } },
     null,
-    { sort: { startDate: 1 } }
-  ).populate('packageId'));
+    { sort: { endDate: -1 } }
+  ).populate('packageId').populate('purchasedAddons.addonId'));
 
   if (!targetSub) {
     return null;
   }
 
-  // If already populated with paidAmount, return as is
-  if (targetSub.paidAmount !== undefined || targetSub.isTrial) {
-    return targetSub;
-  }
-
-  // Fallback enrichment for existing subscriptions
-  try {
-    const pkgPrice = (targetSub.packageId as any)?.price || 0;
-    const payment = await PlatformPaymentSubmission.findOne({
-      tenantId,
-      purpose: { $in: ['package', 'renewal'] },
-      status: 'approved',
-    }).sort({ createdAt: -1 });
-
-    const tenant = await Tenant.findById(tenantId);
-    let paidAmount = payment ? payment.amount : pkgPrice;
-    let originalPrice = pkgPrice;
-    let discountApplied: any = undefined;
-
-    if (payment && payment.amount < pkgPrice) {
-      const discountAmount = pkgPrice - payment.amount;
-      const refDiscount = tenant?.referralDiscount;
-      discountApplied = {
-        discountType: refDiscount?.discountType || 'percentage',
-        discountValue: refDiscount?.discountValue || Math.round((discountAmount / pkgPrice) * 100),
-        discountAmount,
-        reason: 'Referral Discount',
-      };
-    } else if (tenant?.referralDiscount && tenant.referralDiscount.discountValue) {
-      const rd = tenant.referralDiscount;
-      const discountAmount =
-        rd.discountType === 'percentage'
-          ? Math.round((pkgPrice * rd.discountValue) / 100)
-          : rd.discountValue;
-      paidAmount = Math.max(0, pkgPrice - discountAmount);
-      discountApplied = {
-        discountType: rd.discountType,
-        discountValue: rd.discountValue,
-        discountAmount,
-        reason: 'Referral Discount',
-      };
+  const sanitizeSub = (sub: any) => {
+    if (!sub) return sub;
+    const pkgPrice = (sub.packageId as any)?.price || 0;
+    if (sub.discountApplied) {
+      const val = Number(sub.discountApplied.discountValue || 0);
+      const amt = Number(sub.discountApplied.discountAmount || 0);
+      if (val <= 0 && amt <= 0) {
+        sub.discountApplied = null;
+      }
     }
+    if ((sub.paidAmount === null || sub.paidAmount === undefined || (sub.paidAmount === 0 && pkgPrice > 0 && !sub.isTrial && !sub.discountApplied)) && pkgPrice > 0) {
+      sub.paidAmount = sub.originalPrice || pkgPrice;
+    }
+    if (sub.originalPrice === null || sub.originalPrice === undefined) {
+      sub.originalPrice = pkgPrice;
+    }
+    return sub;
+  };
 
-    targetSub.paidAmount = paidAmount;
-    targetSub.originalPrice = originalPrice;
-    if (discountApplied) targetSub.discountApplied = discountApplied;
-    await targetSub.save();
-  } catch (err) {
-    console.error('Error enriching tenant subscription:', err);
+  // Ensure targetSub has paidAmount and originalPrice
+  if (targetSub.paidAmount === undefined || targetSub.paidAmount === null) {
+    const pkgPrice = (targetSub.packageId as any)?.price || 0;
+    targetSub.paidAmount = pkgPrice;
+    targetSub.originalPrice = pkgPrice;
+    try {
+      await targetSub.save();
+    } catch (_) {}
   }
 
-  return targetSub;
+  const cleanTarget: any = sanitizeSub(targetSub.toObject ? targetSub.toObject() : targetSub);
+
+  // If there is an upcoming renewal / future subscription queued
+  const queuedSub = (validSub && futureSub && futureSub._id.toString() !== validSub._id.toString())
+    ? sanitizeSub(futureSub.toObject ? futureSub.toObject() : futureSub)
+    : null;
+
+  // If there is NO currently running subscription (validSub is null), but a future subscription is scheduled:
+  if (!validSub && futureSub) {
+    cleanTarget.isUpcomingOnly = true;
+    cleanTarget.status = 'upcoming';
+    cleanTarget.daysUntilStart = Math.max(1, Math.ceil((new Date(futureSub.startDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+    cleanTarget.upcomingStartDate = futureSub.startDate;
+    cleanTarget.upcomingEndDate = futureSub.endDate;
+    cleanTarget.isRenewed = false;
+  } else if (queuedSub) {
+    cleanTarget.isUpcomingOnly = false;
+    cleanTarget.isRenewed = true;
+    cleanTarget.renewalEndDate = queuedSub.endDate;
+    cleanTarget.extendedEndDate = maxFutureEndDate || queuedSub.endDate;
+    cleanTarget.renewalStatus = queuedSub.status;
+    cleanTarget.queuedSubscription = queuedSub;
+  } else {
+    cleanTarget.isUpcomingOnly = false;
+    cleanTarget.isRenewed = false;
+    cleanTarget.extendedEndDate = cleanTarget.endDate;
+  }
+
+  // Check if there is any pending subscription request for this tenant
+  const pendingSub = await Subscription.findOne({ tenantId, status: 'pending' }).populate('packageId');
+  if (pendingSub && (!validSub || pendingSub._id.toString() !== validSub._id.toString())) {
+    cleanTarget.hasPendingRequest = true;
+    cleanTarget.pendingSubscription = sanitizeSub(pendingSub.toObject ? pendingSub.toObject() : pendingSub);
+  } else {
+    cleanTarget.hasPendingRequest = false;
+  }
+
+  return cleanTarget;
 };
 
 const requestPackage = async (
@@ -207,7 +233,16 @@ const requestPackage = async (
   let originalPrice = selectedPackage.price;
   let discountApplied: any = undefined;
 
-  if (tenant?.referralDiscount && !tenant.referralDiscount.used && tenant.referralDiscount.discountValue) {
+  // Check if tenant has already had an active, expired, or past paid subscription
+  const priorPaidSub = await Subscription.findOne({
+    tenantId,
+    status: { $in: ['active', 'expired', 'cancelled'] },
+    isTrial: { $ne: true },
+  });
+  const hasPriorPaidSub = Boolean(priorPaidSub);
+
+  // Referral discount only applies for the very first subscription when never used before
+  if (!hasPriorPaidSub && tenant?.referralDiscount && !tenant.referralDiscount.used && tenant.referralDiscount.discountValue) {
     const rd = tenant.referralDiscount;
     const discountAmount =
       rd.discountType === 'percentage'
@@ -272,15 +307,20 @@ const approveSubscription = async (subscriptionId: string): Promise<ISubscriptio
 
   const selectedPackage = subscription.packageId as any;
 
-  // Find currently active or latest subscription
-  const lastSub = await Subscription.findOne(
-    { tenantId: subscription.tenantId, status: { $in: ['active', 'expired', 'cancelled'] } },
+  // Find currently active subscription to queue after
+  const lastActiveSub = await Subscription.findOne(
+    { 
+      tenantId: subscription.tenantId, 
+      status: 'active',
+      endDate: { $gt: new Date() },
+      _id: { $ne: subscription._id }
+    },
     null,
     { sort: { endDate: -1 } }
   );
 
   // Check if this approval is for the SAME package or a DIFFERENT package
-  const lastPackageIdStr = (lastSub?.packageId as any)?._id?.toString() || lastSub?.packageId?.toString() || '';
+  const lastPackageIdStr = (lastActiveSub?.packageId as any)?._id?.toString() || lastActiveSub?.packageId?.toString() || '';
   const selectedPackageIdStr = (selectedPackage as any)?._id?.toString() || selectedPackage?.toString() || '';
   const isSamePackage = Boolean(lastPackageIdStr && selectedPackageIdStr && lastPackageIdStr === selectedPackageIdStr);
 
@@ -289,16 +329,16 @@ const approveSubscription = async (subscriptionId: string): Promise<ISubscriptio
   // Different package upgrades honor the merchant's choice (instant vs queue).
   const isQueue = isSamePackage || subscription.activationType === 'queue';
 
-  if (isQueue && lastSub && lastSub.endDate && new Date(lastSub.endDate) > new Date() && !lastSub.isTrial) {
-    // Option: Queue after the current active subscription ends
-    startDate = new Date(lastSub.endDate);
+  if (isQueue && lastActiveSub && lastActiveSub.endDate && !lastActiveSub.isTrial) {
+    // Option: Queue after the current active subscription ends (0 ms gap)
+    startDate = new Date(lastActiveSub.endDate);
   } else {
-    // Option: Immediate upgrade from today (different package)
+    // Option: Immediate upgrade from today (different package or no current active)
     startDate = new Date();
     // If there is an active previous subscription, expire it so new upgraded features take effect right away
-    if (lastSub && lastSub.status === 'active') {
-      lastSub.status = 'expired';
-      await lastSub.save();
+    if (lastActiveSub && lastActiveSub.status === 'active') {
+      lastActiveSub.status = 'expired';
+      await lastActiveSub.save();
     }
   }
 
@@ -331,6 +371,10 @@ const approveSubscription = async (subscriptionId: string): Promise<ISubscriptio
   if (subscription.tenantId) {
     try {
       await ReferralService.unlockReferralPointsForSubscription(subscription.tenantId.toString());
+      // Mark first-time referral discount as used so it cannot be claimed again
+      await Tenant.findByIdAndUpdate(subscription.tenantId, {
+        $set: { 'referralDiscount.used': true },
+      });
     } catch (err) {
       console.error('Failed to unlock referral points:', err);
     }
@@ -455,52 +499,64 @@ const getAllSubscriptions = async (query: any): Promise<{ data: any[]; meta: any
     Subscription.countDocuments(filter)
   ]);
 
-  // Enrich legacy or existing subscriptions with paidAmount and discountApplied
-  const tenantIds = data.map((s: any) => s.tenantId?._id).filter(Boolean);
-  const paymentSubmissions = await PlatformPaymentSubmission.find({
-    tenantId: { $in: tenantIds },
-    purpose: { $in: ['package', 'renewal'] },
-    status: 'approved',
-  }).lean();
+  const now = new Date();
+  const tenantIdsInPage = data
+    .map((s: any) => s.tenantId?._id || s.tenantId)
+    .filter(Boolean);
+
+  const activeRunningSubs = await Subscription.find({
+    tenantId: { $in: tenantIdsInPage },
+    status: 'active',
+    startDate: { $lte: now },
+    endDate: { $gte: now },
+  })
+    .select('tenantId _id')
+    .lean();
+
+  const activeTenantIdSet = new Set(
+    activeRunningSubs.map((s: any) => s.tenantId.toString())
+  );
 
   const enrichedData = data.map((sub: any) => {
-    if (sub.isTrial) return sub;
+    const tId = sub.tenantId?._id?.toString() || sub.tenantId?.toString();
+    const hasRunningActivePlan = Boolean(tId && activeTenantIdSet.has(tId));
+    const isQueued = sub.status === 'active' && sub.startDate && new Date(sub.startDate) > now;
+    const canActivateEarly = Boolean(isQueued && !hasRunningActivePlan);
+
+    if (sub.isTrial) {
+      return {
+        ...sub,
+        hasRunningActivePlan,
+        canActivateEarly,
+      };
+    }
 
     const pkgPrice = sub.packageId?.price || 0;
-    const matchingPayment = paymentSubmissions.find(
-      (p: any) => p.tenantId?.toString() === sub.tenantId?._id?.toString()
-    );
-
-    let paidAmount = sub.paidAmount ?? (matchingPayment ? matchingPayment.amount : pkgPrice);
-    let originalPrice = sub.originalPrice ?? pkgPrice;
+    const originalPrice = sub.originalPrice ?? pkgPrice;
+    let paidAmount = sub.paidAmount ?? originalPrice;
     let discountApplied = sub.discountApplied;
 
-    if (!discountApplied && matchingPayment && matchingPayment.amount < pkgPrice) {
-      const discountAmount = pkgPrice - matchingPayment.amount;
-      const refDiscount = sub.tenantId?.referralDiscount;
-      discountApplied = {
-        discountType: refDiscount?.discountType || 'percentage',
-        discountValue: refDiscount?.discountValue || Math.round((discountAmount / pkgPrice) * 100),
-        discountAmount,
-        reason: 'Referral Discount',
-      };
-    } else if (!discountApplied && sub.tenantId?.referralDiscount && sub.tenantId.referralDiscount.discountValue) {
-      const rd = sub.tenantId.referralDiscount;
-      const discountAmount =
-        rd.discountType === 'percentage'
-          ? Math.round((pkgPrice * rd.discountValue) / 100)
-          : rd.discountValue;
-      paidAmount = Math.max(0, pkgPrice - discountAmount);
-      discountApplied = {
-        discountType: rd.discountType,
-        discountValue: rd.discountValue,
-        discountAmount,
-        reason: 'Referral Discount',
-      };
+    if (discountApplied) {
+      const val = Number(discountApplied.discountValue || 0);
+      const amt = Number(discountApplied.discountAmount || 0);
+      if (val <= 0 && amt <= 0) {
+        discountApplied = null;
+      }
+    }
+
+    // A discount is only valid if paidAmount is strictly less than originalPrice
+    if (!discountApplied || Number(paidAmount) >= Number(originalPrice)) {
+      discountApplied = null;
+    }
+
+    if ((paidAmount === null || paidAmount === undefined || (paidAmount === 0 && pkgPrice > 0 && !discountApplied)) && pkgPrice > 0) {
+      paidAmount = originalPrice;
     }
 
     return {
       ...sub,
+      hasRunningActivePlan,
+      canActivateEarly,
       paidAmount,
       originalPrice,
       discountApplied,
@@ -518,17 +574,76 @@ const getAllSubscriptions = async (query: any): Promise<{ data: any[]; meta: any
   };
 };
 
-const updateSubscription = async (subscriptionId: string, payload: Partial<ISubscription>): Promise<ISubscription> => {
+const activateEarly = async (tenantId: string, subscriptionId?: string): Promise<ISubscription> => {
+  const query: any = {
+    tenantId,
+    status: 'active',
+  };
+
+  if (subscriptionId) {
+    query._id = subscriptionId;
+  } else {
+    query.startDate = { $gt: new Date() };
+  }
+
+  const sub = await Subscription.findOne(query).sort({ startDate: 1 }).populate('packageId');
+  if (!sub) {
+    throw new CustomError(404, 'No upcoming subscription found to activate early');
+  }
+
+  // Safety check: Prevent early activation if another subscription is currently active and running
+  const now = new Date();
+  const currentRunningSub = await Subscription.findOne({
+    tenantId,
+    _id: { $ne: sub._id },
+    status: 'active',
+    startDate: { $lte: now },
+    endDate: { $gte: now },
+  });
+
+  if (currentRunningSub) {
+    throw new CustomError(
+      400,
+      'The store already has an active subscription running. The renewed plan will start automatically without gap when the current plan ends.'
+    );
+  }
+
+  const pkg = (sub.packageId as any) || (await Package.findById(sub.packageId));
+  sub.startDate = new Date();
+  const newEnd = new Date(sub.startDate);
+  if (pkg?.billingCycle === 'yearly') {
+    newEnd.setFullYear(newEnd.getFullYear() + 1);
+  } else {
+    newEnd.setMonth(newEnd.getMonth() + 1);
+  }
+  sub.endDate = newEnd;
+  sub.status = 'active';
+  await sub.save();
+
+  await notifySubscriptionUpdate(tenantId);
+  return sub;
+};
+
+const updateSubscription = async (subscriptionId: string, payload: any): Promise<ISubscription> => {
   const subscription = await Subscription.findById(subscriptionId);
   if (!subscription) {
     throw new CustomError(404, 'Subscription not found');
   }
 
+  const prevStatus = subscription.status;
   if (payload.startDate) subscription.startDate = new Date(payload.startDate);
   if (payload.endDate) subscription.endDate = new Date(payload.endDate);
   if (payload.status) subscription.status = payload.status;
   
   await subscription.save();
+
+  // If this subscription was cancelled, and admin requested activateNextImmediately:
+  if (payload.status === 'cancelled' && prevStatus !== 'cancelled' && payload.activateNextImmediately) {
+    try {
+      await activateEarly(subscription.tenantId.toString());
+    } catch (_) {}
+  }
+
   await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
   return subscription;
 };
@@ -1065,4 +1180,5 @@ export const SubscriptionService = {
   terminateAddonRequest,
   rejectAddonRequest,
   removeAddon,
+  activateEarly,
 };

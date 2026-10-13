@@ -12,12 +12,7 @@ const subscriptionSchema = new Schema<ISubscription>(
     isTrial: { type: Boolean, default: false },
     originalPrice: { type: Number, default: null },
     paidAmount: { type: Number, default: null },
-    discountApplied: {
-      discountType: { type: String, enum: ['percentage', 'fixed'], default: null },
-      discountValue: { type: Number, default: null },
-      discountAmount: { type: Number, default: null },
-      reason: { type: String, default: null },
-    },
+    discountApplied: { type: Schema.Types.Mixed, default: null },
     purchasedAddons: [
       {
         addonId: { type: Schema.Types.ObjectId, ref: 'Addon' },

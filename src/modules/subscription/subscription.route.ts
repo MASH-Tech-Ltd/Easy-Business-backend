@@ -21,6 +21,8 @@ router.put('/approve/:id', authMiddleware('super_admin'), validateRequest(Subscr
 router.put('/reject/:id', authMiddleware('super_admin'), validateRequest(SubscriptionValidation.subscriptionIdParamValidation), SubscriptionController.rejectSubscription);
 router.put('/update/:id', authMiddleware('super_admin'), validateRequest(SubscriptionValidation.updateSubscriptionValidation), SubscriptionController.updateSubscription);
 router.delete('/delete/:id', authMiddleware('super_admin'), validateRequest(SubscriptionValidation.subscriptionIdParamValidation), SubscriptionController.deleteSubscription);
+router.post('/activate-early', authMiddleware('tenant_admin', 'super_admin'), SubscriptionController.activateEarly);
+router.post('/activate-early/:id', authMiddleware('super_admin'), SubscriptionController.activateEarlyById);
 router.get('/get-all-subscriptions', authMiddleware('super_admin'), SubscriptionController.getAllSubscriptions);
 
 router.post('/addons/purchase', authMiddleware('tenant_admin'), validateRequest(SubscriptionValidation.purchaseAddonValidation), SubscriptionController.purchaseAddon);

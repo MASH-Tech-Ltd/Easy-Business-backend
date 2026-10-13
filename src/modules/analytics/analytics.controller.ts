@@ -290,6 +290,7 @@ const getDashboardSummary = asyncHandler(
 
     const { Tenant } = require("../tenant/tenant.model");
     const { Subscription } = require("../subscription/subscription.model");
+    const { SubscriptionService } = require("../subscription/subscription.service");
     const { Product } = require("../product/product.model");
     const { Category } = require("../category/category.model");
 
@@ -321,9 +322,7 @@ const getDashboardSummary = asyncHandler(
         { $group: { _id: null, totalRevenue: { $sum: "$totalPrice" } } },
       ]),
       Order.find({ tenantId }).sort({ createdAt: -1 }).limit(5),
-      Subscription.findOne({ tenantId, status: "active" }).populate(
-        "packageId",
-      ),
+      SubscriptionService.getTenantSubscription(tenantId),
       Product.countDocuments({ tenantId }),
       Product.countDocuments({ tenantId, status: "DRAFT" }),
       Product.find({ tenantId }).sort({ salesCount: -1 }).limit(4).lean(),

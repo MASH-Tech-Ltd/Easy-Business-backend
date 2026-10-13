@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { SubscriptionService } from './subscription.service';
 import ApiResponse from '../../utils/apiResponse';
 import { asyncHandler } from '../../utils/asyncHandler';
+import {Subscription} from './subscription.model';
 
 const assignPackage = asyncHandler(async (req: Request, res: Response) => {
   const result = await SubscriptionService.assignPackage(req.body);
@@ -132,6 +133,23 @@ const removeAddon = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 200, 'Addon removed successfully', result);
 });
 
+const activateEarly = asyncHandler(async (req: Request, res: Response) => {
+  const callerRole = (req as any).user?.role;
+  const tenantId = callerRole === 'super_admin' ? (req.body.tenantId || (req as any).user?.tenantId) : (req as any).user?.tenantId;
+  const result = await SubscriptionService.activateEarly(tenantId);
+  ApiResponse.sendSuccess(res, 200, 'Upcoming subscription activated immediately with zero time gap', result);
+});
+
+const activateEarlyById = asyncHandler(async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  const sub = await Subscription.findById(id);
+  if (!sub) {
+    return ApiResponse.sendError(res, 404, 'Subscription not found');
+  }
+  const result = await SubscriptionService.activateEarly(sub.tenantId.toString(), id);
+  ApiResponse.sendSuccess(res, 200, 'Subscription activated immediately with zero time gap', result);
+});
+
 export const SubscriptionController = {
   assignPackage,
   getTenantSubscription,
@@ -150,5 +168,7 @@ export const SubscriptionController = {
   extendAddonLimit,
   terminateAddonRequest,
   rejectAddonRequest,
-  removeAddon
+  removeAddon,
+  activateEarly,
+  activateEarlyById
 };

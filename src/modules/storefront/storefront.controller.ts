@@ -49,22 +49,36 @@ const checkStoreSubscription = async (tenantId: Types.ObjectId) => {
     };
   }
 
+  const now = new Date();
+
+  // Find currently running active subscription (startDate <= now && endDate >= now)
   const sub = await Subscription.findOne(
-    { tenantId, status: { $in: ["active", "pending"] } },
+    { 
+      tenantId, 
+      status: { $in: ["active", "pending"] },
+      startDate: { $lte: now },
+      endDate: { $gte: now }
+    },
     null,
     { sort: { endDate: -1 } },
   );
 
   if (!sub) {
+    // Check if there is an upcoming scheduled subscription
+    const upcoming = await Subscription.findOne(
+      { tenantId, status: "active", startDate: { $gt: now } },
+      null,
+      { sort: { startDate: 1 } }
+    );
+
     return {
       storeDown: true,
       daysLeft: 0,
       isTrial: false,
-      reason: "No active subscription",
+      reason: upcoming ? `Plan scheduled to start on ${new Date(upcoming.startDate).toLocaleDateString('en-GB')}` : "No active subscription",
     };
   }
 
-  const now = new Date();
   const end = new Date(sub.endDate);
   const daysLeft = Math.max(
     0,

@@ -5,6 +5,7 @@ import CustomError from "../../helpers/CustomError";
 import { deleteCloudinary, deleteMultipleCloudinary } from '../../helpers/cloudinary';
 import { paginationHelper } from "../../helpers/paginationHelper";
 import { Subscription } from "../subscription/subscription.model";
+import { SubscriptionService } from "../subscription/subscription.service";
 import { Order } from "../order/order.model";
 import { Courier } from "../courier/courier.model";
 import { FraudCheck } from "../fraudCheck/fraudCheck.model";
@@ -165,8 +166,22 @@ const getAllTenants = async (
   const dataWithPackages = data.map((tenant) => {
     const tIdStr = tenant._id.toString();
     const tenantSubs = subscriptions.filter((s) => s.tenantId?.toString() === tIdStr);
-    // Prefer active subscription if available, else latest subscription
-    const sub = tenantSubs.find((s) => s.status === 'active') || tenantSubs[0];
+    const nowTime = Date.now();
+    // Prioritize currently active cycle (startDate <= now && endDate >= now)
+    const currentSub = tenantSubs.find((s) => {
+      const start = new Date(s.startDate).getTime();
+      const end = new Date(s.endDate).getTime();
+      return s.status === 'active' && start <= nowTime && end >= nowTime;
+    });
+    // Check if there is an upcoming renewal
+    const futureSub = tenantSubs.find((s) => {
+      const start = new Date(s.startDate).getTime();
+      return (s.status === 'active' || s.status === 'pending') && start > nowTime;
+    });
+    const sub = currentSub || tenantSubs.find((s) => s.status === 'active') || tenantSubs[0];
+    const isRenewed = Boolean(currentSub && futureSub);
+    const extendedEndDate = futureSub ? futureSub.endDate : sub?.endDate;
+
     return {
       ...tenant,
       isOnline: tenant.isOnline !== false,
@@ -180,6 +195,8 @@ const getAllTenants = async (
         isTrial: sub.isTrial,
         startDate: sub.startDate,
         endDate: sub.endDate,
+        isRenewed,
+        extendedEndDate,
         packageName: (sub.packageId as any)?.name || (sub.isTrial ? 'Free Trial' : 'Custom Plan')
       } : null
     };
@@ -526,9 +543,7 @@ const getTenantMetrics = async (tenantId: string, query?: any) => {
     Category.countDocuments({ ...dateSpecificFilter, status: 'ACTIVE' }),
     Product.countDocuments(dateSpecificFilter),
     Product.countDocuments({ ...dateSpecificFilter, status: 'ACTIVE' }),
-    Subscription.findOne({ tenantId, status: 'active' })
-      .populate('packageId')
-      .populate('purchasedAddons.addonId'),
+    SubscriptionService.getTenantSubscription(tenantId),
     Order.aggregate([
       { $match: { ...dateSpecificFilterAgg, status: 'delivered' } },
       { $group: { _id: null, totalRevenue: { $sum: "$totalPrice" }, deliveredOrders: { $sum: 1 } } }
