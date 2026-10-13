@@ -163,7 +163,7 @@ const getMyPaymentSubmissions = async (tenantId: string) => {
 
 const getAllPaymentSubmissions = async (query: any = {}) => {
   const { page, limit, skip } = paginationHelper(query?.page, query?.limit);
-  const { search, status, provider } = query || {};
+  const { search, status, provider, year, month, startDate, endDate } = query || {};
 
   const filter: any = {};
   if (status && status !== 'all') {
@@ -173,6 +173,38 @@ const getAllPaymentSubmissions = async (query: any = {}) => {
     filter.provider = { $regex: new RegExp(`^${provider}$`, 'i') };
   }
 
+  let dateStart: Date | null = null;
+  let dateEnd: Date | null = null;
+  let filteredPeriodLabel = '';
+
+  if (startDate && endDate) {
+    dateStart = new Date(startDate);
+    dateStart.setHours(0, 0, 0, 0);
+    dateEnd = new Date(endDate);
+    dateEnd.setHours(23, 59, 59, 999);
+    filteredPeriodLabel = `${startDate} to ${endDate}`;
+  } else if (year && year !== 'all') {
+    const numYear = parseInt(year);
+    if (month && month !== 'all') {
+      const numMonth = parseInt(month);
+      dateStart = new Date(numYear, numMonth - 1, 1, 0, 0, 0, 0);
+      dateEnd = new Date(numYear, numMonth, 0, 23, 59, 59, 999);
+      const monthNames = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December',
+      ];
+      filteredPeriodLabel = `${monthNames[numMonth - 1]} ${numYear}`;
+    } else {
+      dateStart = new Date(numYear, 0, 1, 0, 0, 0, 0);
+      dateEnd = new Date(numYear, 11, 31, 23, 59, 59, 999);
+      filteredPeriodLabel = `Year ${numYear}`;
+    }
+  }
+
+  if (dateStart && dateEnd) {
+    filter.createdAt = { $gte: dateStart, $lte: dateEnd };
+  }
+
   if (search) {
     const searchRegex = { $regex: search, $options: 'i' };
     const matchingTenants = await Tenant.find({
@@ -180,16 +212,19 @@ const getAllPaymentSubmissions = async (query: any = {}) => {
     }).select('_id').lean();
     const matchingTenantIds = matchingTenants.map((t) => t._id);
 
-    filter.$or = [
-      { transactionId: searchRegex },
-      { senderNumber: searchRegex },
-      { purposeTitle: searchRegex },
-      { tenantId: { $in: matchingTenantIds } },
-    ];
+    filter.$and = filter.$and || [];
+    filter.$and.push({
+      $or: [
+        { transactionId: searchRegex },
+        { senderNumber: searchRegex },
+        { purposeTitle: searchRegex },
+        { tenantId: { $in: matchingTenantIds } },
+      ],
+    });
   }
 
   const [allSubmissions, data, total] = await Promise.all([
-    PlatformPaymentSubmission.find().lean(),
+    PlatformPaymentSubmission.find().populate('tenantId', 'name domain slug').lean(),
     PlatformPaymentSubmission.find(filter)
       .populate('tenantId', 'name domain slug customDomain domainStatus')
       .sort({ createdAt: -1 })
@@ -199,15 +234,72 @@ const getAllPaymentSubmissions = async (query: any = {}) => {
     PlatformPaymentSubmission.countDocuments(filter),
   ]);
 
-  const stats = {
-    totalCount: allSubmissions.length,
-    pendingCount: allSubmissions.filter((p) => p.status === 'pending').length,
-    approvedCount: allSubmissions.filter((p) => p.status === 'approved').length,
-    rejectedCount: allSubmissions.filter((p) => p.status === 'rejected').length,
-    approvedRevenue: allSubmissions
-      .filter((p) => p.status === 'approved')
-      .reduce((sum, p) => sum + (p.amount || 0), 0),
-  };
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+
+  let approvedRevenue = 0;
+  let pendingRevenue = 0;
+  let thisMonthRevenue = 0;
+  let thisYearRevenue = 0;
+
+  let filteredCount = 0;
+  let filteredApprovedCount = 0;
+  let filteredPendingCount = 0;
+  let filteredApprovedRevenue = 0;
+  let filteredPendingRevenue = 0;
+
+  allSubmissions.forEach((p: any) => {
+    const amt = Number(p.amount || 0);
+    const pDate = new Date(p.createdAt);
+
+    if (p.status === 'approved') {
+      approvedRevenue += amt;
+      if (pDate.getMonth() === currentMonth && pDate.getFullYear() === currentYear) {
+        thisMonthRevenue += amt;
+      }
+      if (pDate.getFullYear() === currentYear) {
+        thisYearRevenue += amt;
+      }
+    } else if (p.status === 'pending') {
+      pendingRevenue += amt;
+    }
+
+    if (dateStart && dateEnd && pDate >= dateStart && pDate <= dateEnd) {
+      filteredCount += 1;
+      if (p.status === 'approved') {
+        filteredApprovedCount += 1;
+        filteredApprovedRevenue += amt;
+      } else if (p.status === 'pending') {
+        filteredPendingCount += 1;
+        filteredPendingRevenue += amt;
+      }
+    }
+  });
+
+    const validSubmissionsList = allSubmissions.filter((p: any) => p.status !== 'rejected');
+    const rejectedSubmissionsList = allSubmissions.filter((p: any) => p.status === 'rejected');
+
+    const stats = {
+      totalCount: validSubmissionsList.length, // Don't count rejected in total
+      allSubmissionsCount: allSubmissions.length,
+      validCount: validSubmissionsList.length,
+      pendingCount: allSubmissions.filter((p: any) => p.status === 'pending').length,
+      approvedCount: allSubmissions.filter((p: any) => p.status === 'approved').length,
+      rejectedCount: rejectedSubmissionsList.length,
+      approvedRevenue,
+      pendingRevenue,
+      thisMonthRevenue,
+      thisYearRevenue,
+      hasFilter: Boolean(dateStart && dateEnd),
+      filteredPeriodLabel,
+      filteredCount: filteredApprovedCount + filteredPendingCount, // Exclude rejected from filtered total
+      allFilteredCount: filteredCount,
+      filteredApprovedCount,
+      filteredPendingCount,
+      filteredApprovedRevenue,
+      filteredPendingRevenue,
+    };
 
   return {
     data,
@@ -218,6 +310,129 @@ const getAllPaymentSubmissions = async (query: any = {}) => {
       totalPages: Math.ceil(total / limit) || 1,
     },
     stats,
+  };
+};
+
+const getPaymentProofsReport = async (query: any) => {
+  const { type, year, month, startDate, endDate, status, provider } = query || {};
+
+  const filter: any = {};
+  if (status && status !== 'all') {
+    filter.status = status;
+  }
+  if (provider && provider !== 'all') {
+    filter.provider = { $regex: new RegExp(`^${provider}$`, 'i') };
+  }
+
+  let filterStart: Date | null = null;
+  let filterEnd: Date | null = null;
+  let periodLabel = 'All Time';
+
+  if (type === 'custom' && startDate && endDate) {
+    filterStart = new Date(startDate);
+    filterStart.setHours(0, 0, 0, 0);
+    filterEnd = new Date(endDate);
+    filterEnd.setHours(23, 59, 59, 999);
+    periodLabel = `${startDate} to ${endDate}`;
+  } else if (type === 'monthly' && year && month && month !== 'all' && year !== 'all') {
+    const numYear = parseInt(year);
+    const numMonth = parseInt(month);
+    filterStart = new Date(numYear, numMonth - 1, 1, 0, 0, 0, 0);
+    filterEnd = new Date(numYear, numMonth, 0, 23, 59, 59, 999);
+    const monthNames = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December',
+    ];
+    periodLabel = `${monthNames[numMonth - 1]} ${numYear}`;
+  } else if (type === 'yearly' && year && year !== 'all') {
+    const numYear = parseInt(year);
+    filterStart = new Date(numYear, 0, 1, 0, 0, 0, 0);
+    filterEnd = new Date(numYear, 11, 31, 23, 59, 59, 999);
+    periodLabel = `Year ${numYear}`;
+  } else if (startDate && endDate) {
+    filterStart = new Date(startDate);
+    filterStart.setHours(0, 0, 0, 0);
+    filterEnd = new Date(endDate);
+    filterEnd.setHours(23, 59, 59, 999);
+    periodLabel = `${startDate} to ${endDate}`;
+  } else if (year && year !== 'all') {
+    const numYear = parseInt(year);
+    if (month && month !== 'all') {
+      const numMonth = parseInt(month);
+      filterStart = new Date(numYear, numMonth - 1, 1, 0, 0, 0, 0);
+      filterEnd = new Date(numYear, numMonth, 0, 23, 59, 59, 999);
+      const monthNames = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December',
+      ];
+      periodLabel = `${monthNames[numMonth - 1]} ${numYear}`;
+    } else {
+      filterStart = new Date(numYear, 0, 1, 0, 0, 0, 0);
+      filterEnd = new Date(numYear, 11, 31, 23, 59, 59, 999);
+      periodLabel = `Year ${numYear}`;
+    }
+  }
+
+  if (filterStart && filterEnd) {
+    filter.createdAt = { $gte: filterStart, $lte: filterEnd };
+  }
+
+  const submissions = await PlatformPaymentSubmission.find(filter)
+    .populate('tenantId', 'name domain slug customDomain')
+    .sort({ createdAt: -1 })
+    .lean();
+
+  let totalRevenue = 0;
+  let totalPending = 0;
+  let approvedCount = 0;
+  let pendingCount = 0;
+  let rejectedCount = 0;
+
+  const items = submissions.map((p: any, idx: number) => {
+    const amt = Number(p.amount || 0);
+    const tenant = p.tenantId || {};
+
+    if (p.status === 'approved') {
+      totalRevenue += amt;
+      approvedCount += 1;
+    } else if (p.status === 'pending') {
+      totalPending += amt;
+      pendingCount += 1;
+    } else if (p.status === 'rejected') {
+      rejectedCount += 1;
+    }
+
+    return {
+      sl: idx + 1,
+      _id: p._id,
+      date: p.createdAt,
+      tenantName: tenant.name || 'Unknown Store',
+      tenantDomain: tenant.domain || 'N/A',
+      purpose: p.purposeTitle || (p.purpose ? p.purpose.toUpperCase() : 'SUBSCRIPTION'),
+      provider: p.provider || 'N/A',
+      transactionId: p.transactionId || 'N/A',
+      senderNumber: p.senderNumber || 'N/A',
+      amount: amt,
+      status: p.status,
+      adminFeedback: p.adminFeedback || '-',
+    };
+  });
+
+  return {
+    summary: {
+      reportType: type || 'all',
+      periodLabel,
+      totalRevenue,
+      totalPending,
+      totalSubmissions: items.length,
+      validSubmissions: approvedCount + pendingCount,
+      approvedCount,
+      pendingCount,
+      rejectedCount,
+      generatedAt: new Date().toISOString(),
+      currency: 'BDT',
+    },
+    items,
   };
 };
 
@@ -409,6 +624,7 @@ export const BillingService = {
   getMyPaymentSubmissions,
   updateMyPaymentSubmission,
   getAllPaymentSubmissions,
+  getPaymentProofsReport,
   verifyPaymentSubmission,
 };
 

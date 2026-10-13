@@ -40,8 +40,10 @@ router.put(
   BillingController.verifyPaymentSubmission
 );
 
-// Billing Overview Stats
+// Billing Overview Stats & Revenue Report
 router.get('/overview', authMiddleware('super_admin'), BillingController.getBillingOverview);
+router.get('/revenue-report', authMiddleware('super_admin'), BillingController.getRevenueReport);
+router.get('/payment-proofs-report', authMiddleware('super_admin'), BillingController.getPaymentProofsReport);
 
 export const BillingRoutes = router;
 

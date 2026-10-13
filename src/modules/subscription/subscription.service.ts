@@ -463,11 +463,38 @@ const rejectSubscription = async (subscriptionId: string): Promise<ISubscription
 
 const getAllSubscriptions = async (query: any): Promise<{ data: any[]; meta: any }> => {
   const { page, limit, skip } = paginationHelper(query?.page, query?.limit);
-  const { search, status, sortBy } = query;
+  const { search, status, sortBy, year, month, startDate, endDate } = query;
 
   let filter: any = {};
   if (status && status !== 'all') {
     filter.status = status;
+  }
+
+  let dateStart: Date | null = null;
+  let dateEnd: Date | null = null;
+
+  if (startDate && endDate) {
+    dateStart = new Date(startDate);
+    dateStart.setHours(0, 0, 0, 0);
+    dateEnd = new Date(endDate);
+    dateEnd.setHours(23, 59, 59, 999);
+  } else if (year && year !== 'all') {
+    const numYear = parseInt(year);
+    if (month && month !== 'all') {
+      const numMonth = parseInt(month);
+      dateStart = new Date(numYear, numMonth - 1, 1, 0, 0, 0, 0);
+      dateEnd = new Date(numYear, numMonth, 0, 23, 59, 59, 999);
+    } else {
+      dateStart = new Date(numYear, 0, 1, 0, 0, 0, 0);
+      dateEnd = new Date(numYear, 11, 31, 23, 59, 59, 999);
+    }
+  }
+
+  if (dateStart && dateEnd) {
+    filter.$or = [
+      { startDate: { $gte: dateStart, $lte: dateEnd } },
+      { createdAt: { $gte: dateStart, $lte: dateEnd } },
+    ];
   }
 
   if (search) {
