@@ -6,6 +6,7 @@ import mongoose from "mongoose";
 import v8 from "v8";
 import { SecurityLog, BlockedIp, VisitorLog } from "./security.model";
 import { GlobalSetting } from "./globalSetting.model";
+import { Tenant } from "../tenant/tenant.model";
 import { isCloudflareProxyIp, getClientIp } from "../../utils/ipHelper";
 
 const getGlobalSettings = asyncHandler(async (req: Request, res: Response) => {
@@ -48,6 +49,13 @@ const updateGlobalSettings = asyncHandler(
     if (payload.sidebarMenu !== undefined) {
       settings.sidebarMenu = payload.sidebarMenu;
     }
+    if (payload.socialLinks !== undefined) {
+      settings.socialLinks = {
+        ...(settings.socialLinks || {}),
+        ...payload.socialLinks,
+      };
+      settings.markModified('socialLinks');
+    }
 
     await settings.save();
     ApiResponse.sendSuccess(
@@ -88,9 +96,23 @@ const getPublicSettings = asyncHandler(async (req: Request, res: Response) => {
     allowRegistration: settings.allowRegistration,
     couriers: settings.couriers,
     sidebarMenu: settings.sidebarMenu,
+    socialLinks: settings.socialLinks || {},
   };
   
   ApiResponse.sendSuccess(res, 200, "Public settings retrieved", publicData);
+});
+
+const getActiveStoresForSeo = asyncHandler(async (req: Request, res: Response) => {
+  const stores = await Tenant.find({
+    status: "active",
+    isOnline: { $ne: false },
+    isOnlineByAdmin: { $ne: false },
+  })
+    .select("name slug domain customDomain domainStatus logo updatedAt description")
+    .sort({ updatedAt: -1 })
+    .lean();
+
+  ApiResponse.sendSuccess(res, 200, "Active stores retrieved for SEO sitemap", stores);
 });
 
 const getHealthStats = asyncHandler(async (req: Request, res: Response) => {
@@ -470,4 +492,5 @@ export const SystemController = {
   createVisitorLog,
   clearVisitorLogs,
   getPublicSettings,
+  getActiveStoresForSeo,
 };

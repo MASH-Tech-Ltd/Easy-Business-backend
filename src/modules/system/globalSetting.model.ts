@@ -28,6 +28,14 @@ export interface IGlobalSettings extends Document {
     badge: 'none' | 'new' | 'beta';
     message?: string;
   }[];
+  socialLinks: {
+    facebook?: { url: string; isActive: boolean };
+    instagram?: { url: string; isActive: boolean };
+    twitter?: { url: string; isActive: boolean };
+    linkedin?: { url: string; isActive: boolean };
+    youtube?: { url: string; isActive: boolean };
+    [key: string]: { url: string; isActive: boolean } | undefined;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -78,6 +86,16 @@ const globalSettingsSchema = new Schema<IGlobalSettings>(
         { id: 'checkoutLeads', isActive: true, badge: 'beta', message: '' },
         { id: 'apiKeys', isActive: true, badge: 'beta', message: '' },
       ],
+    },
+    socialLinks: {
+      type: Object,
+      default: {
+        facebook: { url: '', isActive: true },
+        instagram: { url: '', isActive: true },
+        twitter: { url: '', isActive: true },
+        linkedin: { url: '', isActive: true },
+        youtube: { url: '', isActive: true },
+      },
     },
   },
   { timestamps: true }

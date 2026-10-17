@@ -451,9 +451,20 @@ const addCustomDomain = async (tenantId: string, customDomain: string) => {
 };
 
 const getStoreInfoByDomain = async (domain: string) => {
-  // SECURITY FIX: Removed localhost fallback — it was leaking the first tenant's data
-  // to anyone who sent domain=localhost. Always do an exact domain lookup.
-  const store = await Tenant.findOne({ domain });
+  const bare = domain.replace(/^www\./, '').toLowerCase().trim();
+  const prefix = bare.replace(/\.masheco\.com$/, '');
+  const withMasheco = `${prefix}.masheco.com`;
+  const store = await Tenant.findOne({
+    $or: [
+      { domain: bare },
+      { domain: prefix },
+      { domain: withMasheco },
+      { slug: bare },
+      { slug: prefix },
+      { customDomain: bare },
+      { customDomain: `www.${bare}` },
+    ],
+  });
   if (!store) {
     throw new CustomError(404, 'Store not found for domain');
   }

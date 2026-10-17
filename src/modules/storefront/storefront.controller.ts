@@ -16,9 +16,15 @@ import CustomError from "../../helpers/CustomError";
 const normalizeTenantQuery = (slugOrDomain: string) => {
   const bare = slugOrDomain.replace(/^www\./, '').toLowerCase();
   const withWww = `www.${bare}`;
+  const prefixOnly = bare.replace(/\.masheco\.com$/, '');
+  const withMasheco = `${prefixOnly}.masheco.com`;
   return {
     $or: [
+      { domain: bare },
+      { domain: prefixOnly },
+      { domain: withMasheco },
       { slug: bare },
+      { slug: prefixOnly },
       { customDomain: bare },
       { customDomain: withWww },
     ],
@@ -662,7 +668,7 @@ const getInfo = asyncHandler(async (req: Request, res: Response) => {
   const tenantSlug = req.params.tenantSlug as string;
   const query = normalizeTenantQuery(tenantSlug);
   const tenant = await Tenant.findOne({ ...query, status: 'active' })
-    .select('name logo slug customDomain domainStatus settings description');
+    .select('name logo slug domain customDomain domainStatus settings description');
   if (!tenant) {
     // We MUST return 200 here. Next.js ISR ignores 404s and will keep the stale cache!
     return res

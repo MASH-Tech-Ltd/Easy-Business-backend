@@ -25,9 +25,15 @@ const resolveUserTenantId = async (req: Request) => {
 const normalizeTenantQuery = (slugOrDomain: string) => {
   const bare = slugOrDomain.replace(/^www\./, '').toLowerCase();
   const withWww = `www.${bare}`;
+  const prefixOnly = bare.replace(/\.masheco\.com$/, '');
+  const withMasheco = `${prefixOnly}.masheco.com`;
   return {
     $or: [
+      { domain: bare },
+      { domain: prefixOnly },
+      { domain: withMasheco },
       { slug: bare },
+      { slug: prefixOnly },
       { customDomain: bare },
       { customDomain: withWww },
     ],
