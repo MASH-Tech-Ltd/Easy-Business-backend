@@ -10,6 +10,7 @@ const subscriptionSchema = new Schema<ISubscription>(
     status: { type: String, enum: ['active', 'expired', 'cancelled', 'pending'], default: 'active' },
     activationType: { type: String, enum: ['immediate', 'queue'], default: 'immediate' },
     isTrial: { type: Boolean, default: false },
+    bonusAddonsGranted: { type: Boolean, default: false },
     originalPrice: { type: Number, default: null },
     paidAmount: { type: Number, default: null },
     discountApplied: { type: Schema.Types.Mixed, default: null },

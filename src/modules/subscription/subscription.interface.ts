@@ -8,6 +8,7 @@ export interface ISubscription extends Document {
   status: 'pending' | 'active' | 'expired' | 'cancelled';
   activationType?: 'immediate' | 'queue';
   isTrial?: boolean;
+  bonusAddonsGranted?: boolean;
   originalPrice?: number;
   paidAmount?: number;
   discountApplied?: {

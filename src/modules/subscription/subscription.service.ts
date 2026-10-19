@@ -27,6 +27,60 @@ const notifySubscriptionUpdate = async (tenantId?: string) => {
   } catch (error) {}
 };
 
+// Free credits granted automatically with every paid subscription
+const BONUS_ADDON_SLUGS = ['abandoned_checkout', 'courier_automation'];
+const BONUS_ADDON_LIMIT = 30;
+
+const grantBonusAddons = async (subscription: any): Promise<void> => {
+  if (!subscription || subscription.isTrial || subscription.bonusAddonsGranted) return;
+
+  try {
+    const addonDocs = await Addon.find({ slug: { $in: BONUS_ADDON_SLUGS }, isActive: true });
+    subscription.purchasedAddons = subscription.purchasedAddons || [];
+
+    for (const slug of BONUS_ADDON_SLUGS) {
+      const addonDoc = addonDocs.find((a) => a.slug === slug);
+      if (!addonDoc) {
+        console.warn(`[Bonus Addons] Addon "${slug}" not found or inactive; skipping bonus grant.`);
+        continue;
+      }
+
+      const existing = subscription.purchasedAddons.find(
+        (pa: any) => ((pa.addonId?._id || pa.addonId)?.toString() === addonDoc._id.toString())
+      );
+
+      if (!existing) {
+        subscription.purchasedAddons.push({
+          addonId: addonDoc._id,
+          limit: BONUS_ADDON_LIMIT,
+          used: 0,
+          isActive: true,
+          status: 'active',
+          requestedAt: new Date(),
+        });
+      } else if (existing.status === 'rejected') {
+        // Previously rejected paid request: reset and activate with the free credits
+        existing.limit = BONUS_ADDON_LIMIT;
+        existing.used = 0;
+        existing.isActive = true;
+        existing.status = 'active';
+        existing.requestedAt = new Date();
+      } else if (existing.status === 'active' || existing.status === 'pending' || existing.status === undefined) {
+        // Carried-over or awaiting-approval addon: just top up the limit (status untouched,
+        // so a pending paid request still requires payment approval)
+        existing.limit = (existing.limit || 0) + BONUS_ADDON_LIMIT;
+      }
+      // 'inactive' / 'terminated' were deliberately set by an admin: leave them untouched.
+    }
+
+    subscription.bonusAddonsGranted = true;
+    await subscription.save();
+  } catch (err) {
+    // Never block subscription activation because of the bonus grant
+    console.error('Failed to grant bonus addons:', err);
+  }
+};
+
 const assignPackage = async (payload: { tenantId: string, packageId: string }): Promise<ISubscription> => {
   const selectedPackage = await Package.findById(payload.packageId);
   if (!selectedPackage) {
@@ -80,6 +134,9 @@ const assignPackage = async (payload: { tenantId: string, packageId: string }): 
     status: 'active',
     purchasedAddons: inheritedAddons,
   });
+
+  // Every paid subscription comes with 30 Abandoned Checkout + 30 Courier Automation credits
+  await grantBonusAddons(subscription);
 
   // When assigning a paid package directly, mark any first-time referral discount as used
   await Tenant.findByIdAndUpdate(payload.tenantId, {
@@ -354,6 +411,9 @@ const approveSubscription = async (subscriptionId: string): Promise<ISubscriptio
   subscription.endDate = endDate;
   subscription.status = 'active';
   await subscription.save();
+
+  // Every paid subscription comes with 30 Abandoned Checkout + 30 Courier Automation credits
+  await grantBonusAddons(subscription);
 
   const tenant = await Tenant.findById(subscription.tenantId);
   if (tenant && tenant.ownerId) {
