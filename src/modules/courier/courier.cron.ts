@@ -8,6 +8,8 @@ import { SteadfastProvider } from './providers/SteadfastProvider';
 import { RedxProvider } from './providers/RedxProvider';
 import { getIO } from '../../socket';
 
+import { Product } from '../product/product.model';
+
 export interface SyncDetail {
   tenantId: string;
   merchantName: string;
@@ -37,20 +39,33 @@ export interface SyncResult {
   durationMs: number;
 }
 
-// Extracted as a named function so it can be triggered manually via API
-export const runCourierStatusSync = async (): Promise<SyncResult> => {
+export interface RunCourierSyncOptions {
+  tenantId?: string;
+  orderId?: string;
+}
+
+// Extracted as a named function so it can be triggered manually via API or cron
+export const runCourierStatusSync = async (options?: RunCourierSyncOptions): Promise<SyncResult> => {
   const startedAt = new Date();
 
   const details: SyncDetail[] = [];
   const skippedDetails: SkippedDetail[] = [];
 
   try {
-    // Find orders that have been shipped and have a consignment ID
-    const activeOrders = await Order.find({ 
+    // Find active orders that have not been finalized and have a consignment ID
+    const query: any = { 
       status: { $nin: ['delivered', 'cancelled'] }, 
-      consignmentId: { $exists: true, $ne: null },
-      courierProvider: { $exists: true, $ne: null }
-    });
+      consignmentId: { $exists: true, $ne: null, $nin: ['', null] }
+    };
+
+    if (options?.tenantId) {
+      query.tenantId = options.tenantId;
+    }
+    if (options?.orderId) {
+      query.$or = [{ _id: options.orderId }, { orderId: options.orderId }];
+    }
+
+    const activeOrders = await Order.find(query);
 
     if (activeOrders.length === 0) {
       const completedAt = new Date();
@@ -64,23 +79,29 @@ export const runCourierStatusSync = async (): Promise<SyncResult> => {
 
     // Group orders by tenantId to minimize Courier Config DB calls
     const ordersByTenant = activeOrders.reduce((acc, order) => {
-      const tenantIdStr = order.tenantId.toString();
+      const tenantIdStr = order.tenantId?.toString();
+      if (!tenantIdStr) return acc;
       if (!acc[tenantIdStr]) acc[tenantIdStr] = [];
       acc[tenantIdStr].push(order);
       return acc;
     }, {} as Record<string, typeof activeOrders>);
 
-    // Pre-fetch tenant names for display
+    // Pre-fetch tenant names and details for display and provider stores
     const tenantIds = Object.keys(ordersByTenant);
-    const tenants = await Tenant.find({ _id: { $in: tenantIds } }).select('_id name slug');
+    const tenants = await Tenant.find({ _id: { $in: tenantIds } });
     const tenantMap: Record<string, string> = {};
-    tenants.forEach((t: any) => { tenantMap[t._id.toString()] = t.name || t.slug || t._id.toString(); });
+    const tenantObjMap: Record<string, any> = {};
+    tenants.forEach((t: any) => { 
+      tenantMap[t._id.toString()] = t.name || t.slug || t._id.toString(); 
+      tenantObjMap[t._id.toString()] = t;
+    });
 
     let totalUpdated = 0;
     let totalSkipped = 0;
 
     for (const [tenantId, orders] of Object.entries(ordersByTenant)) {
       const merchantName = tenantMap[tenantId] || tenantId;
+      const tenantObj = tenantObjMap[tenantId];
 
       try {
         const courierConfig = await Courier.findOne({ tenantId });
@@ -90,6 +111,7 @@ export const runCourierStatusSync = async (): Promise<SyncResult> => {
             skippedDetails.push({
               tenantId, merchantName,
               orderId: order.orderId,
+              provider: order.courierProvider || 'Unknown',
               reason: 'No courier configuration found for this merchant',
               errorType: 'NO_CONFIG'
             });
@@ -98,69 +120,127 @@ export const runCourierStatusSync = async (): Promise<SyncResult> => {
           continue;
         }
 
-        // Determine active provider — prefer providers map, fall back to legacy
-        const providerId = courierConfig.provider;
-        if (!providerId) {
-          console.log(`[Courier Cron] No provider set for tenant ${tenantId}`);
-          for (const order of orders) {
-            skippedDetails.push({
-              tenantId, merchantName,
-              orderId: order.orderId,
-              reason: 'No active courier provider configured for this merchant',
-              errorType: 'NO_PROVIDER'
-            });
-            totalSkipped++;
+        // Cache initialized provider instances per merchant during this sync run
+        const providerInstances: Record<string, any> = {};
+        const providerErrors: Record<string, { reason: string; errorType: SkippedDetail['errorType'] }> = {};
+
+        const getProviderForOrder = (orderProviderRaw?: string): {
+          instance?: any;
+          providerId: string;
+          error?: { reason: string; errorType: SkippedDetail['errorType'] };
+        } => {
+          // Identify this specific order's provider, falling back to merchant's default provider
+          const providerId = (orderProviderRaw || courierConfig.provider || '').toLowerCase().trim();
+          if (!providerId) {
+            return {
+              providerId: 'Unknown',
+              error: {
+                reason: 'No courier provider configured for this order and no default found',
+                errorType: 'NO_PROVIDER',
+              },
+            };
           }
-          continue;
-        }
 
-        // Read credentials from providers map (preferred) or legacy fields
-        const pConfig: any = (courierConfig.providers as Record<string, any>)?.[providerId] || {
-          clientId: courierConfig.clientId,
-          apiSecret: courierConfig.apiSecret,
-        };
+          if (providerInstances[providerId]) {
+            return { instance: providerInstances[providerId], providerId };
+          }
+          if (providerErrors[providerId]) {
+            return { error: providerErrors[providerId], providerId };
+          }
 
-        let clientId = pConfig.clientId || '';
-        let apiSecret = pConfig.apiSecret || '';
-        try { clientId = decryptText(clientId); } catch (e) {}
-        try { apiSecret = decryptText(apiSecret); } catch (e) {}
+          // Case-insensitive lookup in courierConfig.providers
+          let pConfig: any = null;
+          if (courierConfig.providers) {
+            const providersObj = courierConfig.providers as Record<string, any>;
+            const foundKey = Object.keys(providersObj).find(
+              (k) => k.toLowerCase().trim() === providerId
+            );
+            if (foundKey) {
+              pConfig = providersObj[foundKey];
+            }
+          }
 
-        let providerInstance: any;
-        if (providerId === 'pathao') {
-          let pathaoUsername = '';
-          let pathaoPassword = '';
-          try { pathaoUsername = decryptText(pConfig.username || ''); } catch (e) { pathaoUsername = pConfig.username || ''; }
-          try { pathaoPassword = decryptText(pConfig.password || ''); } catch (e) { pathaoPassword = pConfig.password || ''; }
-          providerInstance = new PathaoProvider(clientId, apiSecret, pathaoUsername, pathaoPassword);
-        } else if (providerId === 'steadfast') {
-          providerInstance = new SteadfastProvider(clientId, apiSecret);
-        } else if (providerId === 'redx') {
-          providerInstance = new RedxProvider(clientId, apiSecret);
-        }
+          // Fallback to legacy single-provider configuration if provider matches
+          if (!pConfig && courierConfig.provider?.toLowerCase()?.trim() === providerId) {
+            pConfig = {
+              clientId: courierConfig.clientId,
+              apiSecret: courierConfig.apiSecret,
+              username: (courierConfig as any).username,
+              password: (courierConfig as any).password,
+              isActive: true,
+            };
+          }
 
-        if (!providerInstance) {
-          console.log(`[Courier Cron] Unknown provider ${providerId} for tenant ${tenantId}`);
-          for (const order of orders) {
-            skippedDetails.push({
-              tenantId, merchantName,
-              orderId: order.orderId,
-              provider: providerId,
+          if (!pConfig || (!pConfig.clientId && !pConfig.apiSecret)) {
+            const err = {
+              reason: `Credentials for courier provider "${providerId}" are not configured for this merchant`,
+              errorType: 'NO_CONFIG' as const,
+            };
+            providerErrors[providerId] = err;
+            return { error: err, providerId };
+          }
+
+          let clientId = pConfig.clientId || '';
+          let apiSecret = pConfig.apiSecret || '';
+          try { clientId = decryptText(clientId); } catch (e) {}
+          try { apiSecret = decryptText(apiSecret); } catch (e) {}
+
+          if (!clientId || !apiSecret) {
+            const err = {
+              reason: `Courier credentials for "${providerId}" are empty or decryption failed`,
+              errorType: 'AUTH_ERROR' as const,
+            };
+            providerErrors[providerId] = err;
+            return { error: err, providerId };
+          }
+
+          let instance: any = null;
+          if (providerId === 'pathao') {
+            let pathaoUsername = '';
+            let pathaoPassword = '';
+            try { pathaoUsername = decryptText(pConfig.username || ''); } catch (e) { pathaoUsername = pConfig.username || ''; }
+            try { pathaoPassword = decryptText(pConfig.password || ''); } catch (e) { pathaoPassword = pConfig.password || ''; }
+            instance = new PathaoProvider(clientId, apiSecret, pathaoUsername, pathaoPassword);
+          } else if (providerId === 'steadfast') {
+            instance = new SteadfastProvider(clientId, apiSecret);
+          } else if (providerId === 'redx') {
+            instance = new RedxProvider(clientId, apiSecret, false, tenantObj);
+          } else {
+            const err = {
               reason: `Unknown or unsupported courier provider: "${providerId}"`,
-              errorType: 'UNKNOWN_PROVIDER'
-            });
-            totalSkipped++;
+              errorType: 'UNKNOWN_PROVIDER' as const,
+            };
+            providerErrors[providerId] = err;
+            return { error: err, providerId };
           }
-          continue;
-        }
+
+          providerInstances[providerId] = instance;
+          return { instance, providerId };
+        };
 
         let tenantUpdated = false;
 
         for (const order of orders) {
+          const { instance: providerInstance, providerId, error } = getProviderForOrder(order.courierProvider);
+
+          if (error) {
+            skippedDetails.push({
+              tenantId,
+              merchantName,
+              orderId: order.orderId,
+              provider: providerId,
+              reason: error.reason,
+              errorType: error.errorType,
+            });
+            totalSkipped++;
+            continue;
+          }
+
           try {
             const trackingData = await providerInstance.getTrackingStatus(order.consignmentId);
             let newStatus: "pending" | "confirmed" | "shipped" | "delivered" | "cancelled" | "returned" | null = null;
             
-            const courierStatus = trackingData.status.toLowerCase();
+            const courierStatus = (trackingData?.status || '').toLowerCase();
             
             // Comprehensive status mapping logic based on provider documentations
             if (
@@ -182,6 +262,7 @@ export const runCourierStatusSync = async (): Promise<SyncResult> => {
             } else if (
               courierStatus.includes('cancel') || 
               courierStatus.includes('delete') ||
+              courierStatus.includes('unknown') ||
               courierStatus.includes('delivery_failed') ||
               courierStatus === 'hold'
             ) {
@@ -195,7 +276,7 @@ export const runCourierStatusSync = async (): Promise<SyncResult> => {
               courierStatus.includes('pending') ||
               courierStatus.includes('in_review') ||
               courierStatus.includes('package created') ||
-              courierStatus.includes('picked up') ||
+              courierStatus.includes('picked') ||
               courierStatus.includes('in_transit') ||
               courierStatus.includes('ready-for-delivery') ||
               courierStatus.includes('delivery-in-progress') ||
@@ -207,7 +288,7 @@ export const runCourierStatusSync = async (): Promise<SyncResult> => {
 
             // Only update if we mapped a new valid status that is different from current
             if (newStatus && newStatus !== order.status) {
-              console.log(`[Courier Cron] Updating order ${order.orderId} status from ${order.status} to ${newStatus}`);
+              console.log(`[Courier Cron] Updating order ${order.orderId} status from ${order.status} to ${newStatus} (${providerId})`);
               
               details.push({
                 tenantId,
@@ -218,14 +299,35 @@ export const runCourierStatusSync = async (): Promise<SyncResult> => {
                 newStatus: newStatus
               });
 
+              const oldStatus = order.status;
               order.status = newStatus;
+              if (newStatus === 'delivered' && order.paymentStatus === 'unpaid') {
+                order.paymentStatus = 'paid';
+              }
               await order.save();
+
+              // If order became cancelled or returned from a confirmed/shipped state, revert stock
+              if ((newStatus === 'cancelled' || newStatus === 'returned') && ['confirmed', 'shipped'].includes(oldStatus)) {
+                try {
+                  for (const item of (order.items || [])) {
+                    if (item.productId) {
+                      await Product.findByIdAndUpdate(item.productId, {
+                        $inc: { salesCount: -item.quantity, stock: item.quantity },
+                      });
+                    }
+                  }
+                } catch (stockErr) {
+                  console.error(`[Courier Cron] Error reverting stock for order ${order.orderId}:`, stockErr);
+                }
+              }
+
               tenantUpdated = true;
               totalUpdated++;
             } else {
               // No status change needed — still a valid skip
               skippedDetails.push({
-                tenantId, merchantName,
+                tenantId,
+                merchantName,
                 orderId: order.orderId,
                 provider: providerId,
                 reason: `Status unchanged (current: ${order.status}, courier: ${courierStatus})`,
@@ -234,7 +336,6 @@ export const runCourierStatusSync = async (): Promise<SyncResult> => {
               totalSkipped++;
             }
           } catch (err: any) {
-            // Detect auth errors
             const errMsg = err.message || '';
             const isAuthError = 
               errMsg.toLowerCase().includes('unauthorized') ||
@@ -247,7 +348,8 @@ export const runCourierStatusSync = async (): Promise<SyncResult> => {
               errMsg.toLowerCase().includes('access denied');
 
             skippedDetails.push({
-              tenantId, merchantName,
+              tenantId,
+              merchantName,
               orderId: order.orderId,
               provider: providerId,
               reason: isAuthError
@@ -259,18 +361,17 @@ export const runCourierStatusSync = async (): Promise<SyncResult> => {
           }
         }
 
-        // If any orders for this tenant were updated, emit a websocket event
         if (tenantUpdated) {
           const io = getIO();
           if (io) {
             io.to(tenantId).emit('dashboard:refresh');
           }
         }
-
       } catch (err: any) {
         console.error(`[Courier Cron] Error processing tenant ${tenantId}:`, err.message);
         skippedDetails.push({
-          tenantId, merchantName,
+          tenantId,
+          merchantName,
           reason: `Fatal error processing merchant: ${err.message}`,
           errorType: 'AUTH_ERROR'
         });

@@ -19,5 +19,6 @@ router.post('/credentials', authMiddleware('tenant_admin'), validateRequest(Cour
 router.get('/check-addon', authMiddleware('tenant_admin'), CourierController.checkAddonLimit);
 router.post('/forward', authMiddleware('tenant_admin'), validateRequest(CourierValidation.forwardOrderValidation), CourierController.forwardOrder);
 router.post('/sync-status', authMiddleware('super_admin'), CourierController.syncCourierStatuses);
+router.post('/sync-order/:orderId', authMiddleware('tenant_admin'), CourierController.syncSingleOrder);
 
 export const CourierRoutes = router;

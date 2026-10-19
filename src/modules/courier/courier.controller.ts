@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { CourierService } from './courier.service';
 import { runCourierStatusSync } from './courier.cron';
+import { Order } from '../order/order.model';
 import ApiResponse from '../../utils/apiResponse';
 import { asyncHandler } from '../../utils/asyncHandler';
 
@@ -54,6 +55,20 @@ const syncCourierStatuses = asyncHandler(async (req: Request, res: Response) => 
   ApiResponse.sendSuccess(res, 200, 'Courier status sync completed', result);
 });
 
+const syncSingleOrder = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = (req as any).user?.tenantId;
+  const orderId = req.params.orderId as string;
+  if (!tenantId) {
+    return ApiResponse.sendError(res, 401, 'Unauthorized');
+  }
+  const result = await runCourierStatusSync({ tenantId, orderId });
+  const updatedOrder = await Order.findOne({
+    tenantId: tenantId as any,
+    $or: [{ _id: orderId as any }, { orderId: orderId }],
+  });
+  ApiResponse.sendSuccess(res, 200, 'Order status checked', { ...result, order: updatedOrder });
+});
+
 export const CourierController = {
   getMyCourierCharge,
   getStorefrontCourierCharge,
@@ -63,4 +78,5 @@ export const CourierController = {
   checkAddonLimit,
   forwardOrder,
   syncCourierStatuses,
+  syncSingleOrder,
 };
