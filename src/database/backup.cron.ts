@@ -40,7 +40,6 @@ export const runBackup = async (
     let totalRecords = 0;
 
     for (const collName of collectionsToBackup) {
-      if (collName === 'backuplogs') continue;
       try {
         const count = await primaryDb.collection(collName).countDocuments();
         recordsDetail[collName] = count;
@@ -152,8 +151,6 @@ export const runBackup = async (
     }
 
     for (const collName of collectionsToBackup) {
-      if (collName === 'backuplogs') continue;
-
       try {
         const primaryColl = primaryDb.collection(collName);
         let secondaryColl: any = null;
@@ -296,14 +293,14 @@ export const runBackup = async (
 };
 
 export const initBackupCron = () => {
-  // Daily backup at 3:00 AM UTC
-  const schedule = '0 3 * * *';
+  // Automatic backup every 12 hours
+  const schedule = '0 */12 * * *';
 
   cron.schedule(
     schedule,
     async () => {
       try {
-        console.log('[Backup Cron] Triggering scheduled database backup...');
+        console.log('[Backup Cron] Triggering scheduled database backup (Every 12 hours)...');
         await runBackup('scheduled');
       } catch (e) {
         console.error('[Backup Cron] Scheduled backup encountered an error:', e);
@@ -314,5 +311,5 @@ export const initBackupCron = () => {
     }
   );
 
-  console.log('⏰ Database backup cron scheduled (Daily at 3:00 AM UTC)');
+  console.log('⏰ Database backup cron scheduled (Every 12 hours at 00:00 & 12:00 UTC)');
 };

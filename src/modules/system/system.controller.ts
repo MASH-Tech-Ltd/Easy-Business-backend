@@ -233,12 +233,9 @@ const getDatabaseStats = asyncHandler(async (req: Request, res: Response) => {
   if (db) {
     try {
       primaryStats = await db.command({ dbStats: 1 });
-      if (primaryStats.collections !== undefined) {
-        primaryCollections = primaryStats.collections;
-      } else {
-        const rawCols = await db.listCollections().toArray();
-        primaryCollections = rawCols.filter((c) => !c.name.startsWith("system.")).length;
-      }
+      const rawCols = await db.listCollections().toArray();
+      const userCollections = rawCols.filter((c) => !c.name.startsWith("system."));
+      primaryCollections = userCollections.length;
     } catch (e: any) {
       console.error("[Primary DB Stats] Error:", e.message);
     }
@@ -252,12 +249,9 @@ const getDatabaseStats = asyncHandler(async (req: Request, res: Response) => {
     secondaryConn = await getSecondaryConnection();
     if (secondaryConn && secondaryConn.db) {
       backupStats = await secondaryConn.db.command({ dbStats: 1 });
-      if (backupStats.collections !== undefined) {
-        backupCollections = backupStats.collections;
-      } else {
-        const rawBackupCols = await secondaryConn.db.listCollections().toArray();
-        backupCollections = rawBackupCols.filter((c) => !c.name.startsWith("system.")).length;
-      }
+      const rawBackupCols = await secondaryConn.db.listCollections().toArray();
+      const userBackupCols = rawBackupCols.filter((c) => !c.name.startsWith("system."));
+      backupCollections = userBackupCols.length;
     }
   } catch (secErr: any) {
     console.warn("[Backup DB Stats] Error querying secondary stats:", secErr.message);
