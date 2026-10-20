@@ -4,6 +4,8 @@ import jwt from "jsonwebtoken";
 import fs from "fs";
 import CustomError from "./CustomError";
 
+import { cleanupUploadedFiles } from "../utils/asyncHandler";
+
 const developmentError = (error: CustomError, res: Response): Response => {
   const fullStack = error.stack ? error.stack.split("\n") : [];
   const firstLine = fullStack[0];
@@ -59,29 +61,7 @@ export const globalErrorHandler = (
   } else {
     console.error("Global Error Handler caught an error:", error);
   }
-  
-  if (req.file && req.file.path && fs.existsSync(req.file.path)) {
-    try { fs.unlinkSync(req.file.path); } catch (e) { console.error("Failed to delete temp file:", e); }
-  }
-
-  if (req.files) {
-    const files = req.files as any[] | { [fieldname: string]: any[] };
-    if (Array.isArray(files)) {
-      files.forEach((file) => {
-        if (file.path && fs.existsSync(file.path)) {
-           try { fs.unlinkSync(file.path); } catch (e) {}
-        }
-      });
-    } else {
-      Object.values(files).forEach((fileArray) => {
-        fileArray.forEach((file) => {
-          if (file.path && fs.existsSync(file.path)) {
-             try { fs.unlinkSync(file.path); } catch (e) {}
-          }
-        });
-      });
-    }
-  }
+  cleanupUploadedFiles(req).catch(() => {});
 
   let err: CustomError = error instanceof CustomError
     ? error
