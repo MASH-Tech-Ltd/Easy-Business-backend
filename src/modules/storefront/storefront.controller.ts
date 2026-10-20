@@ -150,11 +150,20 @@ const getStatus = asyncHandler(async (req: Request, res: Response) => {
         daysLeft: 0,
         isTrial: false,
         reason: "Store is offline",
+        customDomain: tenant.customDomain || null,
+        domainStatus: tenant.domainStatus || null,
       },
     });
   }
   const status = await checkStoreSubscription(tenant._id as Types.ObjectId);
-  return res.status(200).json({ success: true, data: status });
+  return res.status(200).json({
+    success: true,
+    data: {
+      ...status,
+      customDomain: tenant.customDomain || null,
+      domainStatus: tenant.domainStatus || null,
+    },
+  });
 });
 
 const getTheme = asyncHandler(async (req: Request, res: Response) => {
