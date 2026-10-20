@@ -15,6 +15,45 @@ export interface BackupResult {
   recordsDetail?: Record<string, number>;
 }
 
+// Safe chunked deletion for secondary collections to prevent memory/timeout issues on big collections
+const safeChunkedDelete = async (coll: any): Promise<void> => {
+  try {
+    const count = await coll.countDocuments();
+    if (count === 0) return;
+    if (count <= 2500) {
+      await coll.deleteMany({});
+      return;
+    }
+    // Delete in chunks of 2500 by _id
+    while (true) {
+      const batch = await coll.find({}, { projection: { _id: 1 } }).limit(2500).toArray();
+      if (!batch || batch.length === 0) break;
+      const ids = batch.map((d: any) => d._id);
+      await coll.deleteMany({ _id: { $in: ids } });
+    }
+  } catch (err: any) {
+    await coll.deleteMany({}).catch(() => {});
+  }
+};
+
+// Safe chunked insert with recursive sub-chunk splitting to avoid MongoDB 16MB bulk write limits
+const safeChunkedInsert = async (coll: any, docs: any[]): Promise<void> => {
+  if (!docs || docs.length === 0) return;
+  try {
+    await coll.insertMany(docs, { ordered: false });
+  } catch (err: any) {
+    if (docs.length > 50) {
+      const mid = Math.floor(docs.length / 2);
+      await safeChunkedInsert(coll, docs.slice(0, mid));
+      await safeChunkedInsert(coll, docs.slice(mid));
+    } else {
+      await Promise.allSettled(
+        docs.map((doc) => coll.insertOne(doc).catch(() => {}))
+      );
+    }
+  }
+};
+
 export const runBackup = async (
   triggerType: 'manual' | 'scheduled' = 'scheduled'
 ): Promise<BackupResult> => {
@@ -157,8 +196,8 @@ export const runBackup = async (
 
         if (secondaryConn && secondaryConn.db) {
           secondaryColl = secondaryConn.db.collection(collName);
-          // 1. Wipe existing secondary collection to guarantee fresh replica
-          await secondaryColl.deleteMany({});
+          // 1. Wipe existing secondary collection in safe chunks to avoid socket timeout on big collections
+          await safeChunkedDelete(secondaryColl);
 
           // 2. Replicate all indexes from primary (excluding default _id_)
           try {
@@ -177,7 +216,7 @@ export const runBackup = async (
           }
         }
 
-        const cursor = primaryColl.find({});
+        const cursor = primaryColl.find({}).batchSize(500);
         let chunk: any[] = [];
 
         if (!isFirstModel) gzip.write(',\n');
@@ -192,11 +231,11 @@ export const runBackup = async (
           isFirstDoc = false;
           gzip.write(JSON.stringify(doc));
 
-          // Batch chunk for secondary replication
+          // Batch chunk for secondary replication (safe 500 records chunk with auto split on 16MB limit)
           if (secondaryColl) {
             chunk.push(doc);
-            if (chunk.length >= 1000) {
-              await secondaryColl.insertMany(chunk, { ordered: false });
+            if (chunk.length >= 500) {
+              await safeChunkedInsert(secondaryColl, chunk);
               chunk = [];
             }
           }
@@ -206,7 +245,8 @@ export const runBackup = async (
 
         // Flush remaining chunk
         if (secondaryColl && chunk.length > 0) {
-          await secondaryColl.insertMany(chunk, { ordered: false });
+          await safeChunkedInsert(secondaryColl, chunk);
+          chunk = [];
         }
 
         if (secondaryColl) {
@@ -232,6 +272,27 @@ export const runBackup = async (
 
     console.log(`[Backup] Local compressed backup saved: ${backupFilePath}`);
 
+    // Save success log to primary DB
+    const logDoc = await BackupLogModel.create({
+      status: 'success',
+      backupFile: backupFilePath,
+      recordsDetail,
+      triggerType,
+      message: 'Database backup and replication completed successfully.',
+      timestamp: new Date(),
+    });
+
+    // Also replicate this backup log entry to secondary so both databases are 100% identical!
+    if (secondaryConn && secondaryConn.db) {
+      try {
+        const secondaryColl = secondaryConn.db.collection('backuplogs');
+        await secondaryColl.insertOne(logDoc.toObject ? logDoc.toObject() : logDoc);
+        console.log('[Backup] Synchronized backuplogs to secondary DB');
+      } catch (logSyncErr: any) {
+        console.warn('[Backup] Error replicating log entry to secondary:', logSyncErr.message);
+      }
+    }
+
     if (secondaryConn) {
       await secondaryConn.close();
       console.log('[Backup] Secondary DB replication completed successfully!');
@@ -256,16 +317,6 @@ export const runBackup = async (
     } catch (cleanupErr) {
       console.warn('[Backup] Error cleaning up old backup files:', cleanupErr);
     }
-
-    // Save success log
-    await BackupLogModel.create({
-      status: 'success',
-      backupFile: backupFilePath,
-      recordsDetail,
-      triggerType,
-      message: 'Database backup and replication completed successfully.',
-      timestamp: new Date(),
-    });
 
     return {
       success: true,

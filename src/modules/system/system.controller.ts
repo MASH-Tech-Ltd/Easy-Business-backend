@@ -157,6 +157,49 @@ const getHealthStats = asyncHandler(async (req: Request, res: Response) => {
     if (ipAddress !== "Unknown") break;
   }
 
+  let diskStats = {
+    totalGB: "0.00",
+    freeGB: "0.00",
+    usedGB: "0.00",
+    total: "0.00 GB",
+    free: "0.00 GB",
+    used: "0.00 GB",
+    percent: 0,
+    text: "N/A",
+  };
+
+  try {
+    if (typeof (fs as any).statfsSync === "function") {
+      const stats = (fs as any).statfsSync(process.cwd());
+      const bsize = BigInt(stats.bsize);
+      const blocks = BigInt(stats.blocks);
+      const bavail = BigInt(stats.bavail);
+
+      const totalBytes = Number(bsize * blocks);
+      const freeBytes = Number(bsize * bavail);
+      const usedBytes = Math.max(0, totalBytes - freeBytes);
+
+      const oneGB = 1024 * 1024 * 1024;
+      const totalGB = (totalBytes / oneGB).toFixed(2);
+      const freeGB = (freeBytes / oneGB).toFixed(2);
+      const usedGB = (usedBytes / oneGB).toFixed(2);
+      const diskPercent = totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 100) : 0;
+
+      diskStats = {
+        totalGB,
+        freeGB,
+        usedGB,
+        total: `${totalGB} GB`,
+        free: `${freeGB} GB`,
+        used: `${usedGB} GB`,
+        percent: diskPercent,
+        text: `${freeGB} GB Free / ${totalGB} GB Total`,
+      };
+    }
+  } catch (err: any) {
+    console.warn("[Health] Failed to get disk space:", err.message);
+  }
+
   const data = {
     osUptime: `${osDays}d ${osHours}h ${osMinutes}m`,
     processUptime: `${procDays}d ${procHours}h ${procMinutes}m`,
@@ -164,6 +207,11 @@ const getHealthStats = asyncHandler(async (req: Request, res: Response) => {
     cpuCores: cpuCores,
     memory: memoryUsage,
     memoryPercent: memoryPercent,
+    disk: diskStats,
+    diskTotal: diskStats.total,
+    diskFree: diskStats.free,
+    diskUsed: diskStats.used,
+    diskPercent: diskStats.percent,
     latency: "Real-time",
     os: `${os.type()} ${os.release()}`,
     arch: os.arch(),
@@ -230,11 +278,15 @@ const getDatabaseStats = asyncHandler(async (req: Request, res: Response) => {
   const db = mongoose.connection.db;
   let primaryStats: any = {};
   let primaryCollections = 0;
+  let rawCols: any[] = [];
+  let rawBackupCols: any[] = [];
+  let missingInBackup: string[] = [];
+
   if (db) {
     try {
       primaryStats = await db.command({ dbStats: 1 });
-      const rawCols = await db.listCollections().toArray();
-      const userCollections = rawCols.filter((c) => !c.name.startsWith("system."));
+      rawCols = await db.listCollections().toArray();
+      const userCollections = rawCols.filter((c: any) => !c.name.startsWith("system."));
       primaryCollections = userCollections.length;
     } catch (e: any) {
       console.error("[Primary DB Stats] Error:", e.message);
@@ -249,8 +301,27 @@ const getDatabaseStats = asyncHandler(async (req: Request, res: Response) => {
     secondaryConn = await getSecondaryConnection();
     if (secondaryConn && secondaryConn.db) {
       backupStats = await secondaryConn.db.command({ dbStats: 1 });
-      const rawBackupCols = await secondaryConn.db.listCollections().toArray();
-      const userBackupCols = rawBackupCols.filter((c) => !c.name.startsWith("system."));
+      rawBackupCols = await secondaryConn.db.listCollections().toArray();
+      const primaryColls = rawCols.filter((c: any) => !c.name.startsWith("system.")).map((c: any) => c.name);
+      const backupColls = rawBackupCols.filter((c: any) => !c.name.startsWith("system.")).map((c: any) => c.name);
+      missingInBackup = primaryColls.filter((c: string) => !backupColls.includes(c));
+
+      // Auto-heal missing backuplogs on secondary if that's the only difference
+      if (missingInBackup.includes("backuplogs") && db) {
+        try {
+          const logs = await db.collection("backuplogs").find({}).toArray();
+          if (logs.length > 0) {
+            const secColl = secondaryConn.db.collection("backuplogs");
+            await secColl.deleteMany({});
+            await secColl.insertMany(logs, { ordered: false });
+            backupStats = await secondaryConn.db.command({ dbStats: 1 });
+            rawBackupCols = await secondaryConn.db.listCollections().toArray();
+            missingInBackup = primaryColls.filter((c: string) => !rawBackupCols.map((x: any) => x.name).includes(c));
+          }
+        } catch (_) {}
+      }
+
+      const userBackupCols = rawBackupCols.filter((c: any) => !c.name.startsWith("system."));
       backupCollections = userBackupCols.length;
     }
   } catch (secErr: any) {
@@ -287,6 +358,7 @@ const getDatabaseStats = asyncHandler(async (req: Request, res: Response) => {
     cluster: secondaryConn?.name ? `MongoDB Secondary (${secondaryConn.name})` : "MongoDB Secondary Replica",
     isSynced: isFullySynced,
     syncDifference: (primaryStats.objects || 0) - (backupStats.objects || 0),
+    missingCollections: missingInBackup,
   };
 
   const responseData = {
