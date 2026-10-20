@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const createProductValidation = z.object({
   body: z.object({
-    title: z.string({ message: 'Product title is required' }).min(1, 'Product title cannot be empty').optional(),
+    title: z.string().optional(),
     name: z.string().optional(),
     originalPrice: z.union([z.string(), z.number()]).optional(),
     discountedPrice: z.union([z.string(), z.number()]).optional(),
@@ -11,7 +11,7 @@ export const createProductValidation = z.object({
     stock: z.union([z.string(), z.number()]).optional(),
     description: z.string().optional(),
     shortDescription: z.string().optional(),
-    categoryId: z.string().optional(),
+    categoryId: z.string({ message: 'Category is required' }).trim().min(1, 'Category is required'),
     brand: z.string().optional(),
     weight: z.union([z.string(), z.number()]).optional(),
     length: z.union([z.string(), z.number()]).optional(),
@@ -31,12 +31,15 @@ export const createProductValidation = z.object({
       width: z.number().optional(),
       height: z.number().optional(),
     })]).optional(),
-  }).refine((data) => !!(data.title || data.name), {
-    message: 'Product name/title is required',
+  }).refine((data) => !!(data.title?.trim() || data.name?.trim()), {
+    message: 'Product title is required',
     path: ['title'],
-  }).refine((data) => (data.discountedPrice !== undefined || data.originalPrice !== undefined || data.price !== undefined), {
-    message: 'Product price is required',
-    path: ['price'],
+  }).refine((data) => {
+    const p = data.discountedPrice ?? data.price ?? data.originalPrice;
+    return p !== undefined && p !== '' && !isNaN(Number(p)) && Number(p) >= 0;
+  }, {
+    message: 'Product selling price is required and must be valid',
+    path: ['discountedPrice'],
   }),
 });
 

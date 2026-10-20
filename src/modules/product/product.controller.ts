@@ -21,6 +21,15 @@ const createProduct = asyncHandler(async (req: Request, res: Response) => {
     req.body.title = req.body.name;
   }
 
+  if (!req.body.title || typeof req.body.title !== 'string' || !req.body.title.trim()) {
+    throw new CustomError(400, "Product title is required");
+  }
+
+  if (!req.body.categoryId || typeof req.body.categoryId !== 'string' || !req.body.categoryId.trim()) {
+    throw new CustomError(400, "Category is required");
+  }
+  req.body.categoryId = req.body.categoryId.trim();
+
   if (req.body.price !== undefined) {
     if (req.body.discountedPrice === undefined) req.body.discountedPrice = Number(req.body.price);
     if (req.body.originalPrice === undefined) req.body.originalPrice = Number(req.body.price);
@@ -32,9 +41,17 @@ const createProduct = asyncHandler(async (req: Request, res: Response) => {
   if (req.body.originalPrice !== undefined) {
     req.body.originalPrice = Number(req.body.originalPrice);
   }
+
+  if (req.body.discountedPrice === undefined || isNaN(req.body.discountedPrice) || req.body.discountedPrice < 0) {
+    throw new CustomError(400, "Selling price is required and must be 0 or greater");
+  }
+  if (req.body.originalPrice === undefined || isNaN(req.body.originalPrice) || req.body.originalPrice < 0) {
+    throw new CustomError(400, "Regular price is required and must be 0 or greater");
+  }
+
   if (req.body.saveAmount !== undefined) {
     req.body.saveAmount = Number(req.body.saveAmount);
-  } else if (req.body.originalPrice !== undefined && req.body.discountedPrice !== undefined) {
+  } else {
     req.body.saveAmount = Math.max(0, req.body.originalPrice - req.body.discountedPrice);
   }
 

@@ -30,6 +30,7 @@ const developmentError = (error: CustomError, res: Response): Response => {
 
   if (error.data) {
     errorResponse.data = error.data;
+    errorResponse.errors = error.data;
   }
 
   errorResponse.stack = sequentialStack;
@@ -43,7 +44,7 @@ const productionError = (error: CustomError, res: Response): Response => {
     success: false,
     status: error.status,
     statusCode: error.statusCode,
-    ...(error.data ? { data: error.data } : {}),
+    ...(error.data ? { data: error.data, errors: error.data } : {}),
   });
 };
 
@@ -97,7 +98,8 @@ export const globalErrorHandler = (
         message: el.message,
         kind: el.kind,
       }));
-      err = new CustomError(400, "Validation failed", validationErrors);
+      const detailedMessage = validationErrors.map((el: any) => el.message).join(', ');
+      err = new CustomError(400, detailedMessage || "Validation failed", validationErrors);
     } else if ((error as any).code === 11000) {
       const keyValue = (error as any).keyValue || {};
       const key = Object.keys(keyValue)[0] || 'unknown field';

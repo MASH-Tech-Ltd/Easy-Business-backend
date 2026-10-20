@@ -3,13 +3,13 @@ import { IProduct } from './product.interface';
 
 const productSchema = new Schema<IProduct>(
   {
-    title: { type: String, required: true },
-    slug: { type: String, required: true },
+    title: { type: String, required: [true, 'Product title is required'] },
+    slug: { type: String, required: [true, 'Product slug is required'] },
     shortDescription: { type: String },
     description: { type: String },
     images: [{
-      public_id: { type: String, required: true },
-      secure_url: { type: String, required: true }
+      public_id: { type: String, required: [true, 'Image public_id is required'] },
+      secure_url: { type: String, required: [true, 'Image URL is required'] }
     }],
     specifications: [{
       group: { type: String },
@@ -18,9 +18,9 @@ const productSchema = new Schema<IProduct>(
         value: { type: String }
       }]
     }],
-    originalPrice: { type: Number, required: true },
-    discountedPrice: { type: Number, required: true },
-    saveAmount: { type: Number, required: true },
+    originalPrice: { type: Number, required: [true, 'Regular price is required'] },
+    discountedPrice: { type: Number, required: [true, 'Selling price is required'] },
+    saveAmount: { type: Number, required: [true, 'Save amount is required'] },
     badgeText: { type: String },
     features: { type: [String], default: [] },
     videos: { type: [String], default: [] },
@@ -36,8 +36,8 @@ const productSchema = new Schema<IProduct>(
     status: { type: String, enum: ['ACTIVE', 'DRAFT', 'ARCHIVED'], default: 'ACTIVE' },
     sku: { type: String },
     unit: { type: String },
-    categoryId: { type: Schema.Types.ObjectId, ref: 'Category', required: true },
-    tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true },
+    categoryId: { type: Schema.Types.ObjectId, ref: 'Category', required: [true, 'Category is required'] },
+    tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: [true, 'Tenant ID is required'] },
     stock: { type: Number, default: 0 },
     salesCount: { type: Number, default: 0 },
   },
