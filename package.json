@@ -9,6 +9,7 @@
     "start": "node ./dist/server.js",
     "lint": "tsc --noEmit",
     "lint:fix": "npm run lint",
+    "backup:sync": "tsx src/scripts/runBackupNow.ts",
     "prettier": "prettier --ignore-path .gitignore --write \"./src/**/*.+(js|ts|json)\"",
     "prettier:fix": "prettier --write src"
   },

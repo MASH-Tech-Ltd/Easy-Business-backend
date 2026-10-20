@@ -8,6 +8,10 @@ const router = Router();
 router.get('/health', authMiddleware('super_admin'), SystemController.getHealthStats);
 router.get('/logs', authMiddleware('super_admin'), SystemController.getLogs);
 router.get('/database', authMiddleware('super_admin'), SystemController.getDatabaseStats);
+router.post('/database/sync', authMiddleware('super_admin'), SystemController.syncDatabaseData);
+router.get('/database/backup-logs', authMiddleware('super_admin'), SystemController.getBackupLogs);
+router.get('/database/backup-files', authMiddleware('super_admin'), SystemController.getBackupFiles);
+router.get('/database/download-backup/:filename', authMiddleware('super_admin'), SystemController.downloadBackupFile);
 router.get('/security', authMiddleware('super_admin'), SystemController.getSecurityStats);
 
 // New Security & Blocklist Routes

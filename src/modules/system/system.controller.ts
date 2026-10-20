@@ -2,12 +2,16 @@ import { Request, Response } from "express";
 import ApiResponse from "../../utils/apiResponse";
 import { asyncHandler } from "../../utils/asyncHandler";
 import os from "os";
+import fs from "fs";
+import path from "path";
 import mongoose from "mongoose";
 import v8 from "v8";
 import { SecurityLog, BlockedIp, VisitorLog } from "./security.model";
 import { GlobalSetting } from "./globalSetting.model";
 import { Tenant } from "../tenant/tenant.model";
 import { isCloudflareProxyIp, getClientIp } from "../../utils/ipHelper";
+import { runBackup } from "../../database/backup.cron";
+import { BackupLogModel } from "../../database/backupLog.model";
 
 const getGlobalSettings = asyncHandler(async (req: Request, res: Response) => {
   let settings = await GlobalSetting.findOne();
@@ -215,6 +219,8 @@ const getDatabaseStats = asyncHandler(async (req: Request, res: Response) => {
       ? `${(stats.dataSize / 1024 / 1024).toFixed(2)} MB`
       : "Unknown",
     connections: mongoose.connection.readyState === 1 ? "Active" : "0",
+    collections: Object.keys(mongoose.connection.models).length,
+    documents: stats.objects || 0,
   };
   ApiResponse.sendSuccess(res, 200, "Database stats retrieved", data);
 });
@@ -475,6 +481,69 @@ const clearVisitorLogs = asyncHandler(async (req: Request, res: Response) => {
   );
 });
 
+const syncDatabaseData = asyncHandler(async (req: Request, res: Response) => {
+  const result = await runBackup("manual");
+  if (result && !result.success) {
+    ApiResponse.sendSuccess(res, 200, result.message || "Sync bypassed due to safety checks", result);
+  } else {
+    ApiResponse.sendSuccess(res, 200, "Database synchronized and backup created successfully", result);
+  }
+});
+
+const getBackupLogs = asyncHandler(async (req: Request, res: Response) => {
+  const result = await BackupLogModel.find().sort({ timestamp: -1 }).limit(100);
+  ApiResponse.sendSuccess(res, 200, "Backup history logs fetched successfully", result);
+});
+
+const getBackupFiles = asyncHandler(async (req: Request, res: Response) => {
+  const backupsDir = path.join(process.cwd(), "backups");
+  if (!fs.existsSync(backupsDir)) {
+    return ApiResponse.sendSuccess(res, 200, "Backup files fetched successfully", []);
+  }
+  const files = fs.readdirSync(backupsDir).filter((f) => f.endsWith(".json.gz") || f.endsWith(".gz"));
+  const fileList = files.map((filename) => {
+    const filePath = path.join(backupsDir, filename);
+    const stats = fs.statSync(filePath);
+    return {
+      filename,
+      sizeBytes: stats.size,
+      sizeKB: (stats.size / 1024).toFixed(2),
+      sizeMB: (stats.size / (1024 * 1024)).toFixed(2),
+      createdAt: stats.mtime,
+    };
+  });
+  fileList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  ApiResponse.sendSuccess(res, 200, "Backup files fetched successfully", fileList);
+});
+
+const downloadBackupFile = asyncHandler(async (req: Request, res: Response) => {
+  const { filename } = req.params;
+  if (
+    !filename ||
+    typeof filename !== "string" ||
+    filename.includes("..") ||
+    filename.includes("/") ||
+    filename.includes("\\") ||
+    !filename.endsWith(".gz")
+  ) {
+    res.status(400).json({ status: "error", message: "Invalid backup filename" });
+    return;
+  }
+  const backupsDir = path.join(process.cwd(), "backups");
+  const filePath = path.join(backupsDir, filename);
+
+  if (!fs.existsSync(filePath)) {
+    res.status(404).json({ status: "error", message: "Backup file not found on server disk" });
+    return;
+  }
+
+  res.download(filePath, filename, (err) => {
+    if (err) {
+      console.error("[Backup Download] Error sending file:", err);
+    }
+  });
+});
+
 export const SystemController = {
   getGlobalSettings,
   updateGlobalSettings,
@@ -493,4 +562,8 @@ export const SystemController = {
   clearVisitorLogs,
   getPublicSettings,
   getActiveStoresForSeo,
+  syncDatabaseData,
+  getBackupLogs,
+  getBackupFiles,
+  downloadBackupFile,
 };

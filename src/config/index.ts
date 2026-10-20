@@ -56,6 +56,7 @@ const config = {
   // Database
   database: {
     url: process.env.DATABASE_URL || 'mongodb://localhost:27017/electronics',
+    backupUrl: process.env.BACKUP_DATABASE_URL || '',
   },
 
   // Security & Authentication
