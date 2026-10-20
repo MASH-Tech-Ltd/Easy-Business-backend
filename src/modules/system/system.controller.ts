@@ -12,6 +12,7 @@ import { Tenant } from "../tenant/tenant.model";
 import { isCloudflareProxyIp, getClientIp } from "../../utils/ipHelper";
 import { runBackup } from "../../database/backup.cron";
 import { BackupLogModel } from "../../database/backupLog.model";
+import config from "../../config";
 
 const getGlobalSettings = asyncHandler(async (req: Request, res: Response) => {
   let settings = await GlobalSetting.findOne();
@@ -206,23 +207,102 @@ const getLogs = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 200, "Logs retrieved", data);
 });
 
+let secondaryDbConn: mongoose.Connection | null = null;
+const getSecondaryConnection = async (): Promise<mongoose.Connection | null> => {
+  const backupMongoUri = config.database.backupUrl || process.env.BACKUP_DATABASE_URL;
+  if (!backupMongoUri) return null;
+  if (secondaryDbConn && secondaryDbConn.readyState === 1) {
+    return secondaryDbConn;
+  }
+  try {
+    secondaryDbConn = await mongoose.createConnection(backupMongoUri, {
+      serverSelectionTimeoutMS: 5000,
+      connectTimeoutMS: 8000,
+    }).asPromise();
+    return secondaryDbConn;
+  } catch (err: any) {
+    console.warn("[Backup DB] Secondary cluster connection warning:", err?.message || err);
+    return null;
+  }
+};
+
 const getDatabaseStats = asyncHandler(async (req: Request, res: Response) => {
   const db = mongoose.connection.db;
-  let stats: any = {};
+  let primaryStats: any = {};
+  let primaryCollections = 0;
   if (db) {
-    stats = await db.command({ dbStats: 1 });
+    try {
+      primaryStats = await db.command({ dbStats: 1 });
+      if (primaryStats.collections !== undefined) {
+        primaryCollections = primaryStats.collections;
+      } else {
+        const rawCols = await db.listCollections().toArray();
+        primaryCollections = rawCols.filter((c) => !c.name.startsWith("system.")).length;
+      }
+    } catch (e: any) {
+      console.error("[Primary DB Stats] Error:", e.message);
+    }
   }
 
-  const data = {
+  // Backup / Secondary Database Stats
+  let backupStats: any = {};
+  let backupCollections = 0;
+  let secondaryConn: mongoose.Connection | null = null;
+  try {
+    secondaryConn = await getSecondaryConnection();
+    if (secondaryConn && secondaryConn.db) {
+      backupStats = await secondaryConn.db.command({ dbStats: 1 });
+      if (backupStats.collections !== undefined) {
+        backupCollections = backupStats.collections;
+      } else {
+        const rawBackupCols = await secondaryConn.db.listCollections().toArray();
+        backupCollections = rawBackupCols.filter((c) => !c.name.startsWith("system.")).length;
+      }
+    }
+  } catch (secErr: any) {
+    console.warn("[Backup DB Stats] Error querying secondary stats:", secErr.message);
+  }
+
+  const primaryData = {
     status: mongoose.connection.readyState === 1 ? "Connected" : "Disconnected",
-    storage: stats.dataSize
-      ? `${(stats.dataSize / 1024 / 1024).toFixed(2)} MB`
+    storage: primaryStats.dataSize
+      ? `${(primaryStats.dataSize / 1024 / 1024).toFixed(2)} MB`
       : "Unknown",
     connections: mongoose.connection.readyState === 1 ? "Active" : "0",
-    collections: Object.keys(mongoose.connection.models).length,
-    documents: stats.objects || 0,
+    collections: primaryCollections,
+    documents: primaryStats.objects || 0,
+    cluster: "MongoDB Primary Replica",
   };
-  ApiResponse.sendSuccess(res, 200, "Database stats retrieved", data);
+
+  const backupConnected = Boolean(secondaryConn && secondaryConn.readyState === 1);
+  const isFullySynced = Boolean(
+    backupConnected &&
+      primaryStats.objects > 0 &&
+      backupStats.objects === primaryStats.objects &&
+      backupCollections === primaryCollections
+  );
+
+  const backupData = {
+    status: backupConnected ? "Connected" : "Disconnected",
+    storage: backupStats.dataSize
+      ? `${(backupStats.dataSize / 1024 / 1024).toFixed(2)} MB`
+      : "0.00 MB",
+    connections: backupConnected ? "Active" : "0",
+    collections: backupCollections,
+    documents: backupStats.objects || 0,
+    cluster: secondaryConn?.name ? `MongoDB Secondary (${secondaryConn.name})` : "MongoDB Secondary Replica",
+    isSynced: isFullySynced,
+    syncDifference: (primaryStats.objects || 0) - (backupStats.objects || 0),
+  };
+
+  const responseData = {
+    ...primaryData, // backward compatibility
+    primary: primaryData,
+    backup: backupData,
+    backupDb: backupData,
+  };
+
+  ApiResponse.sendSuccess(res, 200, "Database stats retrieved", responseData);
 });
 
 const getSecurityStats = asyncHandler(async (req: Request, res: Response) => {

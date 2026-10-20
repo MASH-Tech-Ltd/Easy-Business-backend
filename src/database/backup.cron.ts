@@ -28,19 +28,26 @@ export const runBackup = async (
   const recordsDetail: Record<string, number> = {};
 
   try {
-    const models = mongoose.connection.models;
+    const primaryDb = mongoose.connection.db;
+    if (!primaryDb) throw new Error("Primary database connection is not established");
+
+    // Discover all real collections in primary database (guarantees all 26 collections are found)
+    const rawCollections = await primaryDb.listCollections().toArray();
+    const collectionsToBackup = rawCollections
+      .filter((c) => !c.name.startsWith('system.'))
+      .map((c) => c.name);
+
     let totalRecords = 0;
 
-    for (const [modelName, model] of Object.entries(models)) {
-      // Exclude BackupLog itself from counting if desired, or include it
-      if (modelName === 'BackupLog') continue;
+    for (const collName of collectionsToBackup) {
+      if (collName === 'backuplogs') continue;
       try {
-        const count = await model.countDocuments();
-        recordsDetail[modelName] = count;
+        const count = await primaryDb.collection(collName).countDocuments();
+        recordsDetail[collName] = count;
         totalRecords += count;
-        console.log(`[Backup] Counted ${count} records for ${modelName}`);
+        console.log(`[Backup] Counted ${count} records for collection ${collName}`);
       } catch (err: any) {
-        console.error(`[Backup] Failed to count model ${modelName}:`, err.message);
+        console.error(`[Backup] Failed to count collection ${collName}:`, err.message);
       }
     }
 
@@ -61,9 +68,9 @@ export const runBackup = async (
     }
 
     // 2. Ransomware / Corruption Canary Safeguard
-    const UserModel = models['User'] || models['Tenant'];
-    if (UserModel) {
-      const samples = await UserModel.find({}).limit(50).lean();
+    const userColl = primaryDb.collection('users');
+    if (userColl) {
+      const samples = await userColl.find({}).limit(50).toArray();
       const sampleSize = samples.length;
       let validEmails = 0;
 
@@ -144,26 +151,42 @@ export const runBackup = async (
       console.warn('[Backup] No BACKUP_DATABASE_URL configured. Secondary replication skipped.');
     }
 
-    for (const [modelName, model] of Object.entries(models)) {
-      if (modelName === 'BackupLog') continue;
+    for (const collName of collectionsToBackup) {
+      if (collName === 'backuplogs') continue;
 
       try {
-        const collectionName = model.collection.name;
+        const primaryColl = primaryDb.collection(collName);
         let secondaryColl: any = null;
 
         if (secondaryConn && secondaryConn.db) {
-          secondaryColl = secondaryConn.db.collection(collectionName);
-          // Clear collection on secondary before replica
+          secondaryColl = secondaryConn.db.collection(collName);
+          // 1. Wipe existing secondary collection to guarantee fresh replica
           await secondaryColl.deleteMany({});
+
+          // 2. Replicate all indexes from primary (excluding default _id_)
+          try {
+            const rawIndexes = await primaryColl.indexes();
+            for (const idx of rawIndexes) {
+              if (idx.name === '_id_') continue;
+              const { key, name, unique, sparse, expireAfterSeconds } = idx;
+              const options: any = { name };
+              if (unique) options.unique = true;
+              if (sparse) options.sparse = true;
+              if (expireAfterSeconds !== undefined) options.expireAfterSeconds = expireAfterSeconds;
+              await secondaryColl.createIndex(key, options).catch(() => {});
+            }
+          } catch (idxErr: any) {
+            console.warn(`[Backup] Index sync note for ${collName}:`, idxErr.message);
+          }
         }
 
-        const cursor = model.find({}).lean().cursor();
+        const cursor = primaryColl.find({});
         let chunk: any[] = [];
 
         if (!isFirstModel) gzip.write(',\n');
         isFirstModel = false;
 
-        gzip.write(`"${modelName}": [\n`);
+        gzip.write(`"${collName}": [\n`);
         let isFirstDoc = true;
 
         for await (const doc of cursor) {
@@ -190,12 +213,13 @@ export const runBackup = async (
         }
 
         if (secondaryColl) {
+          const replicatedCount = await secondaryColl.countDocuments();
           console.log(
-            `[Backup] Replicated ${recordsDetail[modelName] || 0} records to secondary DB for ${modelName}`
+            `[Backup] Replicated ${replicatedCount} records to secondary DB for collection ${collName}`
           );
         }
       } catch (err: any) {
-        console.error(`[Backup] Stream/Replication failed for model ${modelName}:`, err.message);
+        console.error(`[Backup] Stream/Replication failed for collection ${collName}:`, err.message);
       }
     }
 
