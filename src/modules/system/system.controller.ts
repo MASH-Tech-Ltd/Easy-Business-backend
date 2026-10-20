@@ -10,6 +10,7 @@ import { SecurityLog, BlockedIp, VisitorLog } from "./security.model";
 import { GlobalSetting } from "./globalSetting.model";
 import { Tenant } from "../tenant/tenant.model";
 import { isCloudflareProxyIp, getClientIp } from "../../utils/ipHelper";
+import { unblockIpFromCache, refreshBlockedIpsCache } from "../../middleware/security.middleware";
 import { runBackup } from "../../database/backup.cron";
 import { BackupLogModel } from "../../database/backupLog.model";
 import config from "../../config";
@@ -477,6 +478,9 @@ const unblockIp = asyncHandler(async (req: Request, res: Response) => {
     return ApiResponse.sendError(res, 404, "Blocked IP not found");
   }
 
+  // Immediately remove from in-memory cache as well
+  unblockIpFromCache(ip as string);
+
   ApiResponse.sendSuccess(res, 200, "IP unblocked successfully", null);
 });
 
@@ -527,6 +531,9 @@ const syncIpCache = asyncHandler(async (req: Request, res: Response) => {
   const expiredVisitorLogs = await VisitorLog.deleteMany({
     accessedAt: { $lt: thirtyDaysAgo },
   });
+
+  // 6. Refresh in-memory blocked IP set immediately
+  await refreshBlockedIpsCache();
 
   ApiResponse.sendSuccess(
     res,

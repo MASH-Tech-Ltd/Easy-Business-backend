@@ -18,7 +18,11 @@ const app: Application = express();
 // Using `true` would trust ALL upstream proxies and allow IP spoofing via X-Forwarded-For.
 app.set("trust proxy", 1);
 
-import { ipBlocklistMiddleware, attackDetectionMiddleware } from './middleware/security.middleware';
+import {
+  ipBlocklistMiddleware,
+  directClientBlockMiddleware,
+  attackDetectionMiddleware
+} from './middleware/security.middleware';
 import { visitorTrackingMiddleware } from './middleware/visitorTracking.middleware';
 import { getClientIp } from './utils/ipHelper';
 
@@ -112,8 +116,9 @@ app.use(
 );
 
 
-// Apply IP blocklist and attack detection before processing anything else
+// Apply IP blocklist and direct client protection before processing request payloads
 app.use(ipBlocklistMiddleware);
+app.use(directClientBlockMiddleware);
 app.use(express.json({ limit: "10mb" })); // Need body parser for attack detection
 app.use(attackDetectionMiddleware);
 app.use(cookieParser());
