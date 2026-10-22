@@ -303,6 +303,18 @@ const getPaymentProofsReport = asyncHandler(async (req: Request, res: Response) 
   ApiResponse.sendSuccess(res, 200, 'Payment proofs report retrieved', result);
 });
 
+const deletePaymentSubmission = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const result = await BillingService.deletePaymentSubmission(id as string);
+  ApiResponse.sendSuccess(res, 200, 'Payment history deleted successfully', result);
+});
+
+const sendPaymentConfirmationEmail = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const result = await BillingService.sendPaymentConfirmationEmail(id as string);
+  ApiResponse.sendSuccess(res, 200, 'Payment confirmation email sent successfully', result);
+});
+
 export const BillingController = {
   getBillingOverview,
   getRevenueReport,
@@ -314,5 +326,8 @@ export const BillingController = {
   updateMyPaymentSubmission,
   getAllPaymentSubmissions,
   verifyPaymentSubmission,
+  deletePaymentSubmission,
+  sendPaymentConfirmationEmail,
 };
+
 

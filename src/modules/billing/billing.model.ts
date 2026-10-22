@@ -13,6 +13,8 @@ const platformPaymentSubmissionSchema = new Schema<IPlatformPaymentSubmission>(
     status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
     note: { type: String },
     adminFeedback: { type: String },
+    confirmationEmailSentCount: { type: Number, default: 0 },
+    lastConfirmationEmailSentAt: { type: Date },
   },
   { timestamps: true }
 );

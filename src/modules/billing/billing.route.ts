@@ -39,6 +39,21 @@ router.put(
   validateRequest(BillingValidation.verifyPaymentSubmissionValidation),
   BillingController.verifyPaymentSubmission
 );
+router.delete(
+  '/payments/:id',
+  authMiddleware('super_admin'),
+  BillingController.deletePaymentSubmission
+);
+router.post(
+  '/payments/:id/send-confirmation-email',
+  authMiddleware('super_admin'),
+  BillingController.sendPaymentConfirmationEmail
+);
+router.post(
+  '/payments/:id/send-email',
+  authMiddleware('super_admin'),
+  BillingController.sendPaymentConfirmationEmail
+);
 
 // Billing Overview Stats & Revenue Report
 router.get('/overview', authMiddleware('super_admin'), BillingController.getBillingOverview);

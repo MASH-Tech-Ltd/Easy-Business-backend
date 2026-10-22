@@ -10,6 +10,8 @@ import { paginationHelper } from '../../helpers/paginationHelper';
 import { ReferralService } from '../referral/referral.service';
 import { Package } from '../package/package.model';
 import { SubscriptionService } from '../subscription/subscription.service';
+import { sendEmail } from '../../utils/sendEmail';
+import { paymentConfirmationTemplate } from '../../templates/paymentConfirmation';
 
 const getPlatformPaymentSettings = async () => {
   let settings = await PlatformPaymentSettings.findOne();
@@ -226,7 +228,11 @@ const getAllPaymentSubmissions = async (query: any = {}) => {
   const [allSubmissions, data, total] = await Promise.all([
     PlatformPaymentSubmission.find().populate('tenantId', 'name domain slug').lean(),
     PlatformPaymentSubmission.find(filter)
-      .populate('tenantId', 'name domain slug customDomain domainStatus')
+      .populate({
+        path: 'tenantId',
+        select: 'name domain slug customDomain domainStatus contactEmail ownerId',
+        populate: { path: 'ownerId', select: 'name email phone' },
+      })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -617,6 +623,82 @@ const updateMyPaymentSubmission = async (
   return submission;
 };
 
+const deletePaymentSubmission = async (id: string) => {
+  const submission = await PlatformPaymentSubmission.findById(id);
+  if (!submission) {
+    throw new CustomError(404, 'Payment submission not found');
+  }
+
+  await PlatformPaymentSubmission.findByIdAndDelete(id);
+
+  try {
+    const io = require('../../socket').getIO();
+    io.emit('refresh_subscriptions');
+  } catch (error) {}
+
+  return { success: true, message: 'Payment submission deleted successfully' };
+};
+
+const sendPaymentConfirmationEmail = async (id: string) => {
+  const submission = await PlatformPaymentSubmission.findById(id).populate({
+    path: 'tenantId',
+    populate: { path: 'ownerId', select: 'name email phone' },
+  });
+
+  if (!submission) {
+    throw new CustomError(404, 'Payment submission not found');
+  }
+
+  if (submission.status !== 'approved') {
+    throw new CustomError(400, 'Confirmation email can only be sent for approved payments');
+  }
+
+  const tenant: any = submission.tenantId;
+  const recipientEmail = tenant?.contactEmail || tenant?.ownerId?.email;
+
+  if (!recipientEmail || !recipientEmail.includes('@')) {
+    throw new CustomError(400, 'No contact email or store owner email found for this merchant');
+  }
+
+  const storeName = tenant?.name || 'Your Store';
+  const ownerName = tenant?.ownerId?.name || tenant?.name || 'মার্চেন্ট';
+
+  const emailHtml = paymentConfirmationTemplate({
+    storeName,
+    ownerName,
+    purposeTitle: submission.purposeTitle || (submission.purpose ? submission.purpose.toUpperCase() : 'Subscription / Package'),
+    amount: submission.amount,
+    provider: submission.provider,
+    senderNumber: submission.senderNumber,
+    transactionId: submission.transactionId,
+    approvalDate: submission.updatedAt || submission.createdAt,
+    adminFeedback: submission.adminFeedback,
+  });
+
+  await sendEmail(
+    recipientEmail,
+    `পেমেন্ট নিশ্চিতকরণ: ${storeName} - ৳${submission.amount} অনুমোদিত হয়েছে (MASH ECO)`,
+    emailHtml
+  );
+
+  submission.confirmationEmailSentCount = (submission.confirmationEmailSentCount || 0) + 1;
+  submission.lastConfirmationEmailSentAt = new Date();
+  await submission.save();
+
+  try {
+    const io = require('../../socket').getIO();
+    io.emit('refresh_subscriptions');
+  } catch (error) {}
+
+  return {
+    success: true,
+    sentTo: recipientEmail,
+    sentCount: submission.confirmationEmailSentCount,
+    lastSentAt: submission.lastConfirmationEmailSentAt,
+    submission,
+  };
+};
+
 export const BillingService = {
   getPlatformPaymentSettings,
   updatePlatformPaymentSettings,
@@ -626,5 +708,8 @@ export const BillingService = {
   getAllPaymentSubmissions,
   getPaymentProofsReport,
   verifyPaymentSubmission,
+  deletePaymentSubmission,
+  sendPaymentConfirmationEmail,
 };
+
 

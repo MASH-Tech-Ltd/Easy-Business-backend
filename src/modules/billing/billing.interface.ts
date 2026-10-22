@@ -23,6 +23,8 @@ export interface IPlatformPaymentSubmission extends Document {
   status: 'pending' | 'approved' | 'rejected';
   note?: string;
   adminFeedback?: string;
+  confirmationEmailSentCount?: number;
+  lastConfirmationEmailSentAt?: Date;
   createdAt?: Date;
   updatedAt?: Date;
 }
