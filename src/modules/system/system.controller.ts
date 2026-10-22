@@ -9,7 +9,7 @@ import v8 from "v8";
 import { SecurityLog, BlockedIp, VisitorLog } from "./security.model";
 import { GlobalSetting } from "./globalSetting.model";
 import { Tenant } from "../tenant/tenant.model";
-import { isCloudflareProxyIp, getClientIp } from "../../utils/ipHelper";
+import { isCloudflareProxyIp, isInternalOrWhitelistedIp, getClientIp } from "../../utils/ipHelper";
 import { unblockIpFromCache, refreshBlockedIpsCache } from "../../middleware/security.middleware";
 import { runBackup } from "../../database/backup.cron";
 import { BackupLogModel } from "../../database/backupLog.model";
@@ -419,13 +419,17 @@ const getBlockedIps = asyncHandler(async (req: Request, res: Response) => {
   const limit = parseInt(req.query.limit as string) || 10;
   const search = (req.query.search as string) || "";
 
-  // Clean up any stale auto-blocked Cloudflare IPs dynamically
+  // Clean up any stale auto-blocked Cloudflare or internal/loopback IPs or false direct CLI blocks dynamically
   const allBlocked = await BlockedIp.find({ type: "auto" });
-  const cloudflareIpIds = allBlocked
-    .filter((b) => isCloudflareProxyIp(b.ipAddress))
+  const staleIpIds = allBlocked
+    .filter((b) =>
+      isInternalOrWhitelistedIp(b.ipAddress) ||
+      (b.reason && (b.reason.includes("Missing/Empty User-Agent") || b.reason.includes("Direct Missing/Empty")))
+    )
     .map((b) => b._id);
-  if (cloudflareIpIds.length > 0) {
-    await BlockedIp.deleteMany({ _id: { $in: cloudflareIpIds } });
+  if (staleIpIds.length > 0) {
+    await BlockedIp.deleteMany({ _id: { $in: staleIpIds } });
+    await refreshBlockedIpsCache();
   }
 
   const query: any = {};
@@ -485,13 +489,16 @@ const unblockIp = asyncHandler(async (req: Request, res: Response) => {
 });
 
 const syncIpCache = asyncHandler(async (req: Request, res: Response) => {
-  // 1. Purge legacy auto-blocked Cloudflare proxy IPs
+  // 1. Purge legacy auto-blocked Cloudflare, loopback, internal, or false direct CLI blocked IPs
   const allBlocked = await BlockedIp.find({ type: "auto" });
-  const cloudflareIpIds = allBlocked
-    .filter((b) => isCloudflareProxyIp(b.ipAddress))
+  const staleIpIds = allBlocked
+    .filter((b) =>
+      isInternalOrWhitelistedIp(b.ipAddress) ||
+      (b.reason && (b.reason.includes("Missing/Empty User-Agent") || b.reason.includes("Direct Missing/Empty")))
+    )
     .map((b) => b._id);
-  if (cloudflareIpIds.length > 0) {
-    await BlockedIp.deleteMany({ _id: { $in: cloudflareIpIds } });
+  if (staleIpIds.length > 0) {
+    await BlockedIp.deleteMany({ _id: { $in: staleIpIds } });
   }
 
   // 2. Purge legacy Security Logs recorded under Cloudflare proxy node IPs
@@ -538,7 +545,7 @@ const syncIpCache = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(
     res,
     200,
-    `IP Cache synced. Purged ${cloudflareIpIds.length} proxy IPs, ${invalidSsrVisitorLogs.deletedCount} SSR node visitor logs, and ${expiredSecurityLogs.deletedCount + expiredVisitorLogs.deletedCount} logs older than 30 days.`,
+    `IP Cache synced. Purged ${staleIpIds.length} stale/whitelisted IPs, ${invalidSsrVisitorLogs.deletedCount} SSR node visitor logs, and ${expiredSecurityLogs.deletedCount + expiredVisitorLogs.deletedCount} logs older than 30 days.`,
     null,
   );
 });

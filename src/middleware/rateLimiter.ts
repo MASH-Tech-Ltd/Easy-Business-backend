@@ -2,7 +2,8 @@ import rateLimit, { Store } from 'express-rate-limit';
 import { Request, Response, NextFunction } from 'express';
 import { SecurityLog, BlockedIp } from '../modules/system/security.model';
 import { getRequestedFrom } from './security.middleware';
-import { getClientIp, isCloudflareProxyIp } from '../utils/ipHelper';
+import { getClientIp, isCloudflareProxyIp, isInternalOrWhitelistedIp } from '../utils/ipHelper';
+import config from '../config/index';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Bounded MemoryStore for express-rate-limit
@@ -105,8 +106,8 @@ const handleRateLimitViolation = async (
   maxStrikes: number,
   reason: string,
 ) => {
-  // Never track or count rate limit violations for internal Socket.IO polling
-  if (req.originalUrl.startsWith('/socket.io')) {
+  // Never track or count rate limit violations for internal Socket.IO polling or internal IPs
+  if (req.originalUrl.startsWith('/socket.io') || isInternalOrWhitelistedIp(ip)) {
     return;
   }
 
@@ -120,8 +121,8 @@ const handleRateLimitViolation = async (
       userAgent: req.headers['user-agent'] || 'Unknown',
     });
 
-    // Never auto-block Cloudflare edge proxy node IPs
-    if (!isCloudflareProxyIp(ip)) {
+    // Never auto-block Cloudflare edge proxy node IPs or loopback/internal IPs
+    if (!isInternalOrWhitelistedIp(ip)) {
       const now = Date.now();
       const existing = warningCache.get(ip);
 
@@ -156,8 +157,16 @@ export const globalRateLimiter = rateLimit({
   message: { success: false, message: 'Too many requests. Please slow down and try again in 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false, default: false, singleCount: false },
   store: new BoundedMemoryStore(50_000),
-  skip: (req: Request) => req.originalUrl.startsWith('/socket.io'),
+  skip: (req: Request) => {
+    if (req.originalUrl.startsWith('/socket.io')) return true;
+    const ip = getClientIp(req);
+    if (isInternalOrWhitelistedIp(ip)) return true;
+    const validApiKey = process.env.STOREFRONT_API_KEY || config.storefront.apiKey;
+    if (validApiKey && req.headers['x-storefront-api-key'] === validApiKey) return true;
+    return false;
+  },
   keyGenerator: (req: Request) => getClientIp(req),
 });
 
@@ -172,6 +181,7 @@ export const storefrontPublicLimiter = rateLimit({
   message: { success: false, message: 'You are browsing too fast. Please wait a moment and try again.' },
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false, default: false, singleCount: false },
   store: new BoundedMemoryStore(20_000),
   keyGenerator: (req: Request) => getClientIp(req),
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
@@ -193,6 +203,7 @@ export const searchLimiter = rateLimit({
   message: { success: false, message: 'Search rate limit reached. Please wait a moment before searching again.' },
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false, default: false, singleCount: false },
   store: new BoundedMemoryStore(10_000),
   keyGenerator: (req: Request) => getClientIp(req),
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
@@ -212,6 +223,7 @@ export const checkoutLimiter = rateLimit({
   message: { success: false, message: 'Too many orders placed from this device. Please wait a few minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false, default: false, singleCount: false },
   store: new BoundedMemoryStore(5_000),
   keyGenerator: (req: Request) => getClientIp(req),
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
@@ -231,6 +243,7 @@ export const checkoutLeadLimiter = rateLimit({
   message: { success: false, message: 'Too many tracking requests.' },
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false, default: false, singleCount: false },
   store: new BoundedMemoryStore(10_000),
   keyGenerator: (req: Request) => getClientIp(req),
   // Silent handler — don't log or ban for this, it's automatic client-side
@@ -249,6 +262,7 @@ export const authLimiter = rateLimit({
   message: { success: false, message: 'Too many login attempts. Please wait 15 minutes before trying again.' },
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false, default: false, singleCount: false },
   store: new BoundedMemoryStore(10_000),
   keyGenerator: (req: Request) => getClientIp(req),
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
@@ -268,6 +282,7 @@ export const dashboardLimiter = rateLimit({
   message: { success: false, message: 'Dashboard API rate limit exceeded. Please slow down.' },
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false, default: false, singleCount: false },
   store: new BoundedMemoryStore(10_000),
   keyGenerator: (req: Request) => req.user?.userId || getClientIp(req),
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
@@ -286,6 +301,7 @@ export const uploadLimiter = rateLimit({
   message: { success: false, message: 'Upload rate limit exceeded. Please wait a few minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false, default: false, singleCount: false },
   store: new BoundedMemoryStore(5_000),
   keyGenerator: (req: Request) => req.user?.userId || getClientIp(req),
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
@@ -305,6 +321,7 @@ export const customRateLimit = (windowMs: number, max: number, messageText: stri
     message: { success: false, message: messageText },
     standardHeaders: true,
     legacyHeaders: false,
+    validate: { xForwardedForHeader: false, default: false, singleCount: false },
     store: new BoundedMemoryStore(5_000),
     keyGenerator: (req: Request) => getClientIp(req),
     handler: async (req: Request, res: Response, _next: NextFunction, options) => {
@@ -331,6 +348,7 @@ export const roleBasedRateLimiter = rateLimit({
   message: { success: false, message: 'Rate limit exceeded for your role.' },
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false, default: false, singleCount: false },
   store: new BoundedMemoryStore(10_000),
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
     const ip = getClientIp(req);

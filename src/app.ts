@@ -18,22 +18,17 @@ const app: Application = express();
 // Do not trust arbitrary hops to prevent IP spoofing via X-Forwarded-For.
 app.set("trust proxy", "loopback");
 
-// Cloudflare verified client IP extraction & Header Sanitization middleware
-// Automatically overwrites or deletes manual/fake X-Forwarded-For headers,
-// so you don't even need to configure Cloudflare Transform Rules manually.
+// Cloudflare verified client IP extraction middleware
+// Extracts CF-Connecting-IP directly from Cloudflare edge proxy when present.
+// Does NOT delete or tamper with X-Forwarded-For so internal reverse proxies and Next.js SSR are preserved.
 app.use((req: Request, res: Response, next) => {
-  const cfIp = req.headers["cf-connecting-ip"];
-  const actualClientIp = (Array.isArray(cfIp) ? cfIp[0] : cfIp) || req.ip || "127.0.0.1";
-  req.realUserIp = actualClientIp;
-
-  if (cfIp) {
-    // Force X-Forwarded-For to be strictly Cloudflare's authentic connecting IP
-    req.headers["x-forwarded-for"] = actualClientIp;
-  } else {
-    // Strip manual X-Forwarded-For header if not from Cloudflare proxy to block IP spoofing
-    delete req.headers["x-forwarded-for"];
+  const rawCfIp = req.headers["cf-connecting-ip"];
+  if (rawCfIp) {
+    const cfIp = Array.isArray(rawCfIp) ? rawCfIp[0] : rawCfIp;
+    if (cfIp && typeof cfIp === "string" && cfIp.trim()) {
+      req.realUserIp = cfIp.trim();
+    }
   }
-
   next();
 });
 
