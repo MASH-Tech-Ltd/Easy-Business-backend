@@ -14,9 +14,17 @@ import config from "./config/index";
 import { Tenant } from "./modules/tenant/tenant.model";
 
 const app: Application = express();
-// Trust exactly 1 proxy hop (Nginx/Cloudflare in front of Express).
-// Using `true` would trust ALL upstream proxies and allow IP spoofing via X-Forwarded-For.
-app.set("trust proxy", 1);
+// Trust only loopback interface for local reverse proxy (Nginx).
+// Do not trust arbitrary hops to prevent IP spoofing via X-Forwarded-For.
+app.set("trust proxy", "loopback");
+
+// Cloudflare verified client IP extraction middleware
+app.use((req: Request, res: Response, next) => {
+  const cfIp = req.headers["cf-connecting-ip"];
+  const actualClientIp = (Array.isArray(cfIp) ? cfIp[0] : cfIp) || req.ip || "127.0.0.1";
+  req.realUserIp = actualClientIp;
+  next();
+});
 
 import {
   ipBlocklistMiddleware,

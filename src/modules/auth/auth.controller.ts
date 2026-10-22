@@ -85,20 +85,18 @@ const register = asyncHandler(async (req: Request, res: Response) => {
   if (result.accessToken && result.refreshToken) {
     const { refreshToken, ...others } = result;
 
-    const isSuperAdmin = others.user?.role === 'super_admin';
-    const rCookieName = isSuperAdmin ? '_super_r_tkn' : '_merchant_r_tkn';
-    const xCookieName = isSuperAdmin ? '_super_x_tkn' : '_merchant_x_tkn';
+    const rCookieName = '_merchant_r_tkn';
+    const xCookieName = '_merchant_x_tkn';
 
     clearLegacyDomainCookies(res);
     res.cookie(rCookieName, refreshToken, COOKIE_OPTIONS);
     res.cookie(xCookieName, others.accessToken, COOKIE_OPTIONS);
 
     try {
-      const roleName = isSuperAdmin ? 'Super Admin' : (others.user?.role === 'tenant_admin' ? 'Merchant' : 'Customer');
       await VisitorLog.create({
-        role: roleName,
+        role: 'Merchant',
         ipAddress: getClientIp(req),
-        userAgent: req.headers['user-agent'] || 'Unknown',
+        userAgent: (req.headers['user-agent'] as string) || 'Unknown',
         storeName: (others.user as any)?.storeName || others.user?.name || 'Platform',
         ownerName: others.user?.name || others.user?.email,
       });

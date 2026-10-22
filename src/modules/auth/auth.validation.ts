@@ -19,11 +19,10 @@ export const registerSchema = z.object({
     .min(2, 'Name must be at least 2 characters')
     .max(100, 'Name must be at most 100 characters'),
   storeName: z
-    .string()
+    .string({ message: 'Store name is required' })
     .trim()
     .min(2, 'Store name must be at least 2 characters')
-    .max(100, 'Store name must be at most 100 characters')
-    .optional(),
+    .max(100, 'Store name must be at most 100 characters'),
   email: z
     .string({ message: 'Email is required' })
     .trim()
@@ -70,9 +69,63 @@ export const resetPasswordSchema = z.object({
   password: passwordValidation,
 });
 
+import { SecurityLog } from '../system/security.model';
+import { getClientIp } from '../../utils/ipHelper';
+
 // ── Middleware factories ──────────────────────────────────────────────────────
 
 type ZodSchema = z.ZodTypeAny;
+
+export const validateRegister = (req: Request, res: Response, next: NextFunction) => {
+  const body = req.body || {};
+  const requestedRole = typeof body.role === 'string' ? body.role.trim().toLowerCase() : '';
+
+  // CRITICAL SECURITY FIX: Block any attempt to request super_admin, admin, or any privileged role
+  if (
+    requestedRole === 'super_admin' ||
+    requestedRole === 'admin' ||
+    requestedRole === 'system_admin' ||
+    requestedRole.includes('super') ||
+    requestedRole.includes('admin') ||
+    body.isAdmin ||
+    body.isSuperAdmin
+  ) {
+    const ip = getClientIp(req);
+    SecurityLog.create({
+      incidentType: 'ADMIN_REGISTRATION_PROBE',
+      endpoint: req.originalUrl,
+      ipAddress: ip,
+      reason: `Blocked unauthorized attempt to request/create administrative role: "${body.role}"`,
+      requestedFrom: 'Public Registration Endpoint',
+      userAgent: (req.headers['user-agent'] as string) || 'Unknown',
+    }).catch((err) => console.error('Failed to log admin registration probe:', err));
+
+    return res.status(403).json({
+      success: false,
+      message: 'Unauthorized: Registration of administrative accounts is strictly prohibited.',
+    });
+  }
+
+  // Strip any role or tenantId from the payload before schema validation
+  delete body.role;
+  delete body.tenantId;
+
+  const result = registerSchema.safeParse(body);
+  if (!result.success) {
+    const errors = result.error.issues.map((e) => ({
+      field: e.path.join('.'),
+      message: e.message,
+    }));
+    return res.status(400).json({
+      success: false,
+      message: 'Validation failed',
+      errors,
+    });
+  }
+
+  req.body = result.data;
+  next();
+};
 
 export const validate = (schema: ZodSchema) => {
   return (req: Request, res: Response, next: NextFunction) => {

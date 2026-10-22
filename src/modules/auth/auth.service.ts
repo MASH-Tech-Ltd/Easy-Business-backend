@@ -19,6 +19,7 @@ import slugify from 'slugify';
 import { Subscription } from '../subscription/subscription.model';
 import { Referral, ReferralUsage, ReferralReward } from '../referral/referral.model';
 import { notificationService } from '../notification/notification.service';
+import { GlobalSetting } from '../system/globalSetting.model';
 
 const assertMerchantNotBanned = async (user: any) => {
   if (user.role === 'tenant_admin') {
@@ -35,7 +36,26 @@ const assertMerchantNotBanned = async (user: any) => {
   }
 };
 
+
 const register = async (payload: Partial<IUser> & { storeName?: string; referralCode?: string }): Promise<{ user: any; accessToken: string; refreshToken: string }> => {
+  // CRITICAL SECURITY FIX: Check if public registration is globally enabled
+  const globalSettings = await GlobalSetting.findOne();
+  if (globalSettings && globalSettings.allowRegistration === false) {
+    throw new CustomError(403, 'Public registration is currently disabled by system administrator.');
+  }
+
+  // Reject any attempt to self-assign super_admin, admin, or privileged roles
+  const incomingRole = (payload.role as any)?.toString().toLowerCase() || '';
+  if (incomingRole.includes('super') || incomingRole.includes('admin')) {
+    throw new CustomError(403, 'Administrative accounts cannot be created via public registration. Admin accounts are provisioned internally.');
+  }
+
+  // Ensure storeName is explicitly provided and valid (prevent generic admin registration probes)
+  const rawStoreName = payload.storeName?.trim();
+  if (!rawStoreName || rawStoreName.length < 2) {
+    throw new CustomError(400, 'A valid store name (minimum 2 characters) is required for merchant registration.');
+  }
+
   const session = await mongoose.startSession();
   session.startTransaction();
 

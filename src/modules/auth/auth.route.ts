@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { AuthController } from './auth.controller';
-import { validate, registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } from './auth.validation';
+import { validate, validateRegister, registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } from './auth.validation';
 import { authLimiter, customRateLimit } from '../../middleware/rateLimiter';
 
 const router = Router();
@@ -19,7 +19,7 @@ const registerLimit = customRateLimit(60 * 60 * 1000, 10, 'Too many registration
 
 import { authMiddleware } from '../../middleware/authMiddleware';
 
-router.post('/register', registerLimit, validate(registerSchema), AuthController.register);
+router.post('/register', registerLimit, validateRegister, AuthController.register);
 router.post('/login', loginLimit, validate(loginSchema), AuthController.login);
 router.post('/logout', AuthController.logout);
 router.post('/forgot-password', forgotLimit, validate(forgotPasswordSchema), AuthController.forgotPassword);
