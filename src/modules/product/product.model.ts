@@ -40,6 +40,15 @@ const productSchema = new Schema<IProduct>(
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: [true, 'Tenant ID is required'] },
     stock: { type: Number, default: 0 },
     salesCount: { type: Number, default: 0 },
+    hasVariants: { type: Boolean, default: false },
+    variants: [
+      {
+        color: { type: String, trim: true },
+        size: { type: String, trim: true },
+        stock: { type: Number, default: 0 },
+        sku: { type: String, trim: true },
+      }
+    ],
   },
   {
     timestamps: true,

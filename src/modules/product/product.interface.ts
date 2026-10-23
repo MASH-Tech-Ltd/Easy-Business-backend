@@ -38,6 +38,16 @@ export interface IProduct extends Document {
   tenantId: Types.ObjectId;
   stock?: number;
   salesCount?: number;
+  hasVariants?: boolean;
+  variants?: IProductVariant[];
+}
+
+export interface IProductVariant {
+  _id?: Types.ObjectId | string;
+  color?: string;
+  size?: string;
+  stock: number;
+  sku?: string;
 }
 
 export const ALLOWED_SORT_FIELDS = [

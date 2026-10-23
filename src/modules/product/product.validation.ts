@@ -8,7 +8,7 @@ export const createProductValidation = z.object({
     discountedPrice: z.union([z.string(), z.number()]).optional(),
     price: z.union([z.string(), z.number()]).optional(),
     saveAmount: z.union([z.string(), z.number()]).optional(),
-    stock: z.union([z.string(), z.number()]).optional(),
+    stock: z.union([z.string(), z.number(), z.array(z.union([z.string(), z.number()]))]).optional(),
     description: z.string().optional(),
     shortDescription: z.string().optional(),
     categoryId: z.string({ message: 'Category is required' }).trim().min(1, 'Category is required'),
@@ -31,6 +31,8 @@ export const createProductValidation = z.object({
       width: z.number().optional(),
       height: z.number().optional(),
     })]).optional(),
+    hasVariants: z.union([z.boolean(), z.string()]).optional(),
+    variants: z.union([z.string(), z.array(z.any())]).optional(),
   }).refine((data) => !!(data.title?.trim() || data.name?.trim()), {
     message: 'Product title is required',
     path: ['title'],
@@ -54,7 +56,7 @@ export const updateProductValidation = z.object({
     discountedPrice: z.union([z.string(), z.number()]).optional(),
     price: z.union([z.string(), z.number()]).optional(),
     saveAmount: z.union([z.string(), z.number()]).optional(),
-    stock: z.union([z.string(), z.number()]).optional(),
+    stock: z.union([z.string(), z.number(), z.array(z.union([z.string(), z.number()]))]).optional(),
     description: z.string().optional(),
     shortDescription: z.string().optional(),
     categoryId: z.string().optional(),
@@ -79,6 +81,8 @@ export const updateProductValidation = z.object({
       width: z.number().optional(),
       height: z.number().optional(),
     })]).optional(),
+    hasVariants: z.union([z.boolean(), z.string()]).optional(),
+    variants: z.union([z.string(), z.array(z.any())]).optional(),
   }),
 });
 

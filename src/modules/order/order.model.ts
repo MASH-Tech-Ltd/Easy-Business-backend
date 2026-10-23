@@ -11,6 +11,9 @@ const orderSchema = new Schema<IOrder>(
     items: [
       {
         productId: { type: String, required: true },
+        variantId: { type: String },
+        color: { type: String, trim: true },
+        size: { type: String, trim: true },
         title: { type: String, required: true },
         price: { type: Number, required: true },
         quantity: { type: Number, required: true, default: 1 },

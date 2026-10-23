@@ -22,7 +22,7 @@ const createOrder = async (payload: IOrder): Promise<IOrder> => {
     const productIds = payload.items.map((item: any) => item.productId);
     const dbProducts = await Product.find(
       { _id: { $in: productIds }, tenantId: payload.tenantId },
-      { _id: 1, discountedPrice: 1, originalPrice: 1, stock: 1, title: 1 }
+      { _id: 1, discountedPrice: 1, originalPrice: 1, stock: 1, title: 1, hasVariants: 1, variants: 1 }
     );
 
     // Build a map of productId → DB product doc
@@ -40,8 +40,33 @@ const createOrder = async (payload: IOrder): Promise<IOrder> => {
         throw new Error(`Product not found or does not belong to this tenant: ${item.productId}`);
       }
 
+      // Check variant stock if product has variants
+      if (dbProduct.hasVariants && Array.isArray(dbProduct.variants) && dbProduct.variants.length > 0) {
+        let matchedVariant: any = null;
+        if (item.variantId) {
+          matchedVariant = dbProduct.variants.find((v: any) => v._id?.toString() === item.variantId?.toString());
+        }
+        if (!matchedVariant && (item.color || item.size)) {
+          matchedVariant = dbProduct.variants.find((v: any) => 
+            (!item.color || (v.color || '').toLowerCase() === item.color.toLowerCase()) &&
+            (!item.size || (v.size || '').toLowerCase() === item.size.toLowerCase())
+          );
+        }
+
+        if (matchedVariant) {
+          item.variantId = matchedVariant._id?.toString();
+          item.color = matchedVariant.color || item.color;
+          item.size = matchedVariant.size || item.size;
+
+          if (typeof matchedVariant.stock === 'number' && matchedVariant.stock < item.quantity) {
+            const optLabel = [matchedVariant.color, matchedVariant.size].filter(Boolean).join(' / ');
+            throw new Error(`Selected option (${optLabel}) is out of stock for ${dbProduct.title}`);
+          }
+        }
+      }
+
       if (typeof dbProduct.stock === 'number' && dbProduct.stock < item.quantity) {
-        throw new Error(`Product out of stock: ${item.productId}`);
+        throw new Error(`Product out of stock: ${dbProduct.title || item.productId}`);
       }
 
       item.price = dbProduct.discountedPrice ?? dbProduct.originalPrice; // overwrite client-supplied price
@@ -196,9 +221,28 @@ const updateOrder = async (id: string, payload: Partial<IOrder>, tenantId: strin
   if (isOldCompleted && (!isNewCompleted || itemsChanged)) {
     try {
       for (const item of order.items) {
-        await Product.findByIdAndUpdate(item.productId, {
-          $inc: { salesCount: -item.quantity, stock: item.quantity }
-        });
+        let updateRes: any = null;
+        if (item.variantId) {
+          updateRes = await Product.updateOne(
+            { _id: item.productId, 'variants._id': item.variantId } as any,
+            { $inc: { 'variants.$.stock': item.quantity, stock: item.quantity, salesCount: -item.quantity } } as any
+          );
+        } else if (item.color || item.size) {
+          const varQuery: any = { _id: item.productId };
+          if (item.color) varQuery['variants.color'] = item.color;
+          if (item.size) varQuery['variants.size'] = item.size;
+          updateRes = await Product.updateOne(
+            varQuery,
+            { $inc: { 'variants.$.stock': item.quantity, stock: item.quantity, salesCount: -item.quantity } } as any
+          );
+        }
+
+        // If no variant matched/updated (e.g. non-variant item or variant was deleted), update base product
+        if (!updateRes || updateRes.matchedCount === 0) {
+          await Product.findByIdAndUpdate(item.productId, {
+            $inc: { salesCount: -item.quantity, stock: item.quantity }
+          });
+        }
       }
     } catch (e) {
       console.error("Error reverting product counts:", e);
@@ -212,9 +256,28 @@ const updateOrder = async (id: string, payload: Partial<IOrder>, tenantId: strin
   if (result && isNewCompleted && (!isOldCompleted || itemsChanged)) {
     try {
       for (const item of result.items) {
-        await Product.findByIdAndUpdate(item.productId, {
-          $inc: { salesCount: item.quantity, stock: -item.quantity }
-        });
+        let updateRes: any = null;
+        if (item.variantId) {
+          updateRes = await Product.updateOne(
+            { _id: item.productId, 'variants._id': item.variantId } as any,
+            { $inc: { 'variants.$.stock': -item.quantity, stock: -item.quantity, salesCount: item.quantity } } as any
+          );
+        } else if (item.color || item.size) {
+          const varQuery: any = { _id: item.productId };
+          if (item.color) varQuery['variants.color'] = item.color;
+          if (item.size) varQuery['variants.size'] = item.size;
+          updateRes = await Product.updateOne(
+            varQuery,
+            { $inc: { 'variants.$.stock': -item.quantity, stock: -item.quantity, salesCount: item.quantity } } as any
+          );
+        }
+
+        // If no variant matched/updated, update base product
+        if (!updateRes || updateRes.matchedCount === 0) {
+          await Product.findByIdAndUpdate(item.productId, {
+            $inc: { salesCount: item.quantity, stock: -item.quantity }
+          });
+        }
       }
     } catch (e) {
       console.error("Error updating product counts:", e);

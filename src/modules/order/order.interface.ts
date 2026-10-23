@@ -2,6 +2,9 @@ import { Document, Types } from 'mongoose';
 
 export interface IOrderItem {
   productId: Types.ObjectId | string;
+  variantId?: Types.ObjectId | string;
+  color?: string;
+  size?: string;
   title: string;
   price: number;
   quantity: number;

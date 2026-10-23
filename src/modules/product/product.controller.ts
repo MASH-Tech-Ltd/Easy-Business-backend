@@ -56,6 +56,9 @@ const createProduct = asyncHandler(async (req: Request, res: Response) => {
   }
 
   if (req.body.stock !== undefined) {
+    if (Array.isArray(req.body.stock)) {
+      req.body.stock = req.body.stock[req.body.stock.length - 1];
+    }
     req.body.stock = Number(req.body.stock) || 0;
   }
   if (req.body.weight !== undefined) {
@@ -96,6 +99,35 @@ const createProduct = asyncHandler(async (req: Request, res: Response) => {
     } catch (e) {
       req.body.specifications = [];
     }
+  }
+
+  if (req.body.hasVariants !== undefined) {
+    req.body.hasVariants = req.body.hasVariants === true || req.body.hasVariants === "true";
+  }
+
+  if (req.body.variants && typeof req.body.variants === "string") {
+    try {
+      req.body.variants = JSON.parse(req.body.variants);
+    } catch (e) {
+      req.body.variants = [];
+    }
+  }
+
+  if (Array.isArray(req.body.variants)) {
+    req.body.variants = req.body.variants
+      .filter((v: any) => v && (v.color?.trim() || v.size?.trim() || v.stock !== undefined))
+      .map((v: any) => ({
+        color: (v.color || '').trim(),
+        size: (v.size || '').trim(),
+        stock: Math.max(0, Number(v.stock) || 0),
+        sku: (v.sku || '').trim(),
+      }));
+
+    if (req.body.hasVariants && req.body.variants.length > 0) {
+      req.body.stock = req.body.variants.reduce((sum: number, v: any) => sum + v.stock, 0);
+    }
+  } else {
+    req.body.variants = [];
   }
 
   req.body.images = [];
@@ -188,6 +220,9 @@ const updateProduct = asyncHandler(async (req: Request, res: Response) => {
   }
 
   if (req.body.stock !== undefined) {
+    if (Array.isArray(req.body.stock)) {
+      req.body.stock = req.body.stock[req.body.stock.length - 1];
+    }
     req.body.stock = Number(req.body.stock) || 0;
   }
   if (req.body.weight !== undefined) {
@@ -228,6 +263,36 @@ const updateProduct = asyncHandler(async (req: Request, res: Response) => {
 
   if (req.body.isAuthentic !== undefined) {
     req.body.isAuthentic = req.body.isAuthentic === "true";
+  }
+
+  if (req.body.hasVariants !== undefined) {
+    req.body.hasVariants = req.body.hasVariants === true || req.body.hasVariants === "true";
+  }
+
+  if (req.body.variants !== undefined) {
+    if (typeof req.body.variants === "string") {
+      try {
+        req.body.variants = JSON.parse(req.body.variants);
+      } catch (e) {
+        req.body.variants = [];
+      }
+    }
+
+    if (Array.isArray(req.body.variants)) {
+      req.body.variants = req.body.variants
+        .filter((v: any) => v && (v.color?.trim() || v.size?.trim() || v.stock !== undefined))
+        .map((v: any) => ({
+          ...(v._id ? { _id: v._id } : {}),
+          color: (v.color || '').trim(),
+          size: (v.size || '').trim(),
+          stock: Math.max(0, Number(v.stock) || 0),
+          sku: (v.sku || '').trim(),
+        }));
+
+      if (req.body.hasVariants && req.body.variants.length > 0) {
+        req.body.stock = req.body.variants.reduce((sum: number, v: any) => sum + v.stock, 0);
+      }
+    }
   }
 
   let existingImages: any[] = [];
