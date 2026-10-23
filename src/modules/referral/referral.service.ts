@@ -9,6 +9,9 @@ import {
 } from './referral.model';
 import { Tenant } from '../tenant/tenant.model';
 import { User } from '../auth/auth.model';
+import { Subscription } from '../subscription/subscription.model';
+import { Package } from '../package/package.model';
+import { notificationService } from '../notification/notification.service';
 
 /**
  * Validates a referral code for registration or public verification.
@@ -426,31 +429,113 @@ const getOrCreateMerchantReferral = async (userId: string, tenantId: string) => 
 };
 
 /**
- * Triggered when a tenant purchases/activates a paid subscription.
- * Unlocks pending referral points for the referrer!
+ * Triggered when a tenant purchases/activates a paid subscription for the 1st time.
+ * Unlocks referral points for the referrer:
+ * If the referred merchant purchases a 1-year (yearly) plan, referrer gets 100 points (৳100).
+ * Otherwise (e.g. monthly), referrer gets standard points (20 points / ৳20).
  */
-const unlockReferralPointsForSubscription = async (referredTenantId: string) => {
+const unlockReferralPointsForSubscription = async (
+  referredTenantId: string,
+  subscriptionOrPackage?: any
+) => {
   // Find pending referral usages for this referred tenant
   const usages = await ReferralUsage.find({
     referredTenantId,
     pointsStatus: 'pending',
   });
 
+  if (!usages || usages.length === 0) {
+    return;
+  }
+
+  // Determine if this subscription is a 1-year plan
+  let pkg: any = subscriptionOrPackage?.packageId;
+  if (!pkg && subscriptionOrPackage?.packageId) {
+    try {
+      pkg = await Package.findById(subscriptionOrPackage.packageId);
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  if (!pkg) {
+    if (subscriptionOrPackage?.billingCycle || subscriptionOrPackage?.name) {
+      pkg = subscriptionOrPackage;
+    }
+  }
+
+  if (!pkg) {
+    // Look up latest paid/pending subscription for this tenant
+    try {
+      const latestSub = await Subscription.findOne({
+        tenantId: referredTenantId,
+        status: { $in: ['active', 'pending'] },
+        isTrial: { $ne: true },
+      })
+        .populate('packageId')
+        .sort({ createdAt: -1 });
+
+      if (latestSub && latestSub.packageId) {
+        pkg = latestSub.packageId;
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  const durationDays =
+    subscriptionOrPackage?.startDate && subscriptionOrPackage?.endDate
+      ? (new Date(subscriptionOrPackage.endDate).getTime() -
+          new Date(subscriptionOrPackage.startDate).getTime()) /
+        (1000 * 60 * 60 * 24)
+      : 0;
+
+  const isYearly =
+    pkg?.billingCycle === 'yearly' ||
+    (pkg?.name && /year|annual|1\s*year|৩৬৫/i.test(pkg.name)) ||
+    durationDays >= 200;
+
   for (const usage of usages) {
     if (!usage.referrerTenantId) continue;
 
-    // Update usage status to 'usable'
+    const initialPendingPoints = usage.pointsAwarded || 20;
+    // 1-Year plan = 100 points; monthly/other = standard points (default 20)
+    const finalPointsToAward = isYearly ? 100 : initialPendingPoints;
+
+    // Update usage status to 'usable' and persist final awarded points
+    usage.pointsAwarded = finalPointsToAward;
     usage.pointsStatus = 'usable';
     usage.activatedAt = new Date();
     await usage.save();
 
     // Update referrer's wallet
-    const points = usage.pointsAwarded || 20;
     const reward = await ReferralReward.findOne({ tenantId: usage.referrerTenantId });
     if (reward) {
-      reward.pendingPoints = Math.max(0, reward.pendingPoints - points);
-      reward.usablePoints = (reward.usablePoints || 0) + points;
+      reward.pendingPoints = Math.max(0, (reward.pendingPoints || 0) - initialPendingPoints);
+      reward.usablePoints = (reward.usablePoints || 0) + finalPointsToAward;
+      reward.totalPoints = Math.max(
+        0,
+        (reward.totalPoints || 0) - initialPendingPoints + finalPointsToAward
+      );
       await reward.save();
+    }
+
+    // Send real-time notification to the referrer
+    try {
+      const referrerTenant = await Tenant.findById(usage.referrerTenantId);
+      if (referrerTenant && referrerTenant.ownerId) {
+        const planLabel = isYearly ? '1-Year plan' : 'Monthly plan';
+        await notificationService.createNotification(
+          referrerTenant.ownerId,
+          'REFERRAL_REWARD_UNLOCKED',
+          'Referral Reward Earned! 🎉',
+          `Your referred merchant (${usage.referredStoreName || 'Friend Store'}) activated a ${planLabel}. You received ${finalPointsToAward} Points (৳${finalPointsToAward})!`,
+          usage._id,
+          usage.referrerTenantId
+        );
+      }
+    } catch (notifErr) {
+      console.error('Failed to notify referrer about referral points:', notifErr);
     }
   }
 };

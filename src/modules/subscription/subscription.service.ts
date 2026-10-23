@@ -143,6 +143,14 @@ const assignPackage = async (payload: { tenantId: string, packageId: string }): 
     $set: { 'referralDiscount.used': true },
   });
 
+  // Unlock referral points for the referrer if this is their first paid package
+  try {
+    const populatedSub = await Subscription.findById(subscription._id).populate('packageId');
+    await ReferralService.unlockReferralPointsForSubscription(payload.tenantId.toString(), populatedSub || subscription);
+  } catch (err) {
+    console.error('Failed to unlock referral points upon direct package assignment:', err);
+  }
+
   await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
   return subscription;
 };
@@ -430,7 +438,7 @@ const approveSubscription = async (subscriptionId: string): Promise<ISubscriptio
   // Unlock referral points for the referrer now that the merchant has purchased a paid subscription
   if (subscription.tenantId) {
     try {
-      await ReferralService.unlockReferralPointsForSubscription(subscription.tenantId.toString());
+      await ReferralService.unlockReferralPointsForSubscription(subscription.tenantId.toString(), subscription);
       // Mark first-time referral discount as used so it cannot be claimed again
       await Tenant.findByIdAndUpdate(subscription.tenantId, {
         $set: { 'referralDiscount.used': true },

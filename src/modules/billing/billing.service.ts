@@ -497,15 +497,7 @@ const verifyPaymentSubmission = async (id: string, status: 'approved' | 'rejecte
 
   // If subscription/package/renewal payment is verified and approved, unlock referrer points & mark first-time discount as used
   if (status === 'approved' && (submission.purpose === 'package' || submission.purpose === 'renewal') && submission.tenantId) {
-    try {
-      await ReferralService.unlockReferralPointsForSubscription(submission.tenantId.toString());
-      // Mark referral discount as used
-      await Tenant.findByIdAndUpdate(submission.tenantId, {
-        $set: { 'referralDiscount.used': true },
-      });
-    } catch (err) {
-      console.error('Failed to unlock referral points upon payment verification:', err);
-    }
+    let pendingSubApproved = false;
 
     // Automatically approve related pending subscription for this tenant
     try {
@@ -525,14 +517,33 @@ const verifyPaymentSubmission = async (id: string, status: 'approved' | 'rejecte
         pendingSub = await Subscription.findOne({
           tenantId: submission.tenantId,
           status: 'pending',
-        }).sort({ createdAt: -1 });
+        }).populate('packageId').sort({ createdAt: -1 });
       }
 
       if (pendingSub) {
         await SubscriptionService.approveSubscription(pendingSub._id.toString());
+        pendingSubApproved = true;
       }
     } catch (err) {
       console.error('Failed to auto-approve related subscription on payment verification:', err);
+    }
+
+    // If there was no pending subscription to approve, trigger referral unlock directly
+    if (!pendingSubApproved) {
+      try {
+        await ReferralService.unlockReferralPointsForSubscription(submission.tenantId.toString());
+      } catch (err) {
+        console.error('Failed to unlock referral points upon payment verification fallback:', err);
+      }
+    }
+
+    // Mark referral discount as used
+    try {
+      await Tenant.findByIdAndUpdate(submission.tenantId, {
+        $set: { 'referralDiscount.used': true },
+      });
+    } catch (err) {
+      console.error('Failed to mark referral discount used:', err);
     }
   }
 
