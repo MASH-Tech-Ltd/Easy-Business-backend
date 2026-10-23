@@ -353,7 +353,7 @@ setInterval(
 // Helper to check if a User-Agent belongs to a legitimate search engine or social media crawler
 export const isLegitimateSearchBot = (userAgent?: string): boolean => {
   if (!userAgent) return false;
-  return /googlebot|bingbot|yandexbot|baiduspider|duckduckbot|slurp|facebookexternalhit|twitterbot|linkedinbot|pinterestbot|applebot|whatsapp|telegram/i.test(
+  return /google|googlebot|google-inspectiontool|bingbot|bingpreview|yandexbot|baiduspider|duckduckbot|slurp|facebookexternalhit|twitterbot|linkedinbot|pinterestbot|applebot|whatsapp|telegram/i.test(
     userAgent,
   );
 };
