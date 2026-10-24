@@ -12,6 +12,7 @@ import { FraudCheck } from "../fraudCheck/fraudCheck.model";
 import { Category } from "../category/category.model";
 import { Product } from "../product/product.model";
 import { Referral, ReferralUsage, ReferralReward, ReferralWithdrawal } from "../referral/referral.model";
+import { Theme } from "../theme/theme.model";
 import mongoose from "mongoose";
 import axios from "axios";
 import config from "../../config";
@@ -276,6 +277,24 @@ const updateMyStore = async (tenantId: string, payload: any) => {
   if (!updatedStore) {
     throw new CustomError(404, 'Store not found');
   }
+
+  // Automatically keep Theme footer contactInfo and policies in sync with Profile store settings
+  try {
+    const themeUpdate: any = {};
+    if (payload.contactEmail !== undefined) themeUpdate['footer.contactInfo.email'] = payload.contactEmail;
+    if (payload.contactPhone !== undefined) themeUpdate['footer.contactInfo.phone'] = payload.contactPhone;
+    if (payload.contactAddress !== undefined) themeUpdate['footer.contactInfo.address'] = payload.contactAddress;
+    if (Object.keys(themeUpdate).length > 0) {
+      await Theme.findOneAndUpdate(
+        { tenantId },
+        { $set: themeUpdate },
+        { upsert: true }
+      );
+    }
+  } catch (syncErr) {
+    console.error("Failed to auto-sync Theme footer with Profile settings:", syncErr);
+  }
+
   return updatedStore;
 };
 

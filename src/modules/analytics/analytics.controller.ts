@@ -293,10 +293,12 @@ const getDashboardSummary = asyncHandler(
     const { SubscriptionService } = require("../subscription/subscription.service");
     const { Product } = require("../product/product.model");
     const { Category } = require("../category/category.model");
+    const { Theme } = require("../theme/theme.model");
 
     // Run all independent queries in parallel using Promise.all
     const [
       storeInfo,
+      themeInfo,
       totalOrders,
       totalCustomers,
       revenueResult,
@@ -308,7 +310,8 @@ const getDashboardSummary = asyncHandler(
       allCats,
       totalVisits,
     ] = await Promise.all([
-      Tenant.findById(tenantId).select("name slug showDemoSeed"),
+      Tenant.findById(tenantId).select("name slug logo customDomain contactPhone contactEmail settings showDemoSeed").lean(),
+      Theme.findOne({ tenantId }).select("themeId primaryColor banner footer shippingZones defaultShippingCost").lean(),
       Order.countDocuments({ tenantId, createdAt: { $gte: startDate } }),
       Customer.countDocuments({ tenantId }),
       Order.aggregate([
@@ -354,6 +357,137 @@ const getDashboardSummary = asyncHandler(
       inactive: draftProds,
     };
 
+    // Calculate Store Setup & Visual Polish Score
+    const hasLogo = Boolean(storeInfo?.logo);
+    const hasProducts = (totalProds - draftProds) >= 1;
+    const hasBanner = Boolean(
+      (themeInfo?.banner?.images && themeInfo.banner.images.length > 0) ||
+      themeInfo?.banner?.image?.secure_url
+    );
+    const hasCategories = allCats.length >= 1;
+    const hasShipping = Boolean(
+      (themeInfo?.shippingZones && themeInfo.shippingZones.length > 0) ||
+      (typeof themeInfo?.defaultShippingCost === "number" && themeInfo.defaultShippingCost > 0)
+    );
+    const hasPolicies = Boolean(
+      themeInfo?.footer?.policies?.returnPolicy ||
+      themeInfo?.footer?.policies?.termsAndConditions
+    );
+    const hasContact = Boolean(
+      storeInfo?.contactPhone ||
+      themeInfo?.footer?.contactInfo?.phone ||
+      storeInfo?.contactEmail
+    );
+    const hasCustomDomain = Boolean(storeInfo?.customDomain);
+
+    const setupSteps = [
+      {
+        id: "logo",
+        title: "Store Brand Logo",
+        titleBn: "স্টোরের লোগো আপলোড",
+        description: "Add a crisp, high-resolution logo to build brand trust and look professional.",
+        category: "appearance",
+        completed: hasLogo,
+        isOptional: false,
+        link: "/dashboard/profile#store-logo-section",
+        weight: 15,
+      },
+      {
+        id: "banner",
+        title: "Hero Banner & Aesthetic Theme",
+        titleBn: "হিরো ব্যানার ও সুন্দর ডিজাইন",
+        description: "Upload eye-catching storefront banners and set your theme primary color.",
+        category: "appearance",
+        completed: hasBanner,
+        isOptional: false,
+        link: "/dashboard/themes?tab=banner",
+        weight: 20,
+      },
+      {
+        id: "products",
+        title: "Products in Catalog",
+        titleBn: "ক্যাটালগে সক্রিয় পণ্য যোগ",
+        description: "Add active products with rich photos, detailed descriptions, and prices.",
+        category: "catalog",
+        completed: hasProducts,
+        isOptional: false,
+        link: "/dashboard/products",
+        weight: 20,
+      },
+      {
+        id: "categories",
+        title: "Product Categories",
+        titleBn: "ক্যাটাগরি সাজানো",
+        description: "Organize items into clear collections so shoppers can browse easily.",
+        category: "catalog",
+        completed: hasCategories,
+        isOptional: false,
+        link: "/dashboard/categories",
+        weight: 15,
+      },
+      {
+        id: "shipping",
+        title: "Delivery Charges & Shipping Zones",
+        titleBn: "ডেলিভারি চার্জ নির্ধারণ",
+        description: "Specify delivery costs for inside and outside your main delivery city.",
+        category: "operations",
+        completed: hasShipping,
+        isOptional: false,
+        link: "/dashboard/themes?tab=shipping",
+        weight: 10,
+      },
+      {
+        id: "contact",
+        title: "Customer Hotline & Contact Info",
+        titleBn: "হটলাইন ও যোগাযোগ তথ্য",
+        description: "Add official phone number and address so customers can reach you.",
+        category: "trust",
+        completed: hasContact,
+        isOptional: false,
+        link: "/dashboard/profile#customer-support-section",
+        weight: 10,
+      },
+      {
+        id: "policies",
+        title: "Return & Exchange Policy",
+        titleBn: "রিটার্ন ও এক্সচেঞ্জ পলিসি",
+        description: "Give buyers confidence by explaining how returns and refunds work.",
+        category: "trust",
+        completed: hasPolicies,
+        isOptional: false,
+        link: "/dashboard/themes?tab=footer&policy=returnPolicy",
+        weight: 10,
+      },
+      {
+        id: "domain",
+        title: "Custom Domain Connection",
+        titleBn: "নিজস্ব কাস্টম ডোমেইন (ঐচ্ছিক)",
+        description: "Connect your custom .com or .tech domain to enhance credibility (Optional).",
+        category: "branding",
+        completed: hasCustomDomain,
+        isOptional: true,
+        link: "/dashboard/domain",
+        weight: 0,
+      },
+    ];
+
+    const requiredSteps = setupSteps.filter((s) => !s.isOptional);
+    const completedRequiredWeight = requiredSteps.reduce(
+      (acc, s) => acc + (s.completed ? s.weight : 0),
+      0
+    );
+    const storeSetupScore = Math.min(100, Math.round(completedRequiredWeight));
+    const completedStepsCount = setupSteps.filter((s) => s.completed).length;
+
+    const storeSetup = {
+      score: storeSetupScore,
+      completedCount: completedStepsCount,
+      totalCount: setupSteps.length,
+      requiredCompletedCount: requiredSteps.filter((s) => s.completed).length,
+      requiredTotalCount: requiredSteps.length,
+      steps: setupSteps,
+    };
+
     // Compile final result
     const summary = {
       store: storeInfo,
@@ -369,6 +503,7 @@ const getDashboardSummary = asyncHandler(
       productStats,
       topProducts,
       categoryStats,
+      storeSetup,
     };
 
     ApiResponse.sendSuccess(res, 200, "Dashboard summary retrieved", summary);
