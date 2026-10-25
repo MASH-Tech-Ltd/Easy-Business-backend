@@ -5,6 +5,7 @@ import { seedSuperAdmin } from './utils/seedSuperAdmin';
 import { seedDemoStorefront } from './utils/seedStorefront';
 import { ensurePackageFreeCredits } from './utils/ensurePackageFreeCredits';
 import { ensureAddons } from './utils/ensureAddons';
+import { BlogService } from './modules/blog/blog.service';
 
 import { initSocket } from './socket';
 import { initCourierCron } from './modules/courier/courier.cron';
@@ -17,6 +18,7 @@ connectDatabase()
     await seedSuperAdmin();
     await ensurePackageFreeCredits();
     await ensureAddons();
+    await BlogService.seedInitialBlogs();
     const server = app.listen(PORT, () => {
       console.log(`Server running at http://localhost:${PORT}`);
     });

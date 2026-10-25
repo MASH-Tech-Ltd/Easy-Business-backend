@@ -25,6 +25,7 @@ import { ContactInquiryRoutes } from '../modules/contactInquiry/contactInquiry.r
 import { TrackingRoutes } from '../modules/analytics/tracking.route';
 import { CourierSyncRoutes } from '../modules/courierSync/courierSync.route';
 import { ReferralRoutes } from '../modules/referral/referral.route';
+import { BlogRoutes } from '../modules/blog/blog.route';
 
 
 const router = Router();
@@ -129,6 +130,10 @@ const moduleRoutes = [
   {
     path: '/referrals',
     route: ReferralRoutes,
+  },
+  {
+    path: '/blogs',
+    route: BlogRoutes,
   },
 ];
 
