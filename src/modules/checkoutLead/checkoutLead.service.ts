@@ -1,6 +1,7 @@
 import { CheckoutLead } from './checkoutLead.model';
 import { ICheckoutLead } from './checkoutLead.interface';
 import { Subscription } from '../subscription/subscription.model';
+import { syncSubscriptionAddonCredits } from '../subscription/subscription.service';
 import CustomError from '../../helpers/CustomError';
 import { Types } from 'mongoose';
 
@@ -9,6 +10,9 @@ const trackLead = async (tenantId: string, payload: Partial<ICheckoutLead>) => {
   const subscription = await Subscription.findOne({ tenantId, status: 'active' }).populate('purchasedAddons.addonId');
   if (!subscription || !subscription.purchasedAddons) return null; // Silently fail if no subscription
 
+  // Ensure monthly free credits are in sync with current entitlement cycle
+  await syncSubscriptionAddonCredits(subscription);
+
   const addonIndex = subscription.purchasedAddons.findIndex(
     (pa: any) => pa.addonId?.slug === 'abandoned_checkout' && pa.isActive
   );
@@ -16,6 +20,18 @@ const trackLead = async (tenantId: string, payload: Partial<ICheckoutLead>) => {
   if (addonIndex === -1) return null; // Addon not active
   const addonInfo = subscription.purchasedAddons[addonIndex];
   if (!addonInfo) return null;
+
+  const deductUsage = async () => {
+    const freeRem = (addonInfo.freeLimit || 0) - (addonInfo.freeUsed || 0);
+    if (freeRem > 0) {
+      addonInfo.freeUsed = (addonInfo.freeUsed || 0) + 1;
+    } else {
+      addonInfo.paidUsed = (addonInfo.paidUsed || 0) + 1;
+    }
+    addonInfo.used = (addonInfo.freeUsed || 0) + (addonInfo.paidUsed || 0);
+    subscription.markModified('purchasedAddons');
+    await subscription.save();
+  };
 
   // Try to find if an abandoned lead already exists for this phone or email in this tenant
   const query: any = { tenantId, status: 'abandoned' };
@@ -29,8 +45,7 @@ const trackLead = async (tenantId: string, payload: Partial<ICheckoutLead>) => {
   } else {
     // If no phone or email, we just create a new one, checking limit first.
     if (addonInfo.used >= addonInfo.limit) return null; // Limit reached
-    subscription.purchasedAddons[addonIndex]!.used += 1;
-    await subscription.save();
+    await deductUsage();
     return await CheckoutLead.create({ ...payload, tenantId });
   }
 
@@ -43,8 +58,7 @@ const trackLead = async (tenantId: string, payload: Partial<ICheckoutLead>) => {
   } else {
     // Create new lead, must check limit
     if (addonInfo.used >= addonInfo.limit) return null; // Limit reached
-    subscription.purchasedAddons[addonIndex]!.used += 1;
-    await subscription.save();
+    await deductUsage();
     return await CheckoutLead.create({ ...payload, tenantId });
   }
 };
@@ -56,6 +70,8 @@ const getMerchantLeads = async (tenantId: string, query: any) => {
   if (!subscription || !subscription.purchasedAddons) {
     throw new CustomError(403, 'Subscription not found or no addons purchased');
   }
+
+  await syncSubscriptionAddonCredits(subscription);
 
   const addonInfo = subscription.purchasedAddons.find(
     (pa: any) => pa.addonId?.slug === 'abandoned_checkout' && pa.isActive

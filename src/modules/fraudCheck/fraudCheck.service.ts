@@ -11,7 +11,12 @@ const checkFraud = async (orderId: string, tenantId: string, force: boolean = fa
   }
 
   const fraudAddon = subscription.purchasedAddons.find(
-    (pa: any) => pa.addonId?.slug === 'fraud_check' && pa.status === 'active'
+    (pa: any) =>
+      (pa.addonId?.slug === 'fraud_check' ||
+        pa.addonId?.slug === 'fraud_check_basic' ||
+        pa.addonId?.slug === 'fraud_check_pro' ||
+        pa.addonId?.slug?.startsWith('fraud_check')) &&
+      pa.status === 'active'
   );
 
   if (!fraudAddon) {

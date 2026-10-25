@@ -8,6 +8,8 @@ export interface IAddon extends Document {
   billingCycle: 'monthly' | 'yearly' | 'one_time';
   defaultLimit: number;
   isActive: boolean;
+  applicablePlans?: string[];
+  badge?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }

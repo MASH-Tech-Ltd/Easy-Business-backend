@@ -3,6 +3,8 @@ import config from './config/index';
 import { connectDatabase } from './database/db';
 import { seedSuperAdmin } from './utils/seedSuperAdmin';
 import { seedDemoStorefront } from './utils/seedStorefront';
+import { ensurePackageFreeCredits } from './utils/ensurePackageFreeCredits';
+import { ensureAddons } from './utils/ensureAddons';
 
 import { initSocket } from './socket';
 import { initCourierCron } from './modules/courier/courier.cron';
@@ -13,6 +15,8 @@ const PORT = config.app.port || 8000;
 connectDatabase()
   .then(async () => {
     await seedSuperAdmin();
+    await ensurePackageFreeCredits();
+    await ensureAddons();
     const server = app.listen(PORT, () => {
       console.log(`Server running at http://localhost:${PORT}`);
     });

@@ -5,6 +5,8 @@ export interface IPackage extends Document {
   price: number;
   billingCycle: 'monthly' | 'yearly';
   productLimit: number;
+  freeCourierLimit?: number;
+  freeAbandonedLimit?: number;
   features?: string[];
   tagline?: string;
   description?: string;

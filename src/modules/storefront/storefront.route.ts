@@ -6,14 +6,17 @@ import { storefrontPublicLimiter, searchLimiter } from '../../middleware/rateLim
 
 const router = Router();
 
-// Secure routes with storefront API key
+// ── Public tracking endpoint — needs to be accessible by storefront visitors & client analytics scripts
+// Tracking IDs (GA4, Pixel ID) are public by nature and rendered in DOM script tags.
+router.get('/:tenantSlug/tracking', storefrontPublicLimiter, TrackingController.getStorefrontTrackingConfig);
+
+// Secure remaining storefront endpoints with storefront API key
 router.use(storefrontAuth);
 
-// ── Static / config endpoints (low traffic, but still protected)
+// ── Static / config endpoints (low traffic, but protected)
 router.get('/:tenantSlug/status', storefrontPublicLimiter, StorefrontController.getStatus);
 router.get('/:tenantSlug/info', storefrontPublicLimiter, StorefrontController.getInfo);
 router.get('/:tenantSlug/theme', storefrontPublicLimiter, StorefrontController.getTheme);
-router.get('/:tenantSlug/tracking', storefrontPublicLimiter, TrackingController.getStorefrontTrackingConfig);
 router.get('/:tenantSlug/categories', storefrontPublicLimiter, StorefrontController.getCategories);
 router.get('/:tenantSlug/brands', storefrontPublicLimiter, StorefrontController.getBrands);
 

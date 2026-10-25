@@ -22,6 +22,12 @@ export interface ISubscription extends Document {
     addonId: Types.ObjectId | string;
     limit: number;
     used: number;
+    freeLimit?: number;
+    freeUsed?: number;
+    paidLimit?: number;
+    paidUsed?: number;
+    lastResetDate?: Date;
+    nextResetDate?: Date;
     isActive: boolean;
     status?: 'pending' | 'active' | 'rejected' | 'inactive' | 'terminated';
     requestedAt?: Date;

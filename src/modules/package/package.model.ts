@@ -7,6 +7,8 @@ const packageSchema = new Schema<IPackage>(
     price: { type: Number, required: true },
     billingCycle: { type: String, enum: ['monthly', 'yearly'], required: true },
     productLimit: { type: Number, required: true },
+    freeCourierLimit: { type: Number, default: 0 },
+    freeAbandonedLimit: { type: Number, default: 0 },
     features: [{ type: String }],
     tagline: { type: String },
     description: { type: String },

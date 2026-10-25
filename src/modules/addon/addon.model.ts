@@ -10,6 +10,8 @@ const addonSchema = new Schema<IAddon>(
     billingCycle: { type: String, enum: ['monthly', 'yearly', 'one_time'], required: true },
     defaultLimit: { type: Number, required: true },
     isActive: { type: Boolean, default: true },
+    applicablePlans: [{ type: String }],
+    badge: { type: String },
   },
   {
     timestamps: true,

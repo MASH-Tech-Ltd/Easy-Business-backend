@@ -1,11 +1,61 @@
+# Dependencies
 node_modules/
-dist/
-build/
-.env
-.env.*
-*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.DS_Store
+pnpm-debug.log*
+
+# Build and Transpiled Code
+dist/
+build/
+*.tsbuildinfo
+
+# Environment variables & secrets (CRITICAL: Do NOT push real credentials to GitHub/Production)
+.env
+.env.*
+!.env.example
+*.env
+
+# Logs and Run-time Data
+logs/
+*.log
+payload.log
+
+# Database backups & local dumps
 backups/
+dump/
+data/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# IDE & Editor folders
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary, scratch, migration & test scripts
+sync_real_db.js
+check-merchant.ts
+check.ts
+clear_ips.ts
+drop-index.js
+fix-language.js
+fix_ts.js
+revert_packages.ts
+seed-addons.js
+seed-packages-js.js
+seed-packages.js
+seed-packages.ts
+test-db.js
+test.js
+update.js
+update_packages.js
+update_packages_final.ts
+update_tenant.js
+scratch/
+*.tmp
+*.bak

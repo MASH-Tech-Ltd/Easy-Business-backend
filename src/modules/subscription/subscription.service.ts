@@ -27,56 +27,169 @@ const notifySubscriptionUpdate = async (tenantId?: string) => {
   } catch (error) {}
 };
 
-// Free credits granted automatically with every paid subscription
-const BONUS_ADDON_SLUGS = ['abandoned_checkout', 'courier_automation'];
-const BONUS_ADDON_LIMIT = 30;
+// Free credits granted automatically with eligible paid subscriptions
+export const FREE_CREDIT_ADDON_SLUGS = ['abandoned_checkout', 'courier_automation'];
 
-const grantBonusAddons = async (subscription: any): Promise<void> => {
-  if (!subscription || subscription.isTrial || subscription.bonusAddonsGranted) return;
+/**
+ * Maps verified database packages to their exact monthly free credit allowance.
+ * Free Trial: 0 free uses/month
+ * Basic (৳299/mo | ৳2990/yr): 5 free uses/month for Courier & Abandoned Cart
+ * Standard (৳499/mo | ৳4990/yr): 10 free uses/month for Courier & Abandoned Cart
+ * Premium (৳799/mo | ৳7990/yr): 15 free uses/month for Courier & Abandoned Cart
+ */
+export const getPackageAddonAllowances = (
+  pkg: any
+): { courier_automation: number; abandoned_checkout: number } => {
+  if (!pkg) return { courier_automation: 0, abandoned_checkout: 0 };
 
-  try {
-    const addonDocs = await Addon.find({ slug: { $in: BONUS_ADDON_SLUGS }, isActive: true });
-    subscription.purchasedAddons = subscription.purchasedAddons || [];
+  if (
+    typeof pkg.freeCourierLimit === 'number' &&
+    typeof pkg.freeAbandonedLimit === 'number' &&
+    (pkg.freeCourierLimit > 0 || pkg.freeAbandonedLimit > 0)
+  ) {
+    return {
+      courier_automation: pkg.freeCourierLimit,
+      abandoned_checkout: pkg.freeAbandonedLimit,
+    };
+  }
 
-    for (const slug of BONUS_ADDON_SLUGS) {
-      const addonDoc = addonDocs.find((a) => a.slug === slug);
-      if (!addonDoc) {
-        console.warn(`[Bonus Addons] Addon "${slug}" not found or inactive; skipping bonus grant.`);
-        continue;
-      }
+  const nameLower = (pkg.name || '').trim().toLowerCase();
+  const price = Number(pkg.price) || 0;
 
-      const existing = subscription.purchasedAddons.find(
-        (pa: any) => ((pa.addonId?._id || pa.addonId)?.toString() === addonDoc._id.toString())
-      );
+  if (price === 299 || price === 2990 || nameLower === 'basic') {
+    return { courier_automation: 5, abandoned_checkout: 5 };
+  }
+  if (price === 499 || price === 4990 || nameLower === 'standard') {
+    return { courier_automation: 10, abandoned_checkout: 10 };
+  }
+  if (price === 799 || price === 7990 || nameLower === 'premium') {
+    return { courier_automation: 15, abandoned_checkout: 15 };
+  }
 
-      if (!existing) {
-        subscription.purchasedAddons.push({
-          addonId: addonDoc._id,
-          limit: BONUS_ADDON_LIMIT,
-          used: 0,
-          isActive: true,
-          status: 'active',
-          requestedAt: new Date(),
-        });
-      } else if (existing.status === 'rejected') {
-        // Previously rejected paid request: reset and activate with the free credits
-        existing.limit = BONUS_ADDON_LIMIT;
-        existing.used = 0;
+  return { courier_automation: 0, abandoned_checkout: 0 };
+};
+
+/**
+ * Synchronizes and allocates monthly free credits for Courier Automation and Abandoned Checkout.
+ * Annual subscribers receive only 1 month's allowance at a time (e.g. 5, 10, or 15/month),
+ * never all 12 months upfront.
+ * Unused free credits expire at each monthly entitlement period boundary without rolling over.
+ */
+export const syncSubscriptionAddonCredits = async (subscription: any): Promise<boolean> => {
+  if (!subscription || subscription.isTrial || subscription.status !== 'active') {
+    return false;
+  }
+
+  const now = new Date();
+  if (subscription.endDate && now > new Date(subscription.endDate)) {
+    return false; // Expired subscriptions do not receive new credits
+  }
+
+  // Populate packageId if necessary
+  let pkg = subscription.packageId;
+  if (!pkg || !pkg.name || typeof pkg.price !== 'number') {
+    pkg = await Package.findById(subscription.packageId);
+  }
+  if (!pkg) return false;
+
+  const allowances = getPackageAddonAllowances(pkg);
+  let modified = false;
+  subscription.purchasedAddons = subscription.purchasedAddons || [];
+
+  const subStart = subscription.startDate ? new Date(subscription.startDate) : now;
+
+  for (const slug of FREE_CREDIT_ADDON_SLUGS) {
+    const monthlyAllowance = allowances[slug as keyof typeof allowances] || 0;
+    if (monthlyAllowance <= 0) continue;
+
+    const addonDoc = await Addon.findOne({ slug, isActive: true });
+    if (!addonDoc) continue;
+
+    let existing = subscription.purchasedAddons.find(
+      (pa: any) => (pa.addonId?._id || pa.addonId)?.toString() === addonDoc._id.toString()
+    );
+
+    if (!existing) {
+      // First time allocation: allocate exactly 1 month's quota
+      const nextReset = new Date(subStart);
+      nextReset.setMonth(nextReset.getMonth() + 1);
+
+      subscription.purchasedAddons.push({
+        addonId: addonDoc._id,
+        limit: monthlyAllowance,
+        used: 0,
+        freeLimit: monthlyAllowance,
+        freeUsed: 0,
+        paidLimit: 0,
+        paidUsed: 0,
+        lastResetDate: subStart,
+        nextResetDate: nextReset > new Date(subscription.endDate) ? new Date(subscription.endDate) : nextReset,
+        isActive: true,
+        status: 'active',
+        requestedAt: new Date(),
+      });
+      modified = true;
+    } else {
+      // If addon exists, ensure freeLimit fields are initialized
+      if (typeof existing.freeLimit !== 'number') {
+        existing.freeLimit = monthlyAllowance;
+        existing.freeUsed = Math.min(existing.used || 0, monthlyAllowance);
+        existing.paidLimit = Math.max(0, (existing.limit || 0) - monthlyAllowance);
+        existing.paidUsed = Math.max(0, (existing.used || 0) - (existing.freeUsed || 0));
+        existing.lastResetDate = subStart;
+        const initialReset = new Date(subStart);
+        initialReset.setMonth(initialReset.getMonth() + 1);
+        existing.nextResetDate = initialReset;
         existing.isActive = true;
         existing.status = 'active';
-        existing.requestedAt = new Date();
-      } else if (existing.status === 'active' || existing.status === 'pending' || existing.status === undefined) {
-        // Carried-over or awaiting-approval addon: just top up the limit (status untouched,
-        // so a pending paid request still requires payment approval)
-        existing.limit = (existing.limit || 0) + BONUS_ADDON_LIMIT;
+        modified = true;
       }
-      // 'inactive' / 'terminated' were deliberately set by an admin: leave them untouched.
-    }
 
+      // Check for monthly rollover: has the current monthly period expired?
+      const nextReset = existing.nextResetDate ? new Date(existing.nextResetDate) : null;
+      if (nextReset && now >= nextReset) {
+        // Roll over: expired unused free credits do NOT carry over
+        existing.freeLimit = monthlyAllowance;
+        existing.freeUsed = 0;
+        existing.lastResetDate = new Date(nextReset);
+
+        // Advance nextResetDate by 1 month until it lies in the future
+        const newNextReset = new Date(nextReset);
+        while (newNextReset <= now) {
+          newNextReset.setMonth(newNextReset.getMonth() + 1);
+        }
+
+        if (subscription.endDate && newNextReset > new Date(subscription.endDate)) {
+          existing.nextResetDate = new Date(subscription.endDate);
+        } else {
+          existing.nextResetDate = newNextReset;
+        }
+
+        // Total available limit = current month's freeLimit + remaining paid credits
+        const remainingPaid = Math.max(0, (existing.paidLimit || 0) - (existing.paidUsed || 0));
+        existing.limit = existing.freeLimit + remainingPaid;
+        existing.used = existing.freeUsed;
+        existing.isActive = true;
+        existing.status = 'active';
+        modified = true;
+      }
+    }
+  }
+
+  if (modified) {
+    subscription.markModified('purchasedAddons');
+    await subscription.save();
+  }
+  return modified;
+};
+
+const grantBonusAddons = async (subscription: any): Promise<void> => {
+  if (!subscription || subscription.isTrial) return;
+  try {
+    await syncSubscriptionAddonCredits(subscription);
     subscription.bonusAddonsGranted = true;
     await subscription.save();
   } catch (err) {
-    // Never block subscription activation because of the bonus grant
     console.error('Failed to grant bonus addons:', err);
   }
 };
@@ -207,6 +320,14 @@ const getTenantSubscription = async (tenantId: string): Promise<ISubscription | 
 
   if (!targetSub) {
     return null;
+  }
+
+  if (targetSub.status === 'active' && !targetSub.isTrial) {
+    try {
+      await syncSubscriptionAddonCredits(targetSub);
+    } catch (err) {
+      console.error('Failed to sync addon credits in getTenantSubscription:', err);
+    }
   }
 
   const sanitizeSub = (sub: any) => {
@@ -753,7 +874,7 @@ const deleteSubscription = async (subscriptionId: string): Promise<void> => {
 };
 
 const purchaseAddon = async (tenantId: string, payload: { addonId: string }): Promise<ISubscription> => {
-  const subscription = await Subscription.findOne({ tenantId, status: 'active' });
+  const subscription = await Subscription.findOne({ tenantId, status: 'active' }).populate('packageId');
   if (!subscription) {
     throw new CustomError(404, 'Active subscription not found for this tenant');
   }
@@ -765,6 +886,22 @@ const purchaseAddon = async (tenantId: string, payload: { addonId: string }): Pr
   const addon = await Addon.findById(payload.addonId);
   if (!addon || !addon.isActive) {
     throw new CustomError(404, 'Addon not found or is inactive');
+  }
+
+  // Validate package tier eligibility
+  if (addon.applicablePlans && addon.applicablePlans.length > 0) {
+    const pkg: any = subscription.packageId;
+    const planName = (pkg?.name || '').trim().toLowerCase();
+    const isAllowed = addon.applicablePlans.some((p: string) => planName.includes(p.toLowerCase()));
+    if (!isAllowed) {
+      const planNames = addon.applicablePlans
+        .map((p: string) => p.charAt(0).toUpperCase() + p.slice(1))
+        .join(' or ');
+      throw new CustomError(
+        403,
+        `This add-on is exclusive to ${planNames} plan subscribers. Please upgrade your subscription plan to activate this add-on.`
+      );
+    }
   }
 
   subscription.purchasedAddons = subscription.purchasedAddons || [];

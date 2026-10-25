@@ -9,6 +9,7 @@ import { SteadfastProvider } from "./providers/SteadfastProvider";
 import { RedxProvider } from "./providers/RedxProvider";
 import CustomError from "../../helpers/CustomError";
 import { Addon } from "../addon/addon.model";
+import { syncSubscriptionAddonCredits } from "../subscription/subscription.service";
 
 const getCourierChargeByTenant = async (
   tenantId: string,
@@ -209,6 +210,9 @@ const checkCourierAddonLimit = async (tenantId: string) => {
     throw new CustomError(403, "No active add-ons found for this subscription");
   }
 
+  // Ensure monthly free credits are in sync with current entitlement cycle
+  await syncSubscriptionAddonCredits(subscription);
+
   const courierAddon = subscription.purchasedAddons.find(
     (pa: any) =>
       pa.addonId?.slug === "courier_automation" && pa.status === "active",
@@ -362,18 +366,26 @@ const forwardOrder = async (
   order.status = "shipped";
   await order.save();
 
-  // 6. Increment Usage
+  // 6. Increment Usage (deduct free credits first, then paid credits)
   const subscription = await Subscription.findOne({
     tenantId,
     status: "active",
   }).populate("purchasedAddons.addonId");
   if (subscription && subscription.purchasedAddons) {
+    await syncSubscriptionAddonCredits(subscription);
     const courierAddon = subscription.purchasedAddons.find(
       (pa: any) =>
         pa.addonId?.slug === "courier_automation" && pa.status === "active",
     );
     if (courierAddon) {
-      courierAddon.used += 1;
+      const freeRem = (courierAddon.freeLimit || 0) - (courierAddon.freeUsed || 0);
+      if (freeRem > 0) {
+        courierAddon.freeUsed = (courierAddon.freeUsed || 0) + 1;
+      } else {
+        courierAddon.paidUsed = (courierAddon.paidUsed || 0) + 1;
+      }
+      courierAddon.used = (courierAddon.freeUsed || 0) + (courierAddon.paidUsed || 0);
+      subscription.markModified("purchasedAddons");
       await subscription.save();
     }
   }

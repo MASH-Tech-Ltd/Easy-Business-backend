@@ -7,6 +7,7 @@ import { Tenant } from '../tenant/tenant.model';
 
 import CustomError from '../../helpers/CustomError';
 import { User } from '../auth/auth.model';
+import { Subscription } from '../subscription/subscription.model';
 
 // Helper to resolve tenantId from authenticated user request
 const resolveUserTenantId = async (req: Request) => {
@@ -70,6 +71,41 @@ const updateMerchantTrackingConfig = asyncHandler(async (req: Request, res: Resp
       message: 'Validation failed',
       errors: validation.errors,
     });
+  }
+
+  // ENFORCE PLAN TIER AUTHORIZATION: Prevent Free/Basic plans from accessing paid tracking features
+  const subscription = await Subscription.findOne({ tenantId, status: 'active' }).populate('packageId');
+  if (!subscription) {
+    throw new CustomError(403, 'An active subscription is required to configure tracking integrations. Please subscribe to a plan.');
+  }
+
+  const pkg = subscription.packageId as any;
+  const planName = (pkg?.name || '').toLowerCase().trim();
+  const isTrial = Boolean(subscription.isTrial);
+
+  const wantsGA = Boolean(googleAnalytics?.enabled);
+  const wantsPixel = Boolean(metaPixel?.enabled);
+  const wantsGTM = Boolean(googleTagManager?.enabled);
+
+  if (isTrial && (wantsGA || wantsPixel || wantsGTM)) {
+    throw new CustomError(
+      403,
+      'Native tracking integrations (GA4, Meta Pixel, and GTM) are paid features and are not included in the Free Trial. Please upgrade to Standard or Premium.'
+    );
+  }
+
+  if (planName.includes('basic') && (wantsGA || wantsPixel || wantsGTM)) {
+    throw new CustomError(
+      403,
+      'Google Analytics 4 and Meta Pixel native integrations require a Standard or Premium plan. Please upgrade your plan to unlock them.'
+    );
+  }
+
+  if (planName.includes('standard') && wantsGTM) {
+    throw new CustomError(
+      403,
+      'Google Tag Manager multi-channel tracking is a Premium feature. Please upgrade to the Premium plan to activate GTM.'
+    );
   }
 
   let configDoc = await TrackingConfig.findOne({ tenantId });
@@ -207,11 +243,20 @@ const getStorefrontTrackingConfig = asyncHandler(async (req: Request, res: Respo
 
   const merchantConfig = await TrackingConfig.findOne({ tenantId: tenant._id });
 
+  // Verify merchant's active plan permissions before serving tracking IDs on public storefront
+  const subscription = await Subscription.findOne({ tenantId: tenant._id, status: 'active' }).populate('packageId');
+  const pkg = subscription?.packageId as any;
+  const planName = (pkg?.name || '').toLowerCase().trim();
+  const isTrial = Boolean(subscription?.isTrial);
+
+  const allowGAandPixel = Boolean(subscription && !isTrial && (planName.includes('standard') || planName.includes('premium')));
+  const allowGTM = Boolean(subscription && !isTrial && planName.includes('premium'));
+
   // STRICT SEPARATION: Platform tracking IDs MUST NEVER be returned for merchant storefronts!
   ApiResponse.sendSuccess(res, 200, 'Storefront tracking retrieved', {
-    googleAnalytics: merchantConfig?.googleAnalytics?.enabled ? merchantConfig.googleAnalytics : { enabled: false, measurementId: '' },
-    metaPixel: merchantConfig?.metaPixel?.enabled ? merchantConfig.metaPixel : { enabled: false, pixelId: '' },
-    googleTagManager: merchantConfig?.googleTagManager?.enabled ? merchantConfig.googleTagManager : { enabled: false, containerId: '' },
+    googleAnalytics: (allowGAandPixel && merchantConfig?.googleAnalytics?.enabled) ? merchantConfig.googleAnalytics : { enabled: false, measurementId: '' },
+    metaPixel: (allowGAandPixel && merchantConfig?.metaPixel?.enabled) ? merchantConfig.metaPixel : { enabled: false, pixelId: '' },
+    googleTagManager: (allowGTM && merchantConfig?.googleTagManager?.enabled) ? merchantConfig.googleTagManager : { enabled: false, containerId: '' },
     isPlatform: false,
     tenantId: tenant._id,
   });
