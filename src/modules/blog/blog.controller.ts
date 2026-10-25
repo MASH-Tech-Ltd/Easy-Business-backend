@@ -2,8 +2,23 @@ import { Request, Response } from 'express';
 import { BlogService } from './blog.service';
 import ApiResponse from '../../utils/apiResponse';
 import { asyncHandler } from '../../utils/asyncHandler';
-import { uploadCloudinary } from '../../helpers/cloudinary';
+import { uploadCloudinary, deleteCloudinary, deleteCloudinaryFromUrl } from '../../helpers/cloudinary';
 import CustomError from '../../helpers/CustomError';
+
+const deleteBlogImage = asyncHandler(async (req: Request, res: Response) => {
+  const { url, public_id } = req.body;
+  if (!url && !public_id) {
+    throw new CustomError(400, 'Image url or public_id is required');
+  }
+
+  if (url) {
+    await deleteCloudinaryFromUrl(url);
+  } else if (public_id) {
+    await deleteCloudinary(public_id);
+  }
+
+  ApiResponse.sendSuccess(res, 200, 'Image deleted successfully from Cloudinary');
+});
 
 const uploadBlogImage = asyncHandler(async (req: Request, res: Response) => {
   if (!req.file) {
@@ -73,4 +88,5 @@ export const BlogController = {
   deleteBlog,
   seedBlogs,
   uploadBlogImage,
+  deleteBlogImage,
 };

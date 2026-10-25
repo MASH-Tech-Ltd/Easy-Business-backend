@@ -18,5 +18,6 @@ router.post('/create-blog', authMiddleware('super_admin'), validateRequest(creat
 router.patch('/update-blog/:id', authMiddleware('super_admin'), validateRequest(updateBlogValidation), BlogController.updateBlog);
 router.delete('/delete-blog/:id', authMiddleware('super_admin'), BlogController.deleteBlog);
 router.post('/upload-image', authMiddleware('super_admin'), upload.single('image'), BlogController.uploadBlogImage);
+router.post('/delete-image', authMiddleware('super_admin'), BlogController.deleteBlogImage);
 
 export const BlogRoutes = router;
