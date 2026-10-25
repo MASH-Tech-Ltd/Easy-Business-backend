@@ -38,5 +38,6 @@ const tenantSchema = new Schema<ITenant>(
 
 tenantSchema.index({ slug: 1, status: 1 });
 tenantSchema.index({ customDomain: 1, status: 1 });
+tenantSchema.index({ domain: 1, status: 1 });
 
 export const Tenant = model<ITenant>('Tenant', tenantSchema);
