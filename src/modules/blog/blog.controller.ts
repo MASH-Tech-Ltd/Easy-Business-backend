@@ -58,9 +58,10 @@ const deleteBlog = asyncHandler(async (req: Request, res: Response) => {
 });
 
 const seedBlogs = asyncHandler(async (req: Request, res: Response) => {
-  await BlogService.seedInitialBlogs();
+  const force = req.query.force === 'true' || req.body?.force === true;
+  await BlogService.seedInitialBlogs(force);
   const { data, meta } = await BlogService.getPublicBlogs({});
-  ApiResponse.sendSuccess(res, 200, 'Blogs re-seeded successfully with Bangla posts', data, meta);
+  ApiResponse.sendSuccess(res, 200, 'Blogs seeded successfully with default articles', data, meta);
 });
 
 export const BlogController = {
