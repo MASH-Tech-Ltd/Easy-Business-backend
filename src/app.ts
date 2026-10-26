@@ -137,6 +137,11 @@ app.use(express.json({ limit: "10mb" })); // Need body parser for attack detecti
 app.use(attackDetectionMiddleware);
 app.use(cookieParser());
 app.use(helmet());
+// Ensure search engines never index any backend API endpoint
+app.use((req: Request, res: Response, next) => {
+  res.setHeader("X-Robots-Tag", "noindex, nofollow");
+  next();
+});
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 morgan.token('real-ip', (req: Request) => getClientIp(req));
 app.use(morgan(':real-ip - :method :url HTTP/:http-version :status :res[content-length] - :response-time ms', {
@@ -240,6 +245,23 @@ app.get("/.well-known/acme-challenge/:token", async (req: Request, res: Response
 // Health check endpoint
 app.get("/ping", (req: Request, res: Response) => {
   res.status(200).json({ message: "pong", time: new Date() });
+});
+
+// Explicit robots.txt for backend API to prevent search crawlers
+app.get("/robots.txt", (req: Request, res: Response) => {
+  res.type("text/plain");
+  res.setHeader("X-Robots-Tag", "noindex, nofollow");
+  res.send("User-agent: *\nDisallow: /\n");
+});
+
+// Root endpoint: return 200 OK with noindex so crawler requests to https://backapi.masheco.com/ do not fail with 404
+app.get("/", (req: Request, res: Response) => {
+  res.setHeader("X-Robots-Tag", "noindex, nofollow");
+  res.status(200).json({
+    status: "ok",
+    service: "MASH ECO e-commerce platform",
+    time: new Date(),
+  });
 });
 
 // Not Found Middleware
