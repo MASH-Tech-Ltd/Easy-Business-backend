@@ -4,8 +4,23 @@ import { Product } from '../product/product.model';
 import { Types } from 'mongoose';
 
 const createCategory = async (payload: Partial<ICategory>): Promise<ICategory> => {
-  const result = await Category.create(payload);
-  return result;
+  try {
+    const result = await Category.create(payload);
+    return result;
+  } catch (err: any) {
+    if (err.code === 11000) {
+      // Duplicate key — figure out which field conflicted
+      const keyPattern = err.keyPattern || {};
+      if (keyPattern.name) {
+        throw new Error(`A category named "${payload.name}" already exists in your store.`);
+      }
+      if (keyPattern.slug) {
+        throw new Error(`A category with that slug already exists in your store.`);
+      }
+      throw new Error('A duplicate category already exists in your store.');
+    }
+    throw err;
+  }
 };
 
 import { paginationHelper } from '../../helpers/paginationHelper';

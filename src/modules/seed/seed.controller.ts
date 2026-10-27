@@ -277,13 +277,14 @@ const seedDemoData = asyncHandler(async (req: Request, res: Response) => {
 
   const categoriesToInsert = filteredCategories.map((cat) => ({
     name: cat.name,
+    slug: cat._tempId,
     description: cat.description,
     image: cat.image,
     status: cat.status,
     tenantId,
   }));
 
-  const categoryDocs = await Category.insertMany(categoriesToInsert);
+  const categoryDocs = await Category.create(categoriesToInsert);
 
   const categoryMap: Record<string, Types.ObjectId> = {};
   for (let i = 0; i < categoryDocs.length; i++) {
@@ -757,17 +758,20 @@ async function seedSingleDemoStore(themeId: string, customSubdomain?: string) {
   await Category.deleteMany({ tenantId: tenant._id });
 
   // 6. Seed exactly 15 categories
+  // slug is NOT set here — the pre('save') middleware on Category
+  // auto-generates it from the name. Use Category.create() (not insertMany)
+  // so that middleware runs for every document.
   const targetCategories = abstractCategories.slice(0, 15);
   const categoriesToInsert = targetCategories.map((c) => ({
     name: c.en,
-    slug: `${c.id}-${subdomain}-${Math.floor(100 + Math.random() * 900)}`,
     description: `High performance authentic ${c.en} products with official warranties.`,
     image: img(c.img),
     status: "ACTIVE",
     tenantId: tenant._id,
   }));
 
-  const createdCategories = await Category.insertMany(categoriesToInsert);
+  // Category.create([...]) runs pre('save') middleware on each doc — slug is auto-generated
+  const createdCategories = await Category.create(categoriesToInsert);
 
   // Map category id to newly created category ObjectId
   const catIdToDocMap: Record<string, Types.ObjectId> = {};
