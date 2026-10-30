@@ -2,23 +2,28 @@ import { ICategory } from './category.interface';
 import { Category } from './category.model';
 import { Product } from '../product/product.model';
 import { Types } from 'mongoose';
+import CustomError from '../../helpers/CustomError';
+
+const handleDuplicateKeyError = (err: any, payload: Partial<ICategory>) => {
+  if (err.code === 11000) {
+    const keyPattern = err.keyPattern || {};
+    if (keyPattern.name) {
+      throw new CustomError(400, `A category named "${payload.name || 'this'}" already exists in your store.`);
+    }
+    if (keyPattern.slug) {
+      throw new CustomError(400, `A category with that slug already exists in your store.`);
+    }
+    throw new CustomError(400, 'A duplicate category already exists in your store.');
+  }
+  throw err;
+};
 
 const createCategory = async (payload: Partial<ICategory>): Promise<ICategory> => {
   try {
     const result = await Category.create(payload);
     return result;
   } catch (err: any) {
-    if (err.code === 11000) {
-      // Duplicate key — figure out which field conflicted
-      const keyPattern = err.keyPattern || {};
-      if (keyPattern.name) {
-        throw new Error(`A category named "${payload.name}" already exists in your store.`);
-      }
-      if (keyPattern.slug) {
-        throw new Error(`A category with that slug already exists in your store.`);
-      }
-      throw new Error('A duplicate category already exists in your store.');
-    }
+    handleDuplicateKeyError(err, payload);
     throw err;
   }
 };
@@ -65,8 +70,13 @@ const getSingleCategory = async (id: string, tenantId: string): Promise<ICategor
 };
 
 const updateCategory = async (id: string, tenantId: string, payload: Partial<ICategory>): Promise<ICategory | null> => {
-  const result = await Category.findOneAndUpdate({ _id: id, tenantId }, payload, { returnDocument: 'after' });
-  return result;
+  try {
+    const result = await Category.findOneAndUpdate({ _id: id, tenantId }, payload, { returnDocument: 'after' });
+    return result;
+  } catch (err: any) {
+    handleDuplicateKeyError(err, payload);
+    throw err;
+  }
 };
 
 const deleteCategory = async (id: string, tenantId: string): Promise<ICategory | null> => {
