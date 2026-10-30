@@ -718,7 +718,19 @@ const getAllSubscriptions = async (query: any): Promise<{ data: any[]; meta: any
 
   let filter: any = {};
   if (status && status !== 'all') {
-    filter.status = status;
+    if (status === 'warning_sent') {
+      filter.expiryWarningSent = true;
+    } else if (status === 'warning_not_sent') {
+      filter.status = 'active';
+      filter.expiryWarningSent = { $ne: true };
+    } else if (status === 'expiring_soon') {
+      const now = new Date();
+      const windowEnd = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+      filter.status = 'active';
+      filter.endDate = { $gt: now, $lte: windowEnd };
+    } else {
+      filter.status = status;
+    }
   }
 
   let dateStart: Date | null = null;

@@ -150,6 +150,12 @@ const activateEarlyById = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 200, 'Subscription activated immediately with zero time gap', result);
 });
 
+const triggerExpiryReminders = asyncHandler(async (req: Request, res: Response) => {
+  const { checkAndSendExpiryWarnings } = require('./subscription.cron');
+  const result = await checkAndSendExpiryWarnings();
+  ApiResponse.sendSuccess(res, 200, 'Subscription expiry scan completed successfully', result);
+});
+
 export const SubscriptionController = {
   assignPackage,
   getTenantSubscription,
@@ -170,5 +176,6 @@ export const SubscriptionController = {
   rejectAddonRequest,
   removeAddon,
   activateEarly,
-  activateEarlyById
+  activateEarlyById,
+  triggerExpiryReminders
 };

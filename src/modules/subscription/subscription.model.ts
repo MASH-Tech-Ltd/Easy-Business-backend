@@ -11,6 +11,8 @@ const subscriptionSchema = new Schema<ISubscription>(
     activationType: { type: String, enum: ['immediate', 'queue'], default: 'immediate' },
     isTrial: { type: Boolean, default: false },
     bonusAddonsGranted: { type: Boolean, default: false },
+    expiryWarningSent: { type: Boolean, default: false },
+    expiryWarningSentAt: { type: Date, default: null },
     originalPrice: { type: Number, default: null },
     paidAmount: { type: Number, default: null },
     discountApplied: { type: Schema.Types.Mixed, default: null },

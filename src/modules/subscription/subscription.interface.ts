@@ -9,6 +9,8 @@ export interface ISubscription extends Document {
   activationType?: 'immediate' | 'queue';
   isTrial?: boolean;
   bonusAddonsGranted?: boolean;
+  expiryWarningSent?: boolean;
+  expiryWarningSentAt?: Date;
   originalPrice?: number;
   paidAmount?: number;
   discountApplied?: {

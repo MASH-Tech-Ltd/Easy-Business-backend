@@ -35,4 +35,6 @@ router.put('/addons/:subscriptionId/:addonId/terminate', authMiddleware('super_a
 router.put('/addons/:subscriptionId/:addonId/reject', authMiddleware('super_admin'), validateRequest(SubscriptionValidation.addonActionParamValidation), SubscriptionController.rejectAddonRequest);
 router.delete('/addons/:subscriptionId/:addonId', authMiddleware('super_admin'), validateRequest(SubscriptionValidation.addonActionParamValidation), SubscriptionController.removeAddon);
 
+router.post('/trigger-expiry-reminders', authMiddleware('super_admin'), SubscriptionController.triggerExpiryReminders);
+
 export const SubscriptionRoutes = router;
