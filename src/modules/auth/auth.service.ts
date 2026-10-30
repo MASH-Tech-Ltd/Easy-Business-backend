@@ -17,6 +17,7 @@ import mongoose from 'mongoose';
 import { Tenant } from '../tenant/tenant.model';
 import slugify from 'slugify';
 import { Subscription } from '../subscription/subscription.model';
+import { syncSubscriptionAddonCredits } from '../subscription/subscription.service';
 import { Referral, ReferralUsage, ReferralReward } from '../referral/referral.model';
 import { notificationService } from '../notification/notification.service';
 import { GlobalSetting } from '../system/globalSetting.model';
@@ -167,6 +168,14 @@ const register = async (payload: Partial<IUser> & { storeName?: string; referral
         isTrial: true,
       });
       await freeSubscription.save({ session });
+
+      // Grant free trial addon credits (10 courier + 30 abandoned) — runs outside the session
+      // to avoid transaction conflicts since syncSubscriptionAddonCredits does its own save.
+      try {
+        await syncSubscriptionAddonCredits(freeSubscription);
+      } catch (err) {
+        console.error('Failed to seed free trial addon credits:', err);
+      }
 
       // If a valid referral was applied, record usage and increment count
       if (referralDoc) {

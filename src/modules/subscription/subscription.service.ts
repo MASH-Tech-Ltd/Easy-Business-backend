@@ -53,31 +53,34 @@ export const getPackageAddonAllowances = (
     };
   }
 
-  const nameLower = (pkg.name || '').trim().toLowerCase();
-  const price = Number(pkg.price) || 0;
 
-  if (price === 299 || price === 2990 || nameLower === 'basic') {
-    return { courier_automation: 5, abandoned_checkout: 5 };
-  }
-  if (price === 499 || price === 4990 || nameLower === 'standard') {
-    return { courier_automation: 10, abandoned_checkout: 10 };
-  }
-  if (price === 799 || price === 7990 || nameLower === 'premium') {
-    return { courier_automation: 15, abandoned_checkout: 15 };
-  }
+  // Dynamic formula: derive monthly price, then apply price/10 and price/10*2
+  const rawPrice = Number(pkg.price) || 0;
+  const billingCycle = (pkg.billingCycle || '').toLowerCase();
+  // For yearly packages use monthly equivalent; for monthly use price directly
+  const monthlyPrice = billingCycle === 'yearly' ? rawPrice / 12 : rawPrice;
 
-  return { courier_automation: 0, abandoned_checkout: 0 };
+  const courierLimit = Math.floor(monthlyPrice / 10);
+  const abandonedLimit = Math.floor((monthlyPrice / 10) * 2);
+
+  return { courier_automation: courierLimit, abandoned_checkout: abandonedLimit };
 };
 
 /**
  * Synchronizes and allocates monthly free credits for Courier Automation and Abandoned Checkout.
- * Annual subscribers receive only 1 month's allowance at a time (e.g. 5, 10, or 15/month),
+ * Annual subscribers receive only 1 month's allowance at a time (based on monthly_price/10),
  * never all 12 months upfront.
+ * Free Trial subscriptions receive a fixed one-time allocation: 10 courier + 30 abandoned.
  * Unused free credits expire at each monthly entitlement period boundary without rolling over.
  */
 export const syncSubscriptionAddonCredits = async (subscription: any): Promise<boolean> => {
-  if (!subscription || subscription.isTrial || subscription.status !== 'active') {
+  if (!subscription || subscription.status !== 'active') {
     return false;
+  }
+
+  // Free trial subscriptions receive a fixed one-time allocation only
+  if (subscription.isTrial) {
+    return grantFreeTrialAddonCredits(subscription);
   }
 
   const now = new Date();
@@ -183,6 +186,62 @@ export const syncSubscriptionAddonCredits = async (subscription: any): Promise<b
   return modified;
 };
 
+// Fixed free-tier credits for Free Trial subscriptions (one-time, no monthly reset)
+export const FREE_TRIAL_COURIER_LIMIT = 10;
+export const FREE_TRIAL_ABANDONED_LIMIT = 30;
+
+/**
+ * Grants fixed one-time free credits to a free trial subscription.
+ * 10 courier automation + 30 abandoned checkout — allocated at signup, no monthly reset.
+ */
+const grantFreeTrialAddonCredits = async (subscription: any): Promise<boolean> => {
+  if (!subscription || !subscription.isTrial) return false;
+  const now = new Date();
+  if (subscription.endDate && now > new Date(subscription.endDate)) return false;
+
+  const trialAllowances: Record<string, number> = {
+    courier_automation: FREE_TRIAL_COURIER_LIMIT,
+    abandoned_checkout: FREE_TRIAL_ABANDONED_LIMIT,
+  };
+
+  let modified = false;
+  subscription.purchasedAddons = subscription.purchasedAddons || [];
+
+  for (const slug of FREE_CREDIT_ADDON_SLUGS) {
+    const allowance = trialAllowances[slug] || 0;
+    if (allowance <= 0) continue;
+
+    const addonDoc = await Addon.findOne({ slug, isActive: true });
+    if (!addonDoc) continue;
+
+    const existing = subscription.purchasedAddons.find(
+      (pa: any) => (pa.addonId?._id || pa.addonId)?.toString() === addonDoc._id.toString()
+    );
+    if (existing) continue; // already allocated, skip
+
+    subscription.purchasedAddons.push({
+      addonId: addonDoc._id,
+      limit: allowance,
+      used: 0,
+      freeLimit: allowance,
+      freeUsed: 0,
+      paidLimit: 0,
+      paidUsed: 0,
+      lastResetDate: subscription.startDate ? new Date(subscription.startDate) : now,
+      nextResetDate: subscription.endDate ? new Date(subscription.endDate) : null,
+      isActive: true,
+      status: 'active',
+      requestedAt: now,
+    });
+    modified = true;
+  }
+
+  if (modified) {
+    await subscription.save();
+  }
+  return modified;
+};
+
 const grantBonusAddons = async (subscription: any): Promise<void> => {
   if (!subscription || subscription.isTrial) return;
   try {
@@ -248,7 +307,7 @@ const assignPackage = async (payload: { tenantId: string, packageId: string }): 
     purchasedAddons: inheritedAddons,
   });
 
-  // Every paid subscription comes with 30 Abandoned Checkout + 30 Courier Automation credits
+  // Every paid subscription gets free addon credits (formula: price/10 courier, price/10*2 abandoned)
   await grantBonusAddons(subscription);
 
   // When assigning a paid package directly, mark any first-time referral discount as used
@@ -322,9 +381,12 @@ const getTenantSubscription = async (tenantId: string): Promise<ISubscription | 
     return null;
   }
 
-  if (targetSub.status === 'active' && !targetSub.isTrial) {
+  if (targetSub.status === 'active') {
     try {
-      await syncSubscriptionAddonCredits(targetSub);
+      const modified = await syncSubscriptionAddonCredits(targetSub);
+      if (modified) {
+        await targetSub.populate('purchasedAddons.addonId');
+      }
     } catch (err) {
       console.error('Failed to sync addon credits in getTenantSubscription:', err);
     }
@@ -541,7 +603,7 @@ const approveSubscription = async (subscriptionId: string): Promise<ISubscriptio
   subscription.status = 'active';
   await subscription.save();
 
-  // Every paid subscription comes with 30 Abandoned Checkout + 30 Courier Automation credits
+  // Every paid subscription gets free addon credits (formula: price/10 courier, price/10*2 abandoned)
   await grantBonusAddons(subscription);
 
   const tenant = await Tenant.findById(subscription.tenantId);

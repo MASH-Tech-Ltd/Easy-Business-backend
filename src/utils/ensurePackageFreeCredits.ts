@@ -12,26 +12,30 @@ export const ensurePackageFreeCredits = async (): Promise<void> => {
 
     for (const pkg of packages) {
       const nameLower = (pkg.name || '').trim().toLowerCase();
-      const price = Number(pkg.price) || 0;
+      const rawPrice = Number(pkg.price) || 0;
+      const billingCycle = (pkg.billingCycle || '').toLowerCase();
 
-      let courierLimit = 0;
-      let abandonedLimit = 0;
+      // Use monthly equivalent for yearly packages so limits are per-month
+      const monthlyPrice = billingCycle === 'yearly' ? rawPrice / 12 : rawPrice;
 
-      let productLimit = 199;
+      // Dynamic formula: courier = floor(monthly_price / 10), abandoned = floor(monthly_price / 10 * 2)
+      const courierLimit = Math.floor(monthlyPrice / 10);
+      const abandonedLimit = Math.floor((monthlyPrice / 10) * 2);
+
+      // Derive tier-specific metadata from plan name
+      let productLimit = pkg.productLimit || 199;
       let features: string[] = [];
       let tagline = '';
       let description = '';
 
-      if (price === 299 || price === 2990 || nameLower === 'basic') {
-        courierLimit = 5;
-        abandonedLimit = 5;
-        productLimit = 199;
+      if (nameLower === 'basic') {
+        productLimit = pkg.productLimit || 199;
         tagline = 'Essential Storefront for New Sellers & Small Businesses';
-        description = 'Launch your brand online with all core store tools, 199 products, and starter free automations.';
+        description = `Launch your brand online with all core store tools, ${productLimit} products, and ${courierLimit} free courier orders/month.`;
         features = [
-          'Up to 199 Products Capacity',
-          'Courier Automation: 5 Free Orders / Month',
-          'Abandoned Checkout: 5 Free Leads / Month',
+          `Up to ${productLimit} Products Capacity`,
+          `Courier Automation: ${courierLimit} Free Orders / Month`,
+          `Abandoned Checkout: ${abandonedLimit} Free Leads / Month`,
           'Online Storefront & All 5 Modern Themes',
           'Mash Eco Subdomain & Custom Domain',
           'Cash on Delivery (COD) & Manual Payments',
@@ -44,16 +48,14 @@ export const ensurePackageFreeCredits = async (): Promise<void> => {
           'Advanced Customer Fraud Risk Scoring: Not included',
           'Swift VIP Dedicated 24/7 Priority Support: Not included',
         ];
-      } else if (price === 499 || price === 4990 || nameLower === 'standard') {
-        courierLimit = 10;
-        abandonedLimit = 10;
-        productLimit = 399;
+      } else if (nameLower === 'standard') {
+        productLimit = pkg.productLimit || 399;
         tagline = 'More Capacity & Insights for Growing Businesses';
-        description = 'Scale faster with 399 products, double monthly free automations, and native GA4 & Meta Pixel tracking.';
+        description = `Scale faster with ${productLimit} products, ${courierLimit} free courier orders/month, and native GA4 & Meta Pixel tracking.`;
         features = [
-          'Up to 399 Products (2x Capacity)',
-          'Courier Automation: 10 Free Orders / Month (2x)',
-          'Abandoned Checkout: 10 Free Leads / Month (2x)',
+          `Up to ${productLimit} Products (2x Capacity)`,
+          `Courier Automation: ${courierLimit} Free Orders / Month`,
+          `Abandoned Checkout: ${abandonedLimit} Free Leads / Month`,
           'Online Storefront & All 5 Modern Themes',
           'Mash Eco Subdomain & Custom Domain',
           'Cash on Delivery (COD) & Manual Payments',
@@ -66,16 +68,14 @@ export const ensurePackageFreeCredits = async (): Promise<void> => {
           'Advanced Customer Fraud Risk Scoring: Not included',
           'Swift VIP Dedicated 24/7 Priority Support: Not included',
         ];
-      } else if (price === 799 || price === 7990 || nameLower === 'premium') {
-        courierLimit = 15;
-        abandonedLimit = 15;
-        productLimit = 1500;
+      } else if (nameLower === 'premium') {
+        productLimit = pkg.productLimit || 1500;
         tagline = 'Maximum Power, High Volume & VIP Support';
-        description = 'Full-scale power for high catalog volume, triple monthly automations, and Swift VIP support.';
+        description = `Full-scale power for high catalog volume, ${courierLimit} free courier orders/month, and Swift VIP support.`;
         features = [
-          'Up to 699 Products (Maximum Catalog Size)',
-          'Courier Automation: 15 Free Orders / Month (3x Volume)',
-          'Abandoned Checkout: 15 Free Leads / Month (3x Volume)',
+          `Up to ${productLimit} Products (Maximum Catalog Size)`,
+          `Courier Automation: ${courierLimit} Free Orders / Month`,
+          `Abandoned Checkout: ${abandonedLimit} Free Leads / Month`,
           'Online Storefront & All 5 Modern Themes',
           'Mash Eco Subdomain & Custom Domain',
           'Cash on Delivery (COD) & Manual Payments',
