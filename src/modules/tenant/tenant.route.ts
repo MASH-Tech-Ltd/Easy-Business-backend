@@ -16,6 +16,7 @@ router.get('/my-store', authMiddleware('tenant_admin'), TenantController.getMySt
 router.patch('/update-store', authMiddleware('tenant_admin'), upload.single('logo'), TenantController.updateMyStore);
 router.patch('/update-slug', authMiddleware('tenant_admin'), TenantController.updateSlug);
 router.post('/custom-domain', authMiddleware('tenant_admin'), TenantController.addCustomDomain);
+router.delete('/custom-domain', authMiddleware('tenant_admin'), TenantController.removeCustomDomain);
 
 // Super Admin routes
 router.post('/create-tenant', authMiddleware('super_admin'), validateRequest(createTenantValidation), TenantController.createTenant);

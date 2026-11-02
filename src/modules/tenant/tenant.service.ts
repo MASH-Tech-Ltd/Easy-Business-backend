@@ -224,22 +224,25 @@ const getMyStore = async (tenantId: string) => {
   if (store.domainStatus === 'pending' && store.customDomain) {
     try {
       if (config.cloudflare.zoneId && config.cloudflare.apiToken) {
-        const getRes = await axios.get(
-          `https://api.cloudflare.com/client/v4/zones/${config.cloudflare.zoneId}/custom_hostnames?hostname=${store.customDomain}`,
-          {
-            headers: {
-              Authorization: `Bearer ${config.cloudflare.apiToken}`,
-              'Content-Type': 'application/json'
+        const bare = store.customDomain.replace(/^www\./, '').trim().toLowerCase();
+        const candidateHostnames = Array.from(new Set([store.customDomain, `www.${bare}`, bare]));
+
+        for (const host of candidateHostnames) {
+          const getRes = await axios.get(
+            `https://api.cloudflare.com/client/v4/zones/${config.cloudflare.zoneId}/custom_hostnames?hostname=${host}`,
+            {
+              headers: {
+                Authorization: `Bearer ${config.cloudflare.apiToken}`,
+                'Content-Type': 'application/json'
+              }
             }
-          }
-        );
-        
-        const cfData = getRes.data.result[0];
-        if (cfData) {
-          const newStatus = cfData.status === 'active' ? 'active' : 'pending';
-          if (newStatus !== store.domainStatus) {
-            store.domainStatus = newStatus;
+          );
+          const cfData = getRes.data?.result?.[0];
+          if (cfData && cfData.status === 'active') {
+            store.customDomain = cfData.hostname;
+            store.domainStatus = 'active';
             await store.save();
+            break;
           }
         }
       }
@@ -341,17 +344,73 @@ const addCustomDomain = async (tenantId: string, customDomain: string) => {
   if (!customDomain) {
     throw new CustomError(400, 'Custom domain is required');
   }
-  if (customDomain.startsWith('www.')) {
-    customDomain = customDomain.replace(/^www\./, '');
-  }
+
+  // Clean and sanitize input
+  customDomain = customDomain
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/.*$/, '');
 
   // Ensure Cloudflare config exists
   if (!config.cloudflare.zoneId || !config.cloudflare.apiToken) {
     throw new CustomError(500, 'Cloudflare configuration is missing on the server');
   }
 
+  const bare = customDomain.replace(/^www\./, '');
+  const candidateHostnames = Array.from(new Set([customDomain, `www.${bare}`, bare]));
+
+  // First check if this domain (or its www variant) already exists in Cloudflare
   try {
-    // Cloudflare API call to add custom hostname
+    for (const host of candidateHostnames) {
+      const getRes = await axios.get(
+        `https://api.cloudflare.com/client/v4/zones/${config.cloudflare.zoneId}/custom_hostnames?hostname=${host}`,
+        {
+          headers: {
+            Authorization: `Bearer ${config.cloudflare.apiToken}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      const cfData = getRes.data?.result?.[0];
+      if (cfData) {
+        const domainStatus = cfData.status === 'active' ? 'active' : 'pending';
+        const validationRecords = [...(cfData?.ssl?.validation_records || [])];
+        if (cfData?.ownership_verification) {
+          validationRecords.push({
+            txt_name: cfData.ownership_verification.name,
+            txt_value: cfData.ownership_verification.value
+          });
+        }
+        if (cfData?.ownership_verification_http) {
+          validationRecords.push({
+            http_url: cfData.ownership_verification_http.http_url,
+            http_body: cfData.ownership_verification_http.http_body
+          });
+        }
+
+        const updatedStore = await Tenant.findByIdAndUpdate(tenantId, {
+          customDomain: cfData.hostname,
+          domainStatus: domainStatus,
+          sslValidationRecords: validationRecords
+        }, { returnDocument: 'after' });
+
+        if (!updatedStore) throw new CustomError(404, 'Store not found');
+
+        return {
+          store: updatedStore,
+          records: validationRecords,
+          isRetry: true,
+          status: domainStatus
+        };
+      }
+    }
+  } catch (err) {
+    console.error('Error checking existing Cloudflare hostnames:', err);
+  }
+
+  // If not found in Cloudflare, create new custom hostname
+  try {
     const cfResponse = await axios.post(
       `https://api.cloudflare.com/client/v4/zones/${config.cloudflare.zoneId}/custom_hostnames`,
       {
@@ -390,7 +449,6 @@ const addCustomDomain = async (tenantId: string, customDomain: string) => {
       });
     }
 
-    // Database-e domain ebong validation records save korun
     const updatedStore = await Tenant.findByIdAndUpdate(tenantId, {
       customDomain: customDomain,
       domainStatus: 'pending',
@@ -403,18 +461,37 @@ const addCustomDomain = async (tenantId: string, customDomain: string) => {
 
     return {
       store: updatedStore,
-      records: validationRecords
+      records: validationRecords,
+      status: 'pending'
     };
   } catch (error: any) {
-    const errorCode = error.response?.data?.errors?.[0]?.code;
     const errorMessage = error.response?.data?.errors?.[0]?.message || 'Failed to add custom domain via Cloudflare';
+    console.error('Cloudflare Error:', error.response?.data || error.message);
+    throw new CustomError(500, errorMessage);
+  }
+};
 
-    // 81057 is Cloudflare's Duplicate Custom Hostname error code
-    if (errorCode === 81057 || errorMessage.toLowerCase().includes('duplicate')) {
-      try {
-        // Fetch existing custom hostname details to check if it's active now
-        const getRes = await axios.get(
-          `https://api.cloudflare.com/client/v4/zones/${config.cloudflare.zoneId}/custom_hostnames?hostname=${customDomain}`,
+const removeCustomDomain = async (tenantId: string) => {
+  const store = await Tenant.findById(tenantId);
+  if (!store) {
+    throw new CustomError(404, 'Store not found');
+  }
+
+  if (store.customDomain && config.cloudflare.zoneId && config.cloudflare.apiToken) {
+    try {
+      const getRes = await axios.get(
+        `https://api.cloudflare.com/client/v4/zones/${config.cloudflare.zoneId}/custom_hostnames?hostname=${store.customDomain}`,
+        {
+          headers: {
+            Authorization: `Bearer ${config.cloudflare.apiToken}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      const cfData = getRes.data?.result?.[0];
+      if (cfData?.id) {
+        await axios.delete(
+          `https://api.cloudflare.com/client/v4/zones/${config.cloudflare.zoneId}/custom_hostnames/${cfData.id}`,
           {
             headers: {
               Authorization: `Bearer ${config.cloudflare.apiToken}`,
@@ -422,51 +499,18 @@ const addCustomDomain = async (tenantId: string, customDomain: string) => {
             }
           }
         );
-        
-        const cfData = getRes.data.result[0];
-        if (cfData) {
-          const validationRecords = [...(cfData?.ssl?.validation_records || [])];
-          
-          if (cfData?.ownership_verification) {
-            validationRecords.push({
-              txt_name: cfData.ownership_verification.name,
-              txt_value: cfData.ownership_verification.value
-            });
-          }
-
-          if (cfData?.ownership_verification_http) {
-            validationRecords.push({
-              http_url: cfData.ownership_verification_http.http_url,
-              http_body: cfData.ownership_verification_http.http_body
-            });
-          }
-          // Cloudflare statuses: 'active', 'pending', 'moved', 'deleted'
-          const domainStatus = cfData.status === 'active' ? 'active' : 'pending';
-
-          const updatedStore = await Tenant.findByIdAndUpdate(tenantId, {
-            customDomain: customDomain,
-            domainStatus: domainStatus,
-            sslValidationRecords: validationRecords
-          }, { returnDocument: 'after' });
-
-          if (!updatedStore) throw new CustomError(404, 'Store not found');
-
-          return {
-            store: updatedStore,
-            records: validationRecords,
-            isRetry: true,
-            status: domainStatus
-          };
-        }
-      } catch (err) {
-        console.error('Failed to fetch existing hostname details', err);
       }
-      throw new CustomError(400, 'Domain verification is already in progress. Please check your DNS records and wait a few minutes.');
+    } catch (err) {
+      console.error('Failed to delete Cloudflare custom hostname:', err);
     }
-
-    console.error('Cloudflare Error:', error.response?.data || error.message);
-    throw new CustomError(500, errorMessage);
   }
+
+  (store as any).customDomain = undefined;
+  (store as any).domainStatus = undefined;
+  store.sslValidationRecords = [];
+  await store.save();
+
+  return store;
 };
 
 const getStoreInfoByDomain = async (domain: string) => {
@@ -718,6 +762,7 @@ export const TenantService = {
   updateMyStore,
   updateSlug,
   addCustomDomain,
+  removeCustomDomain,
   getStoreInfoByDomain,
   updateTenant,
   getTenantMetrics,

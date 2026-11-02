@@ -109,6 +109,12 @@ const deleteTenant = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 200, 'Tenant deleted successfully', result);
 });
 
+const removeCustomDomain = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = (req as any).user.tenantId;
+  const result = await TenantService.removeCustomDomain(tenantId);
+  ApiResponse.sendSuccess(res, 200, 'Custom domain disconnected successfully', result);
+});
+
 export const TenantController = {
   createTenant,
   getAllTenants,
@@ -116,6 +122,7 @@ export const TenantController = {
   updateMyStore,
   updateSlug,
   addCustomDomain,
+  removeCustomDomain,
   getStoreInfoByDomain,
   updateTenant,
   getTenantMetrics,
