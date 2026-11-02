@@ -352,6 +352,12 @@ const addCustomDomain = async (tenantId: string, customDomain: string) => {
     .replace(/^https?:\/\//, '')
     .replace(/\/.*$/, '');
 
+  // Behind-the-scenes: always normalize to www. so apex domains don't cause
+  // CNAME mismatch / Cloudflare pending-forever issues.
+  if (!customDomain.startsWith('www.')) {
+    customDomain = `www.${customDomain}`;
+  }
+
   // Ensure Cloudflare config exists
   if (!config.cloudflare.zoneId || !config.cloudflare.apiToken) {
     throw new CustomError(500, 'Cloudflare configuration is missing on the server');
