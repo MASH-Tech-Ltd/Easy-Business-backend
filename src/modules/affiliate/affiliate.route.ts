@@ -38,6 +38,8 @@ router.post(
   AffiliateController.login
 );
 
+router.post('/refresh-token', AffiliateController.refreshToken);
+
 router.post('/logout', AffiliateController.logout);
 
 // ─────────────────────────────────────────────────────────────────────────────

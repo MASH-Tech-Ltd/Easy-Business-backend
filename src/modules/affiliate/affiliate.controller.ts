@@ -40,20 +40,16 @@ const register = asyncHandler(async (req: Request, res: Response) => {
   });
 
   const isProd = process.env.NODE_ENV === 'production';
-  res.cookie('_affiliate_x_tkn', result.accessToken, {
+  const cookieOptions = {
     httpOnly: true,
     secure: isProd,
-    sameSite: isProd ? 'none' : 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    sameSite: (isProd ? 'none' : 'lax') as 'none' | 'lax',
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days persistent session
     path: '/',
-  });
-  res.cookie('_affiliate_r_tkn', result.refreshToken, {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: isProd ? 'none' : 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-    path: '/',
-  });
+  };
+
+  res.cookie('_affiliate_x_tkn', result.accessToken, cookieOptions);
+  res.cookie('_affiliate_r_tkn', result.refreshToken, cookieOptions);
 
   ApiResponse.sendSuccess(res, 201, 'Affiliate Partner account created successfully', result);
 });
@@ -67,22 +63,46 @@ const login = asyncHandler(async (req: Request, res: Response) => {
   });
 
   const isProd = process.env.NODE_ENV === 'production';
-  res.cookie('_affiliate_x_tkn', result.accessToken, {
+  const cookieOptions = {
     httpOnly: true,
     secure: isProd,
-    sameSite: isProd ? 'none' : 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    sameSite: (isProd ? 'none' : 'lax') as 'none' | 'lax',
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days persistent session
     path: '/',
-  });
-  res.cookie('_affiliate_r_tkn', result.refreshToken, {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: isProd ? 'none' : 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-    path: '/',
-  });
+  };
+
+  res.cookie('_affiliate_x_tkn', result.accessToken, cookieOptions);
+  res.cookie('_affiliate_r_tkn', result.refreshToken, cookieOptions);
 
   ApiResponse.sendSuccess(res, 200, 'Logged in successfully', result);
+});
+
+const refreshToken = asyncHandler(async (req: Request, res: Response) => {
+  const token =
+    req.cookies?._affiliate_r_tkn ||
+    req.body?.refreshToken ||
+    req.cookies?.refreshToken;
+
+  const result = await AffiliateService.refreshToken(token);
+
+  const isProd = process.env.NODE_ENV === 'production';
+  const cookieOptions = {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: (isProd ? 'none' : 'lax') as 'none' | 'lax',
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days persistent session
+    path: '/',
+  };
+
+  res.cookie('_affiliate_x_tkn', result.accessToken, cookieOptions);
+  res.cookie('_affiliate_r_tkn', result.refreshToken, cookieOptions);
+
+  ApiResponse.sendSuccess(res, 200, 'Affiliate token refreshed successfully', {
+    accessToken: result.accessToken,
+    refreshToken: result.refreshToken,
+    user: result.user,
+    affiliate: result.affiliate,
+  });
 });
 
 const logout = asyncHandler(async (_req: Request, res: Response) => {
@@ -317,6 +337,7 @@ export const AffiliateController = {
   trackClick,
   register,
   login,
+  refreshToken,
   logout,
   getMe,
   getOverview,

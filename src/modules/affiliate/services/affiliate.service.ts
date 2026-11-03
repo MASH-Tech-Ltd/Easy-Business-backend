@@ -353,6 +353,126 @@ const loginAffiliate = async (params: {
   };
 };
 
+/**
+ * Refreshes an Affiliate Partner's access token using a valid refresh token.
+ * Features concurrent request grace window & family token rotation.
+ */
+const refreshToken = async (rawRefreshToken: string) => {
+  if (!rawRefreshToken || typeof rawRefreshToken !== 'string') {
+    throw new CustomError(401, 'Refresh token is required');
+  }
+
+  let decoded: any;
+  try {
+    decoded = jwt.verify(rawRefreshToken, config.jwt.refreshSecret as string);
+  } catch (err) {
+    throw new CustomError(401, 'Invalid or expired refresh token');
+  }
+
+  const [user, affiliate] = await Promise.all([
+    User.findById(decoded._id),
+    Affiliate.findOne({ userId: decoded._id }),
+  ]);
+
+  if (!user || !affiliate) {
+    throw new CustomError(401, 'Affiliate account not found');
+  }
+
+  if (affiliate.status === 'deactivated') {
+    throw new CustomError(403, 'Your affiliate account has been deactivated.');
+  }
+
+  const tokenExists =
+    user.refreshTokens && user.refreshTokens.some((rt) => rt.token === rawRefreshToken);
+
+  if (!tokenExists) {
+    const now = Date.now();
+    const tokenIssuedAt = (decoded.iat || 0) * 1000;
+    const isRecentlyIssued = now - tokenIssuedAt < 30_000;
+
+    if (isRecentlyIssued && decoded.familyId) {
+      const familyToken =
+        user.refreshTokens && user.refreshTokens.find((rt) => rt.familyId === decoded.familyId);
+      if (familyToken) {
+        const jwtPayload = {
+          _id: user._id,
+          email: user.email,
+          role: user.role,
+          affiliateId: affiliate._id,
+          familyId: decoded.familyId,
+        };
+        const newAccessToken = jwt.sign(jwtPayload, config.jwt.accessSecret, {
+          expiresIn: config.jwt.accessExpiresIn as any,
+        });
+        return {
+          accessToken: newAccessToken,
+          refreshToken: familyToken.token,
+          user: {
+            ...user.toObject(),
+            affiliateId: affiliate._id,
+            affiliateCode: affiliate.affiliateCode,
+            affiliateStatus: affiliate.status,
+          },
+          affiliate,
+        };
+      }
+    }
+
+    if (decoded.familyId) {
+      await User.updateOne(
+        { _id: user._id },
+        { $pull: { refreshTokens: { familyId: decoded.familyId } } }
+      );
+    }
+    throw new CustomError(401, 'Session expired. Please log in again.');
+  }
+
+  const familyId = decoded.familyId || crypto.randomBytes(8).toString('hex');
+  const jwtPayload = {
+    _id: user._id,
+    email: user.email,
+    role: user.role,
+    affiliateId: affiliate._id,
+    familyId,
+  };
+
+  const newAccessToken = jwt.sign(jwtPayload, config.jwt.accessSecret, {
+    expiresIn: config.jwt.accessExpiresIn as any,
+  });
+
+  const newRefreshToken = jwt.sign(jwtPayload, config.jwt.refreshSecret, {
+    expiresIn: config.jwt.refreshExpiresIn as any,
+  });
+
+  await User.updateOne(
+    { _id: user._id },
+    {
+      $push: {
+        refreshTokens: {
+          $each: [{ token: newRefreshToken, familyId }],
+          $slice: -5,
+        },
+      },
+    }
+  );
+
+  const userObj = user.toObject();
+  delete userObj.password;
+  delete userObj.refreshTokens;
+
+  return {
+    accessToken: newAccessToken,
+    refreshToken: newRefreshToken,
+    user: {
+      ...userObj,
+      affiliateId: affiliate._id,
+      affiliateCode: affiliate.affiliateCode,
+      affiliateStatus: affiliate.status,
+    },
+    affiliate,
+  };
+};
+
 const buildMerchantReferralLink = (affiliateCode: string): string => {
   const configuredRegisterUrl = process.env.MERCHANT_REGISTER_URL?.trim();
   if (configuredRegisterUrl) {
@@ -816,6 +936,7 @@ export const AffiliateService = {
   getPublicConfig,
   registerAffiliate,
   loginAffiliate,
+  refreshToken,
   getMe,
   getOverview,
   updateProfile,

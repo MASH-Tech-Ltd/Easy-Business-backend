@@ -165,7 +165,7 @@ const resetPassword = asyncHandler(async (req: Request, res: Response) => {
 });
 
 const refreshToken = asyncHandler(async (req: Request, res: Response) => {
-  const token = req.cookies._super_r_tkn || req.cookies._merchant_r_tkn || req.cookies._r_sess_tkn || req.cookies.refreshToken;
+  const token = req.cookies._super_r_tkn || req.cookies._merchant_r_tkn || req.cookies._affiliate_r_tkn || req.cookies._r_sess_tkn || req.cookies.refreshToken;
   const result = await AuthService.refreshToken(token);
 
   const isSuperAdmin = result.user.role === 'super_admin';
