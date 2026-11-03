@@ -1,3 +1,4 @@
+import { AnalyticsService } from './analytics.service';
 import { Request, Response } from "express";
 import { Order } from "../order/order.model";
 import { Customer } from "../customer/customer.model";
@@ -639,10 +640,98 @@ const getPublicStats = asyncHandler(async (req: Request, res: Response) => {
   });
 });
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Complete Product & Store Analytics Controller Methods
+// ─────────────────────────────────────────────────────────────────────────────
+
+const trackEvents = asyncHandler(async (req: Request, res: Response) => {
+  const ipAddress = getClientIp(req);
+  const userAgent = req.headers['user-agent'] || 'Unknown';
+
+  const result = await AnalyticsService.trackEvents(req.body, {
+    ipAddress,
+    userAgent,
+  });
+
+  ApiResponse.sendSuccess(res, 200, 'Analytics events processed successfully', result);
+});
+
+const getMerchantOverview = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = (req as any).user.tenantId;
+  const result = await AnalyticsService.getMerchantOverview(tenantId, req.query);
+  ApiResponse.sendSuccess(res, 200, 'Merchant analytics overview retrieved', result);
+});
+
+const getMerchantTimeline = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = (req as any).user.tenantId;
+  const result = await AnalyticsService.getMerchantTimeline(tenantId, req.query);
+  ApiResponse.sendSuccess(res, 200, 'Merchant analytics timeline retrieved', result);
+});
+
+const getMerchantTopProducts = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = (req as any).user.tenantId;
+  const result = await AnalyticsService.getMerchantTopProducts(tenantId, req.query);
+  ApiResponse.sendSuccess(res, 200, 'Top products retrieved', result);
+});
+
+const getMerchantProducts = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = (req as any).user.tenantId;
+  const result = await AnalyticsService.getMerchantProducts(tenantId, req.query);
+  ApiResponse.sendSuccess(res, 200, 'Product analytics retrieved', result.data, result.meta);
+});
+
+const getAdminOverview = asyncHandler(async (req: Request, res: Response) => {
+  const result = await AnalyticsService.getAdminOverview(req.query);
+  ApiResponse.sendSuccess(res, 200, 'Global analytics overview retrieved', result);
+});
+
+const getAdminMerchants = asyncHandler(async (req: Request, res: Response) => {
+  const result = await AnalyticsService.getAdminMerchants(req.query);
+  ApiResponse.sendSuccess(res, 200, 'Merchant-wise analytics retrieved', result.data, result.meta);
+});
+
+const getAdminMerchantDetails = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = req.params.tenantId as string;
+  const [overview, timeline, topProducts] = await Promise.all([
+    AnalyticsService.getMerchantOverview(tenantId, req.query),
+    AnalyticsService.getMerchantTimeline(tenantId, req.query),
+    AnalyticsService.getMerchantTopProducts(tenantId, req.query),
+  ]);
+
+  ApiResponse.sendSuccess(res, 200, 'Merchant details analytics retrieved', {
+    overview,
+    timeline,
+    topProducts,
+  });
+});
+
+const getAdminMerchantProducts = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = req.params.tenantId as string;
+  const result = await AnalyticsService.getMerchantProducts(tenantId, req.query);
+  ApiResponse.sendSuccess(res, 200, 'Merchant products analytics retrieved', result.data, result.meta);
+});
+
+const getAdminMerchantTimeline = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = req.params.tenantId as string;
+  const result = await AnalyticsService.getMerchantTimeline(tenantId, req.query);
+  ApiResponse.sendSuccess(res, 200, 'Merchant timeline retrieved', result);
+});
+
 export const AnalyticsController = {
   recordVisit,
   getDashboardStats,
   getSuperAdminStats,
   getDashboardSummary,
   getPublicStats,
+  trackEvents,
+  getMerchantOverview,
+  getMerchantTimeline,
+  getMerchantTopProducts,
+  getMerchantProducts,
+  getAdminOverview,
+  getAdminMerchants,
+  getAdminMerchantDetails,
+  getAdminMerchantProducts,
+  getAdminMerchantTimeline,
 };

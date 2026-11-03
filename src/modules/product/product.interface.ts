@@ -38,6 +38,8 @@ export interface IProduct extends Document {
   tenantId: Types.ObjectId;
   stock?: number;
   salesCount?: number;
+  impressionsCount?: number;
+  clicksCount?: number;
   hasVariants?: boolean;
   variants?: IProductVariant[];
 }
@@ -57,5 +59,7 @@ export const ALLOWED_SORT_FIELDS = [
   'discountedPrice',
   'originalPrice',
   'stock',
-  'salesCount'
+  'salesCount',
+  'impressionsCount',
+  'clicksCount'
 ];
