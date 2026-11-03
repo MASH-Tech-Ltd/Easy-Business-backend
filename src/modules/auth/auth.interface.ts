@@ -15,7 +15,13 @@ export interface IUser extends Document {
   };
   passwordResetToken?: string | undefined;
   passwordResetExpires?: Date | undefined;
-  refreshTokens?: { token: string; familyId: string }[];
+  refreshTokens?: {
+    token: string;
+    familyId?: string;
+    prevToken?: string;
+    rotatedAt?: Date;
+    expiresAt?: Date;
+  }[];
   twoFactorEnabled?: boolean;
   twoFactorSecret?: string;
   twoFactorTempSecret?: string;

@@ -21,7 +21,10 @@ const userSchema = new Schema<IUser>(
     passwordResetExpires: { type: Date },
     refreshTokens: [{ 
       token: { type: String },
-      familyId: { type: String }
+      familyId: { type: String },
+      prevToken: { type: String },
+      rotatedAt: { type: Date },
+      expiresAt: { type: Date }
     }],
     twoFactorEnabled: { type: Boolean, default: false },
     twoFactorSecret: { type: String, select: false },

@@ -558,29 +558,36 @@ const refreshToken = async (token: string) => {
     // If the token is valid (verified by jwt.verify above) and was issued within the last 30 seconds,
     // it is a parallel in-flight request from the same browser session. Return a fresh access token for the active session
     // instead of triggering false-positive security revocation.
-    const now = Date.now();
+    const familyToken = user.refreshTokens && user.refreshTokens.find(rt => rt.familyId === decoded.familyId);
+    
+    // RACE CONDITION & BURST GRACE WINDOW:
+    // If request 1 rotated the token milliseconds ago, request 2 arriving with the same previous token
+    // within 30 seconds should receive the active rotated token without triggering session revocation.
+    const isRecentlyRotated = Boolean(
+      familyToken &&
+      ((familyToken as any).prevToken === token) &&
+      (familyToken as any).rotatedAt &&
+      (Date.now() - new Date((familyToken as any).rotatedAt).getTime() < 30_000)
+    );
     const tokenIssuedAt = (decoded.iat || 0) * 1000;
-    const isRecentlyIssued = (now - tokenIssuedAt) < 30_000; // 30-second grace window for concurrent request bursts
+    const isRecentlyIssued = (Date.now() - tokenIssuedAt) < 30_000;
 
-    if (isRecentlyIssued && decoded.familyId) {
-      const familyToken = user.refreshTokens && user.refreshTokens.find(rt => rt.familyId === decoded.familyId);
-      if (familyToken) {
-        const jwtPayload = {
-          _id: user._id,
-          email: user.email,
-          role: user.role,
-          tenantId: user.tenantId,
-          familyId: decoded.familyId,
-        };
-        const newAccessToken = jwt.sign(jwtPayload, config.jwt.accessSecret, {
-          expiresIn: config.jwt.accessExpiresIn as any,
-        });
-        return {
-          accessToken: newAccessToken,
-          refreshToken: familyToken.token,
-          user,
-        };
-      }
+    if ((isRecentlyRotated || isRecentlyIssued) && decoded.familyId && familyToken) {
+      const jwtPayload = {
+        _id: user._id,
+        email: user.email,
+        role: user.role,
+        tenantId: user.tenantId,
+        familyId: decoded.familyId,
+      };
+      const newAccessToken = jwt.sign(jwtPayload, config.jwt.accessSecret, {
+        expiresIn: config.jwt.accessExpiresIn as any,
+      });
+      return {
+        accessToken: newAccessToken,
+        refreshToken: familyToken.token,
+        user,
+      };
     }
 
     // Actual stolen token reuse (outside 30s grace window) -> revoke session for that device family
@@ -618,8 +625,14 @@ const refreshToken = async (token: string) => {
     {
       $push: {
         refreshTokens: {
-          $each: [{ token: newRefreshToken, familyId: jwtPayload.familyId }],
-          $slice: -3 // Allow up to 4 active devices per user
+          $each: [{
+            token: newRefreshToken,
+            familyId: jwtPayload.familyId,
+            prevToken: token,
+            rotatedAt: new Date(),
+            expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+          }],
+          $slice: -3
         }
       }
     }

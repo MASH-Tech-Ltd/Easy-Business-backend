@@ -188,8 +188,14 @@ const registerAffiliate = async (params: {
     {
       $push: {
         refreshTokens: {
-          token: refreshToken,
-          familyId,
+          $each: [
+            {
+              token: refreshToken,
+              familyId,
+              expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+            },
+          ],
+          $slice: -3,
         },
       },
     }
@@ -343,8 +349,14 @@ const loginAffiliate = async (params: {
     {
       $push: {
         refreshTokens: {
-          token: refreshToken,
-          familyId,
+          $each: [
+            {
+              token: refreshToken,
+              familyId,
+              expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+            },
+          ],
+          $slice: -3,
         },
       },
     }
@@ -407,14 +419,20 @@ const refreshToken = async (rawRefreshToken: string) => {
     user.refreshTokens && user.refreshTokens.some((rt) => rt.token === rawRefreshToken);
 
   if (!tokenExists) {
-    const now = Date.now();
-    const tokenIssuedAt = (decoded.iat || 0) * 1000;
-    const isRecentlyIssued = now - tokenIssuedAt < 30_000;
+    const familyToken =
+      user.refreshTokens &&
+      user.refreshTokens.find((rt: any) => rt.familyId === decoded.familyId);
 
-    if (isRecentlyIssued && decoded.familyId) {
-      const familyToken =
-        user.refreshTokens && user.refreshTokens.find((rt) => rt.familyId === decoded.familyId);
-      if (familyToken) {
+    // TOKEN ROTATION RACE CONDITION & BURST GRACE WINDOW:
+    // If request 1 consumed rawRefreshToken milliseconds ago, request 2 arriving with the same rawRefreshToken
+    // matches familyToken.prevToken. If within 30 seconds of rotation, return active rotated token safely!
+    if (familyToken && (familyToken as any).prevToken === rawRefreshToken) {
+      const rotatedAtMs = (familyToken as any).rotatedAt
+        ? new Date((familyToken as any).rotatedAt).getTime()
+        : 0;
+      const isWithinGraceWindow = Date.now() - rotatedAtMs < 30_000;
+
+      if (isWithinGraceWindow) {
         const jwtPayload = {
           _id: user._id,
           email: user.email,
@@ -439,13 +457,14 @@ const refreshToken = async (rawRefreshToken: string) => {
       }
     }
 
+    // Actual stolen token reuse (outside 30s grace window) -> revoke session for that device family
     if (decoded.familyId) {
       await User.updateOne(
         { _id: user._id },
         { $pull: { refreshTokens: { familyId: decoded.familyId } } }
       );
     }
-    throw new CustomError(401, 'Session expired. Please log in again.');
+    throw new CustomError(401, 'Session expired or token reuse detected. Please log in again.');
   }
 
   const familyId = decoded.familyId || crypto.randomBytes(8).toString('hex');
@@ -465,7 +484,7 @@ const refreshToken = async (rawRefreshToken: string) => {
     expiresIn: config.jwt.refreshExpiresIn as any,
   });
 
-  // Consume old token and rotate in the new one (allowing up to 3 active device sessions)
+  // Consume old token and rotate in the new one, saving prevToken & rotatedAt for graceful concurrent requests
   await User.updateOne(
     { _id: user._id },
     { $pull: { refreshTokens: { token: rawRefreshToken } } }
@@ -476,7 +495,15 @@ const refreshToken = async (rawRefreshToken: string) => {
     {
       $push: {
         refreshTokens: {
-          $each: [{ token: newRefreshToken, familyId }],
+          $each: [
+            {
+              token: newRefreshToken,
+              familyId,
+              prevToken: rawRefreshToken,
+              rotatedAt: new Date(),
+              expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+            },
+          ],
           $slice: -3,
         },
       },
