@@ -112,6 +112,12 @@ const getReferrals = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 200, 'Affiliate referrals retrieved', result);
 });
 
+const getReferralById = asyncHandler(async (req: Request, res: Response) => {
+  const affiliate = (req as any).affiliate;
+  const result = await AffiliateReferralService.getAffiliateReferralById(affiliate._id, req.params.id as string);
+  ApiResponse.sendSuccess(res, 200, 'Referred merchant details retrieved', result);
+});
+
 const getCommissions = asyncHandler(async (req: Request, res: Response) => {
   const affiliate = (req as any).affiliate;
   const result = await AffiliateCommissionService.getAffiliateCommissions(affiliate._id, req.query);
@@ -315,6 +321,7 @@ export const AffiliateController = {
   getMe,
   getOverview,
   getReferrals,
+  getReferralById,
   getCommissions,
   getLedger,
   getWithdrawals,

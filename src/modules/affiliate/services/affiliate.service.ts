@@ -440,6 +440,8 @@ const getOverview = async (affiliateId: string | Types.ObjectId, query: any = {}
   ] = await Promise.all([
     Affiliate.findById(affObjId).populate('userId', 'name email phone avatar').lean(),
     AffiliateReferral.find({ affiliateId: affObjId })
+      .populate('referredTenantId', 'name slug domain customDomain status')
+      .populate('referredMerchantUserId', 'name email phone status isActive')
       .sort({ registeredAt: -1 })
       .skip(refPage.skip)
       .limit(refPage.limit)

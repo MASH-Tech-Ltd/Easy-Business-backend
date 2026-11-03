@@ -65,6 +65,13 @@ router.get(
 );
 
 router.get(
+  '/referrals/:id',
+  authMiddleware('affiliate_partner'),
+  requireAffiliatePartner({ allowReadOnlyWhenSuspended: true }),
+  AffiliateController.getReferralById
+);
+
+router.get(
   '/commissions',
   authMiddleware('affiliate_partner'),
   requireAffiliatePartner({ allowReadOnlyWhenSuspended: true }),

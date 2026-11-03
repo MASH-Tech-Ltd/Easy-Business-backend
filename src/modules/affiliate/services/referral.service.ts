@@ -1,7 +1,7 @@
 import { ClientSession, Types } from 'mongoose';
 import CustomError from '../../../helpers/CustomError';
 import { paginationHelper } from '../../../helpers/paginationHelper';
-import { Affiliate, AffiliateReferral } from '../affiliate.model';
+import { Affiliate, AffiliateReferral, AffiliateCommission } from '../affiliate.model';
 import { User } from '../../auth/auth.model';
 import { Tenant } from '../../tenant/tenant.model';
 import { Subscription } from '../../subscription/subscription.model';
@@ -10,6 +10,7 @@ import {
   getAffiliateGlobalConfig,
   recordAffiliateAuditLog,
   emitAffiliateSocketEvent,
+  round2,
 } from '../affiliate.utils';
 import { AFFILIATE_SOCKET_EVENTS } from '../affiliate.constants';
 import { notificationService } from '../../notification/notification.service';
@@ -233,8 +234,8 @@ const getAffiliateReferrals = async (affiliateId: string | Types.ObjectId, query
 
   const [referrals, total, allForStats] = await Promise.all([
     AffiliateReferral.find(filter)
-      .populate('referredTenantId', 'name slug domain customDomain status')
-      .populate('referredMerchantUserId', 'name email phone')
+      .populate('referredTenantId', 'name slug domain customDomain status contactPhone contactEmail')
+      .populate('referredMerchantUserId', 'name email phone status isActive')
       .sort(sortCriteria)
       .skip(skip)
       .limit(limit)
@@ -243,30 +244,70 @@ const getAffiliateReferrals = async (affiliateId: string | Types.ObjectId, query
     AffiliateReferral.find({ affiliateId: new Types.ObjectId(affiliateId.toString()) }).lean(),
   ]);
 
-  // Enrich with live eligibility status & active subscription check
-  const tenantIds = referrals.map((r: any) => r.referredTenantId?._id || r.referredTenantId).filter(Boolean);
-  const activeSubs = await Subscription.find({
-    tenantId: { $in: tenantIds },
-    status: 'active',
-    endDate: { $gt: now },
-  })
-    .populate('packageId', 'name price billingCycle')
-    .sort({ endDate: -1 })
-    .lean();
+  const tenantIds = referrals
+    .map((r: any) => r.referredTenantId?._id || r.referredTenantId)
+    .filter(Boolean);
+  const referralIds = referrals.map((r: any) => r._id);
 
-  const subMap = new Map<string, any>();
-  for (const s of activeSubs) {
+  // Fetch all subscriptions and commissions for these tenants and referrals
+  const [allSubs, allCommissions] = await Promise.all([
+    Subscription.find({ tenantId: { $in: tenantIds } })
+      .populate('packageId', 'name price billingCycle durationDays')
+      .sort({ createdAt: -1 })
+      .lean(),
+    AffiliateCommission.find({ referralId: { $in: referralIds } })
+      .populate({
+        path: 'subscriptionId',
+        select: 'startDate endDate packageId paidAmount status',
+        populate: { path: 'packageId', select: 'name price billingCycle durationDays' },
+      })
+      .sort({ createdAt: 1 })
+      .lean(),
+  ]);
+
+  // Group subscriptions by tenantId
+  const subMap = new Map<string, any[]>();
+  for (const s of allSubs) {
     const tId = s.tenantId.toString();
-    if (!subMap.has(tId)) subMap.set(tId, s);
+    if (!subMap.has(tId)) subMap.set(tId, []);
+    subMap.get(tId)!.push(s);
   }
+
+  // Group commissions by referralId
+  const commMap = new Map<string, any[]>();
+  for (const c of allCommissions) {
+    const rId = c.referralId.toString();
+    if (!commMap.has(rId)) commMap.set(rId, []);
+    commMap.get(rId)!.push(c);
+  }
+
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
 
   const enriched = referrals.map((ref: any) => {
     const tId = (ref.referredTenantId?._id || ref.referredTenantId)?.toString();
-    const liveSub = tId ? subMap.get(tId) : null;
+    const rId = ref._id.toString();
+
+    const subsForTenant = tId ? subMap.get(tId) || [] : [];
+    const commissionsForRef = commMap.get(rId) || [];
+
+    const tenant: any = ref.referredTenantId;
+    const merchantUser: any = ref.referredMerchantUserId;
+
+    const tenantStatus = tenant?.status || 'active';
+    const userIsActive = merchantUser?.isActive !== false && merchantUser?.status !== 'suspended' && merchantUser?.status !== 'inactive';
+
+    // Find active or latest subscription
+    const activeSub =
+      subsForTenant.find((s: any) => s.status === 'active' && new Date(s.endDate) > now) ||
+      subsForTenant[0] ||
+      null;
 
     let computedSubStatus = ref.subscriptionStatus;
-    if (liveSub) {
-      computedSubStatus = liveSub.isTrial ? 'trial' : 'active';
+    if (activeSub) {
+      computedSubStatus = activeSub.isTrial ? 'trial' : 'active';
     }
 
     let computedEligibility = ref.eligibilityStatus;
@@ -278,13 +319,116 @@ const getAffiliateReferrals = async (affiliateId: string | Types.ObjectId, query
       computedEligibility = 'expired';
     }
 
+    const isMerchantActive =
+      tenantStatus === 'active' &&
+      userIsActive &&
+      (computedSubStatus === 'active' || computedSubStatus === 'trial');
+
+    const daysRemainingInWindow =
+      computedEligibility === 'active' && ref.eligibilityEndDate
+        ? Math.max(
+            0,
+            Math.ceil(
+              (new Date(ref.eligibilityEndDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+            )
+          )
+        : 0;
+
+    // Build monthly history breakdown
+    const monthlyHistory = commissionsForRef.map((comm: any, idx: number) => {
+      const commDate = new Date(comm.createdAt || Date.now());
+      const monthLabel = `${monthNames[commDate.getMonth()]} ${commDate.getFullYear()}`;
+      const subInfo: any = comm.subscriptionId;
+      const pkgInfo: any = subInfo?.packageId;
+      const packageName = pkgInfo?.name || comm.paymentDescription || 'Standard Subscription';
+      const billingCycle = pkgInfo?.billingCycle || 'monthly';
+
+      return {
+        _id: comm._id ? comm._id.toString() : `comm_${idx}`,
+        paymentNumber: idx + 1,
+        monthLabel,
+        packageName,
+        billingCycle,
+        periodStart: comm.eligibilityPeriodStart || subInfo?.startDate || comm.createdAt,
+        periodEnd: comm.eligibilityPeriodEnd || subInfo?.endDate || null,
+        paidAt: comm.createdAt,
+        originalPackagePrice: round2(comm.originalPackagePrice || 0),
+        actualAmountPaid: round2(comm.actualAmountPaid || 0),
+        commissionRate: comm.commissionRate ?? (ref.commissionSnapshot?.commissionRate || 30),
+        commissionAmount: round2(comm.commissionAmount || 0),
+        status: comm.status || 'available',
+        paymentDescription: comm.paymentDescription || `${packageName} payment`,
+      };
+    });
+
+    // Build 6-Month recurring window tracker slots (Months 1 to 6)
+    const durationMonths = Number(ref.commissionSnapshot?.durationMonths || 6);
+    const sixMonthSlots = [];
+    for (let slot = 1; slot <= durationMonths; slot++) {
+      const matchedHistory = monthlyHistory[slot - 1];
+      if (matchedHistory) {
+        sixMonthSlots.push({
+          slotNumber: slot,
+          slotName: `Month ${slot}`,
+          monthLabel: matchedHistory.monthLabel,
+          packageName: matchedHistory.packageName,
+          billingCycle: matchedHistory.billingCycle,
+          amountPaid: matchedHistory.actualAmountPaid,
+          commissionAmount: matchedHistory.commissionAmount,
+          commissionRate: matchedHistory.commissionRate,
+          paidAt: matchedHistory.paidAt,
+          status: 'paid',
+        });
+      } else {
+        const isWindowActive = computedEligibility === 'active';
+        const isWindowExpired = computedEligibility === 'expired';
+        sixMonthSlots.push({
+          slotNumber: slot,
+          slotName: `Month ${slot}`,
+          monthLabel: `Eligible Month ${slot}`,
+          packageName: (activeSub?.packageId as any)?.name || 'Standard Plan',
+          billingCycle: (activeSub?.packageId as any)?.billingCycle || 'monthly',
+          amountPaid: 0,
+          commissionAmount: 0,
+          commissionRate: ref.commissionSnapshot?.commissionRate || 30,
+          paidAt: null,
+          status: isWindowActive ? 'upcoming' : isWindowExpired ? 'expired' : 'pending',
+        });
+      }
+    }
+
+    const currentPkgName = activeSub?.isTrial
+      ? 'Free Trial'
+      : (activeSub?.packageId as any)?.name ||
+        (computedSubStatus === 'active' ? 'Standard Plan' : 'No Active Plan');
+
     return {
       ...ref,
       subscriptionStatus: computedSubStatus,
       eligibilityStatus: computedEligibility,
-      currentPlanName: liveSub?.isTrial
-        ? 'Free Trial'
-        : (liveSub?.packageId as any)?.name || (computedSubStatus === 'active' ? 'Paid Plan' : 'No Active Plan'),
+      isMerchantActive,
+      merchantName: merchantUser?.name || ref.referredStoreName || 'Merchant',
+      merchantEmail: merchantUser?.email || ref.referredEmail || '',
+      merchantPhone: merchantUser?.phone || tenant?.contactPhone || '',
+      storeName: ref.referredStoreName || tenant?.name || 'Store',
+      storeStatus: tenantStatus,
+      storeSlug: tenant?.slug || '',
+      storeDomain: tenant?.customDomain || tenant?.domain || tenant?.slug || '',
+      currentPackage: {
+        name: currentPkgName,
+        price: (activeSub?.packageId as any)?.price ?? (activeSub?.paidAmount ?? 0),
+        billingCycle: (activeSub?.packageId as any)?.billingCycle || 'monthly',
+        startDate: activeSub?.startDate || null,
+        endDate: activeSub?.endDate || null,
+        isTrial: Boolean(activeSub?.isTrial),
+        status: activeSub?.status || computedSubStatus,
+      },
+      currentPlanName: currentPkgName,
+      daysRemainingInWindow,
+      commissionRate: ref.commissionSnapshot?.commissionRate ?? 30,
+      durationMonths,
+      monthlyHistory,
+      sixMonthSlots,
     };
   });
 
@@ -330,10 +474,194 @@ const getAffiliateReferrals = async (affiliateId: string | Types.ObjectId, query
   };
 };
 
+/**
+ * Retrieves full details for a single referred merchant by ID.
+ */
+const getAffiliateReferralById = async (
+  affiliateId: string | Types.ObjectId,
+  referralId: string | Types.ObjectId
+) => {
+  const now = new Date();
+  const referral = await AffiliateReferral.findOne({
+    _id: new Types.ObjectId(referralId.toString()),
+    affiliateId: new Types.ObjectId(affiliateId.toString()),
+  })
+    .populate('referredTenantId', 'name slug domain customDomain status contactPhone contactEmail')
+    .populate('referredMerchantUserId', 'name email phone status isActive')
+    .lean();
+
+  if (!referral) {
+    throw new CustomError(404, 'Referred merchant not found');
+  }
+
+  const tenantId = referral.referredTenantId?._id || referral.referredTenantId;
+
+  const [subsForTenant, commissionsForRef] = await Promise.all([
+    tenantId
+      ? Subscription.find({ tenantId })
+          .populate('packageId', 'name price billingCycle durationDays')
+          .sort({ createdAt: -1 })
+          .lean()
+      : [],
+    AffiliateCommission.find({ referralId: referral._id })
+      .populate({
+        path: 'subscriptionId',
+        select: 'startDate endDate packageId paidAmount status',
+        populate: { path: 'packageId', select: 'name price billingCycle durationDays' },
+      })
+      .sort({ createdAt: 1 })
+      .lean(),
+  ]);
+
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+
+  const tenant: any = referral.referredTenantId;
+  const merchantUser: any = referral.referredMerchantUserId;
+
+  const tenantStatus = tenant?.status || 'active';
+  const userIsActive =
+    merchantUser?.isActive !== false &&
+    merchantUser?.status !== 'suspended' &&
+    merchantUser?.status !== 'inactive';
+
+  const activeSub =
+    subsForTenant.find((s: any) => s.status === 'active' && new Date(s.endDate) > now) ||
+    subsForTenant[0] ||
+    null;
+
+  let computedSubStatus = referral.subscriptionStatus;
+  if (activeSub) {
+    computedSubStatus = activeSub.isTrial ? 'trial' : 'active';
+  }
+
+  let computedEligibility = referral.eligibilityStatus;
+  if (
+    computedEligibility === 'active' &&
+    referral.eligibilityEndDate &&
+    new Date(referral.eligibilityEndDate) < now
+  ) {
+    computedEligibility = 'expired';
+  }
+
+  const isMerchantActive =
+    tenantStatus === 'active' &&
+    userIsActive &&
+    (computedSubStatus === 'active' || computedSubStatus === 'trial');
+
+  const daysRemainingInWindow =
+    computedEligibility === 'active' && referral.eligibilityEndDate
+      ? Math.max(
+          0,
+          Math.ceil(
+            (new Date(referral.eligibilityEndDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+          )
+        )
+      : 0;
+
+  const monthlyHistory = commissionsForRef.map((comm: any, idx: number) => {
+    const commDate = new Date(comm.createdAt || Date.now());
+    const monthLabel = `${monthNames[commDate.getMonth()]} ${commDate.getFullYear()}`;
+    const subInfo: any = comm.subscriptionId;
+    const pkgInfo: any = subInfo?.packageId;
+    const packageName = pkgInfo?.name || comm.paymentDescription || 'Standard Subscription';
+    const billingCycle = pkgInfo?.billingCycle || 'monthly';
+
+    return {
+      _id: comm._id ? comm._id.toString() : `comm_${idx}`,
+      paymentNumber: idx + 1,
+      monthLabel,
+      packageName,
+      billingCycle,
+      periodStart: comm.eligibilityPeriodStart || subInfo?.startDate || comm.createdAt,
+      periodEnd: comm.eligibilityPeriodEnd || subInfo?.endDate || null,
+      paidAt: comm.createdAt,
+      originalPackagePrice: round2(comm.originalPackagePrice || 0),
+      actualAmountPaid: round2(comm.actualAmountPaid || 0),
+      commissionRate: comm.commissionRate ?? (referral.commissionSnapshot?.commissionRate || 30),
+      commissionAmount: round2(comm.commissionAmount || 0),
+      status: comm.status || 'available',
+      paymentDescription: comm.paymentDescription || `${packageName} payment`,
+    };
+  });
+
+  const durationMonths = Number(referral.commissionSnapshot?.durationMonths || 6);
+  const sixMonthSlots = [];
+  for (let slot = 1; slot <= durationMonths; slot++) {
+    const matchedHistory = monthlyHistory[slot - 1];
+    if (matchedHistory) {
+      sixMonthSlots.push({
+        slotNumber: slot,
+        slotName: `Month ${slot}`,
+        monthLabel: matchedHistory.monthLabel,
+        packageName: matchedHistory.packageName,
+        billingCycle: matchedHistory.billingCycle,
+        amountPaid: matchedHistory.actualAmountPaid,
+        commissionAmount: matchedHistory.commissionAmount,
+        commissionRate: matchedHistory.commissionRate,
+        paidAt: matchedHistory.paidAt,
+        status: 'paid',
+      });
+    } else {
+      const isWindowActive = computedEligibility === 'active';
+      const isWindowExpired = computedEligibility === 'expired';
+      sixMonthSlots.push({
+        slotNumber: slot,
+        slotName: `Month ${slot}`,
+        monthLabel: `Eligible Month ${slot}`,
+        packageName: (activeSub?.packageId as any)?.name || 'Standard Plan',
+        billingCycle: (activeSub?.packageId as any)?.billingCycle || 'monthly',
+        amountPaid: 0,
+        commissionAmount: 0,
+        commissionRate: referral.commissionSnapshot?.commissionRate || 30,
+        paidAt: null,
+        status: isWindowActive ? 'upcoming' : isWindowExpired ? 'expired' : 'pending',
+      });
+    }
+  }
+
+  const currentPkgName = activeSub?.isTrial
+    ? 'Free Trial'
+    : (activeSub?.packageId as any)?.name ||
+      (computedSubStatus === 'active' ? 'Standard Plan' : 'No Active Plan');
+
+  return {
+    ...referral,
+    subscriptionStatus: computedSubStatus,
+    eligibilityStatus: computedEligibility,
+    isMerchantActive,
+    merchantName: merchantUser?.name || referral.referredStoreName || 'Merchant',
+    merchantEmail: merchantUser?.email || referral.referredEmail || '',
+    merchantPhone: merchantUser?.phone || tenant?.contactPhone || '',
+    storeName: referral.referredStoreName || tenant?.name || 'Store',
+    storeStatus: tenantStatus,
+    storeSlug: tenant?.slug || '',
+    storeDomain: tenant?.customDomain || tenant?.domain || tenant?.slug || '',
+    currentPackage: {
+      name: currentPkgName,
+      price: (activeSub?.packageId as any)?.price ?? (activeSub?.paidAmount ?? 0),
+      billingCycle: (activeSub?.packageId as any)?.billingCycle || 'monthly',
+      startDate: activeSub?.startDate || null,
+      endDate: activeSub?.endDate || null,
+      isTrial: Boolean(activeSub?.isTrial),
+      status: activeSub?.status || computedSubStatus,
+    },
+    currentPlanName: currentPkgName,
+    daysRemainingInWindow,
+    commissionRate: referral.commissionSnapshot?.commissionRate ?? 30,
+    durationMonths,
+    monthlyHistory,
+    sixMonthSlots,
+  };
+};
+
 export const AffiliateReferralService = {
   validateAffiliateCode,
   trackReferralClick,
   attributeMerchantRegistration,
   getAffiliateReferrals,
+  getAffiliateReferralById,
 };
 
