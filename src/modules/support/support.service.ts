@@ -143,14 +143,31 @@ export const supportService = {
 
     const skip = (page - 1) * limit;
 
-    const [data, totalCount] = await Promise.all([
+    const [rawTickets, totalCount] = await Promise.all([
       SupportTicket.find(query)
         .populate("tenantId", "name domain slug")
+        .populate("affiliateId", "affiliateCode")
+        .populate("userId", "name email")
         .sort({ updatedAt: -1 })
         .skip(skip)
-        .limit(limit),
+        .limit(limit)
+        .lean(),
       SupportTicket.countDocuments(query),
     ]);
+
+    const data = rawTickets.map((t: any) => {
+      if (!t.tenantId && (t.affiliateId || t.userId)) {
+        return {
+          ...t,
+          tenantId: {
+            _id: t.affiliateId?._id || t.userId?._id,
+            name: `${t.userId?.name || "Affiliate Partner"} (Affiliate)`,
+            domain: t.affiliateId?.affiliateCode || t.userId?.email || "Affiliate Hub",
+          },
+        };
+      }
+      return t;
+    });
 
     return {
       data,
@@ -255,9 +272,20 @@ export const supportService = {
     if (tenantId) {
       query.tenantId = tenantId;
     }
-    return await SupportTicket.findOne(query)
+    const ticket: any = await SupportTicket.findOne(query)
       .populate("tenantId", "name domain slug")
-      .populate("messages.senderId", "name email");
+      .populate("affiliateId", "affiliateCode")
+      .populate("userId", "name email")
+      .populate("messages.senderId", "name email")
+      .lean();
+    if (ticket && !ticket.tenantId && (ticket.affiliateId || ticket.userId)) {
+      ticket.tenantId = {
+        _id: ticket.affiliateId?._id || ticket.userId?._id,
+        name: `${ticket.userId?.name || "Affiliate Partner"} (Affiliate)`,
+        domain: ticket.affiliateId?.affiliateCode || ticket.userId?.email || "Affiliate Hub",
+      };
+    }
+    return ticket;
   },
 
   async replyToTicket(
@@ -313,7 +341,7 @@ export const supportService = {
         message:
           senderType === "ADMIN"
             ? `An admin has replied to your ticket: "${ticket.subject}"`
-            : `A merchant has replied to ticket: "${ticket.subject}"`,
+            : `A partner has replied to ticket: "${ticket.subject}"`,
         relatedId: ticket._id,
         tenantId: ticket.tenantId,
         read: false,
@@ -329,6 +357,9 @@ export const supportService = {
         if (merchantId) {
           io.to(`user_${merchantId}`).emit("new_notification", ephemeralNotification);
           io.to(`user_${merchantId}`).emit("refresh_tickets");
+        }
+        if (ticket.affiliateId) {
+          io.to(`affiliate_${ticket.affiliateId.toString()}`).emit("refresh_tickets");
         }
       } else if (senderType === "MERCHANT") {
         const superAdmins = await User.find({ role: "super_admin" });
@@ -368,6 +399,9 @@ export const supportService = {
       const io = require("../../socket").getIO();
       io.to(`ticket_${ticket.ticketId}`).emit("status_changed", status);
       await this.notifyListUpdate(ticket.messages[0]?.senderId?.toString());
+      if (ticket.affiliateId) {
+        io.to(`affiliate_${ticket.affiliateId.toString()}`).emit("refresh_tickets");
+      }
     } catch (err) {
       console.error("Socket emit error:", err);
     }
@@ -389,7 +423,7 @@ export const supportService = {
           ? "Ticket Closed"
           : "Ticket Status Updated";
 
-      // Notify Merchant
+      // Notify Merchant / Affiliate
       if (merchantId) {
         await notificationService.createNotification(
           merchantId,

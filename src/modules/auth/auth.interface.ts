@@ -3,7 +3,7 @@ import { Document, Types } from 'mongoose';
 export interface IUser extends Document {
   email: string;
   password?: string; // Optional for OAuth
-  role: 'super_admin' | 'tenant_admin' | 'customer';
+  role: 'super_admin' | 'tenant_admin' | 'customer' | 'affiliate_partner';
   tenantId?: Types.ObjectId; // Only for tenant_admin and customer
   name: string;
   phone?: string;

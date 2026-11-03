@@ -13,17 +13,20 @@ const supportMessageSchema = new Schema(
 const supportTicketSchema = new Schema<ISupportTicket>(
   {
     ticketId: { type: String, required: true, unique: true },
-    tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true },
+    tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: false },
+    affiliateId: { type: Schema.Types.ObjectId, ref: 'Affiliate', required: false },
+    userId: { type: Schema.Types.ObjectId, ref: 'User', required: false },
+    category: { type: String, default: 'General' },
     subject: { type: String, required: true },
-    status: { 
-      type: String, 
-      enum: ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'], 
-      default: 'OPEN' 
+    status: {
+      type: String,
+      enum: ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'],
+      default: 'OPEN',
     },
-    priority: { 
-      type: String, 
-      enum: ['LOW', 'MEDIUM', 'HIGH'], 
-      default: 'MEDIUM' 
+    priority: {
+      type: String,
+      enum: ['LOW', 'MEDIUM', 'HIGH'],
+      default: 'MEDIUM',
     },
     messages: [supportMessageSchema],
   },

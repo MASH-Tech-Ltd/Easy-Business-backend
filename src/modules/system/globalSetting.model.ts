@@ -36,6 +36,35 @@ export interface IGlobalSettings extends Document {
     youtube?: { url: string; isActive: boolean };
     [key: string]: { url: string; isActive: boolean } | undefined;
   };
+  affiliateSettings: {
+    programEnabled: boolean;
+    allowAffiliateRegistration: boolean;
+    maxAffiliates: number;
+    approvalMode: 'auto' | 'manual';
+    referralCodePrefix: string;
+    extraTrialDaysForReferredMerchant: number;
+    termsAndConditions: string;
+    defaultCommissionRate: number;
+    commissionDurationMonths: number;
+    commissionType: 'recurring' | 'one_time';
+    commissionBasis: 'actual_paid';
+    commissionApprovalMode: 'auto' | 'manual';
+    holdDays: number;
+    autoReverseOnRefund: boolean;
+    withdrawalsEnabled: boolean;
+    minimumWithdrawalAmount: number;
+    maximumWithdrawalAmount: number;
+    supportedMethods: string[];
+    withdrawalApprovalRequired: boolean;
+    notifications: {
+      onRegistration: boolean;
+      onCommissionGenerated: boolean;
+      onCommissionApproved: boolean;
+      onWithdrawalRequested: boolean;
+      onWithdrawalCompleted: boolean;
+      onWithdrawalRejected: boolean;
+    };
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -95,6 +124,41 @@ const globalSettingsSchema = new Schema<IGlobalSettings>(
         twitter: { url: '', isActive: true },
         linkedin: { url: '', isActive: true },
         youtube: { url: '', isActive: true },
+      },
+    },
+    affiliateSettings: {
+      programEnabled: { type: Boolean, default: true },
+      allowAffiliateRegistration: { type: Boolean, default: true },
+      maxAffiliates: { type: Number, default: 500 },
+      approvalMode: { type: String, enum: ['auto', 'manual'], default: 'auto' },
+      referralCodePrefix: { type: String, default: 'MASH' },
+      extraTrialDaysForReferredMerchant: { type: Number, default: 10 },
+      termsAndConditions: {
+        type: String,
+        default: 'Affiliate partners earn 30% recurring commission for 6 months on actual subscription payments made by referred merchants. Minimum withdrawal is ৳100.',
+      },
+      defaultCommissionRate: { type: Number, default: 30 },
+      commissionDurationMonths: { type: Number, default: 6 },
+      commissionType: { type: String, enum: ['recurring', 'one_time'], default: 'recurring' },
+      commissionBasis: { type: String, enum: ['actual_paid'], default: 'actual_paid' },
+      commissionApprovalMode: { type: String, enum: ['auto', 'manual'], default: 'auto' },
+      holdDays: { type: Number, default: 0 },
+      autoReverseOnRefund: { type: Boolean, default: true },
+      withdrawalsEnabled: { type: Boolean, default: true },
+      minimumWithdrawalAmount: { type: Number, default: 100 },
+      maximumWithdrawalAmount: { type: Number, default: 50000 },
+      supportedMethods: {
+        type: [String],
+        default: ['bKash', 'Nagad', 'Rocket', 'Bank'],
+      },
+      withdrawalApprovalRequired: { type: Boolean, default: true },
+      notifications: {
+        onRegistration: { type: Boolean, default: true },
+        onCommissionGenerated: { type: Boolean, default: true },
+        onCommissionApproved: { type: Boolean, default: true },
+        onWithdrawalRequested: { type: Boolean, default: true },
+        onWithdrawalCompleted: { type: Boolean, default: true },
+        onWithdrawalRejected: { type: Boolean, default: true },
       },
     },
   },

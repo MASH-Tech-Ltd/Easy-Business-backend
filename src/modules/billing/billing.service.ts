@@ -10,6 +10,7 @@ import { paginationHelper } from '../../helpers/paginationHelper';
 import { ReferralService } from '../referral/referral.service';
 import { Package } from '../package/package.model';
 import { SubscriptionService } from '../subscription/subscription.service';
+import { AffiliateCommissionService } from '../affiliate/services/commission.service';
 import { sendEmail } from '../../utils/sendEmail';
 import { paymentConfirmationTemplate } from '../../templates/paymentConfirmation';
 
@@ -532,6 +533,20 @@ const verifyPaymentSubmission = async (id: string, status: 'approved' | 'rejecte
     if (!pendingSubApproved) {
       try {
         await ReferralService.unlockReferralPointsForSubscription(submission.tenantId.toString());
+        const activeSub = await Subscription.findOne({
+          tenantId: submission.tenantId,
+          status: 'active',
+          isTrial: { $ne: true },
+        })
+          .populate('packageId')
+          .sort({ createdAt: -1 });
+        if (activeSub) {
+          await AffiliateCommissionService.processQualifyingPayment({
+            tenantId: submission.tenantId,
+            subscription: activeSub,
+            paymentSubmission: submission,
+          });
+        }
       } catch (err) {
         console.error('Failed to unlock referral points upon payment verification fallback:', err);
       }

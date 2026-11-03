@@ -8,7 +8,7 @@ const userSchema = new Schema<IUser>(
     name: { type: String, required: true },
     email: { type: String, required: true, unique: true },
     password: { type: String, select: false },
-    role: { type: String, enum: ['super_admin', 'tenant_admin', 'customer'], default: 'customer' },
+    role: { type: String, enum: ['super_admin', 'tenant_admin', 'customer', 'affiliate_partner'], default: 'customer' },
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant' },
     phone: { type: String },
     address: { type: String },

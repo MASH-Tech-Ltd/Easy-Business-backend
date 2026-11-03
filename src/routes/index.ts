@@ -26,6 +26,7 @@ import { TrackingRoutes } from '../modules/analytics/tracking.route';
 import { CourierSyncRoutes } from '../modules/courierSync/courierSync.route';
 import { ReferralRoutes } from '../modules/referral/referral.route';
 import { BlogRoutes } from '../modules/blog/blog.route';
+import { AffiliateRoutes } from '../modules/affiliate/affiliate.route';
 
 
 const router = Router();
@@ -134,6 +135,10 @@ const moduleRoutes = [
   {
     path: '/blogs',
     route: BlogRoutes,
+  },
+  {
+    path: '/affiliates',
+    route: AffiliateRoutes,
   },
 ];
 

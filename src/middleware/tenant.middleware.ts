@@ -38,7 +38,9 @@ export const tenantMiddleware = async (
 
     // If the host is in our allowed origins OR is the base domain itself, bypass tenant lookup
     if (
+      req.path.startsWith("/affiliates") ||
       excludedDomains.includes(host) ||
+      host === `affiliate.${config.app.baseDomain}` ||
       host === config.app.baseDomain ||
       host === `backapi.${config.app.baseDomain}`
     ) {

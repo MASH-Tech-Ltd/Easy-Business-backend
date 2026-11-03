@@ -13,6 +13,8 @@ export const initSocket = (httpServer: http.Server): Server => {
     "http://localhost:3000",
     "http://localhost:3001",
     "http://localhost:3002",
+    "http://localhost:3003",
+    "http://localhost:3004",
     "http://localhost:5173",
     "http://localhost:5174",
     "http://localhost:5175",
@@ -58,7 +60,7 @@ export const initSocket = (httpServer: http.Server): Server => {
       try {
         const user = await User.findById(userId).select('email role');
         if (user) {
-          const roleIcons: Record<string, string> = { super_admin: '👑', tenant_admin: '🏢', customer: '👤', store_admin: '🏪' };
+          const roleIcons: Record<string, string> = { super_admin: '👑', tenant_admin: '🏢', customer: '👤', store_admin: '🏪', affiliate_partner: '🤝' };
           const icon = roleIcons[user.role] || '👤';
           console.log(`Socket ${socket.id} joined user: ${user.email} ${icon} (${user.role})`);
         } else {
@@ -82,6 +84,26 @@ export const initSocket = (httpServer: http.Server): Server => {
     socket.on("leave_tenant_room", (tenantId: string) => {
       socket.leave(`tenant_${tenantId}`);
       console.log(`Socket ${socket.id} left tenant_${tenantId}`);
+    });
+
+    socket.on("join_affiliate_room", async (affiliateId: string) => {
+      if (!affiliateId) return;
+      socket.join(`affiliate_${affiliateId}`);
+    });
+
+    socket.on("leave_affiliate_room", (affiliateId: string) => {
+      if (!affiliateId) return;
+      socket.leave(`affiliate_${affiliateId}`);
+    });
+
+    socket.on("join_admin_affiliate_room", async (userId: string) => {
+      if (!userId) return;
+      try {
+        const user = await User.findById(userId).select('role').lean();
+        if (user && user.role === 'super_admin') {
+          socket.join('admin_affiliates');
+        }
+      } catch (_err) {}
     });
 
     socket.on("typing_start", (data: { ticketId: string, senderName: string }) => {

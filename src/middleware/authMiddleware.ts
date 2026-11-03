@@ -20,9 +20,17 @@ export const authMiddleware = (...requiredRoles: string[]) => {
         if (requiredRoles.includes('super_admin') && req.cookies._super_x_tkn) {
           token = `Bearer ${req.cookies._super_x_tkn}`;
         } 
+        // If checking for affiliate_partner, prioritize the affiliate cookie
+        else if (requiredRoles.includes('affiliate_partner') && req.cookies._affiliate_x_tkn) {
+          token = `Bearer ${req.cookies._affiliate_x_tkn}`;
+        }
         // Otherwise use the merchant cookie
         else if (req.cookies._merchant_x_tkn) {
           token = `Bearer ${req.cookies._merchant_x_tkn}`;
+        }
+        // Fallback to affiliate cookie if present on general auth route
+        else if (req.cookies._affiliate_x_tkn) {
+          token = `Bearer ${req.cookies._affiliate_x_tkn}`;
         }
         // If they just didn't specify super_admin but have super admin cookie (e.g. general auth route)
         else if (req.cookies._super_x_tkn) {

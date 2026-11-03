@@ -14,6 +14,7 @@ import { unblockIpFromCache, refreshBlockedIpsCache } from "../../middleware/sec
 import { runBackup } from "../../database/backup.cron";
 import { BackupLogModel } from "../../database/backupLog.model";
 import config from "../../config";
+import { recordAffiliateAuditLog } from "../affiliate/affiliate.utils";
 
 const getGlobalSettings = asyncHandler(async (req: Request, res: Response) => {
   let settings = await GlobalSetting.findOne();
@@ -62,6 +63,45 @@ const updateGlobalSettings = asyncHandler(
       };
       settings.markModified('socialLinks');
     }
+    if (payload.affiliateSettings !== undefined) {
+      const currentAff = (settings as any).affiliateSettings
+        ? (settings as any).affiliateSettings.toObject
+          ? (settings as any).affiliateSettings.toObject()
+          : (settings as any).affiliateSettings
+        : {};
+      const nextAff = {
+        ...currentAff,
+        ...payload.affiliateSettings,
+        notifications: {
+          ...(currentAff.notifications || {}),
+          ...(payload.affiliateSettings.notifications || {}),
+        },
+      };
+      if (nextAff.defaultCommissionRate !== undefined) {
+        nextAff.defaultCommissionRate = Math.min(100, Math.max(0, Number(nextAff.defaultCommissionRate)));
+      }
+      if (nextAff.commissionDurationMonths !== undefined) {
+        nextAff.commissionDurationMonths = Math.min(60, Math.max(1, Number(nextAff.commissionDurationMonths)));
+      }
+      if (nextAff.minimumWithdrawalAmount !== undefined) {
+        nextAff.minimumWithdrawalAmount = Math.max(1, Number(nextAff.minimumWithdrawalAmount));
+      }
+      if (nextAff.maxAffiliates !== undefined) {
+        nextAff.maxAffiliates = Math.max(0, Number(nextAff.maxAffiliates));
+      }
+      (settings as any).affiliateSettings = nextAff;
+      settings.markModified('affiliateSettings');
+
+      await recordAffiliateAuditLog({
+        actorId: (req as any).user?._id || null,
+        actorRole: (req as any).user?.role || 'super_admin',
+        action: 'GLOBAL_AFFILIATE_SETTINGS_UPDATED',
+        targetType: 'settings',
+        targetId: settings._id.toString(),
+        ipAddress: getClientIp(req),
+        metadata: payload.affiliateSettings,
+      });
+    }
 
     await settings.save();
     ApiResponse.sendSuccess(
@@ -103,6 +143,14 @@ const getPublicSettings = asyncHandler(async (req: Request, res: Response) => {
     couriers: settings.couriers,
     sidebarMenu: settings.sidebarMenu,
     socialLinks: settings.socialLinks || {},
+    affiliateProgram: {
+      programEnabled: settings.affiliateSettings?.programEnabled ?? true,
+      allowAffiliateRegistration: settings.affiliateSettings?.allowAffiliateRegistration ?? true,
+      maxAffiliates: settings.affiliateSettings?.maxAffiliates ?? 500,
+      defaultCommissionRate: settings.affiliateSettings?.defaultCommissionRate ?? 30,
+      commissionDurationMonths: settings.affiliateSettings?.commissionDurationMonths ?? 6,
+      minimumWithdrawalAmount: settings.affiliateSettings?.minimumWithdrawalAmount ?? 100,
+    },
   };
   
   ApiResponse.sendSuccess(res, 200, "Public settings retrieved", publicData);

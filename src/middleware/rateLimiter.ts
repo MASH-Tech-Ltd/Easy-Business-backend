@@ -341,6 +341,7 @@ export const roleBasedRateLimiter = rateLimit({
     const role = req.user?.role;
     if (role === 'super_admin') return 5000;
     if (role === 'tenant_admin') return 2000;
+    if (role === 'affiliate_partner') return 1500;
     if (role === 'customer' || role === 'store_admin') return 500;
     return 300;
   },

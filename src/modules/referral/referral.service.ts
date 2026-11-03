@@ -12,6 +12,7 @@ import { User } from '../auth/auth.model';
 import { Subscription } from '../subscription/subscription.model';
 import { Package } from '../package/package.model';
 import { notificationService } from '../notification/notification.service';
+import { AffiliateReferralService } from '../affiliate/services/referral.service';
 
 /**
  * Validates a referral code for registration or public verification.
@@ -25,6 +26,11 @@ const validateCode = async (code: string) => {
   const referral = await Referral.findOne({ code: cleanCode });
 
   if (!referral) {
+    // Check if the code belongs to an active Affiliate Partner
+    const affiliateResult = await AffiliateReferralService.validateAffiliateCode(cleanCode);
+    if (affiliateResult) {
+      return affiliateResult;
+    }
     throw new CustomError(404, 'Invalid referral code. Please check and try again.');
   }
 

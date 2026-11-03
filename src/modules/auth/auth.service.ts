@@ -21,6 +21,7 @@ import { syncSubscriptionAddonCredits } from '../subscription/subscription.servi
 import { Referral, ReferralUsage, ReferralReward } from '../referral/referral.model';
 import { notificationService } from '../notification/notification.service';
 import { GlobalSetting } from '../system/globalSetting.model';
+import { AffiliateReferralService } from '../affiliate/services/referral.service';
 
 const assertMerchantNotBanned = async (user: any) => {
   if (user.role === 'tenant_admin') {
@@ -75,31 +76,36 @@ const register = async (payload: Partial<IUser> & { storeName?: string; referral
     delete payload.referralCode;
 
     let referralDoc: any = null;
+    let affiliateValidation: any = null;
     let extraTrialDays = 0;
 
     if (rawReferralCode) {
       referralDoc = await Referral.findOne({ code: rawReferralCode });
 
       if (!referralDoc) {
-        throw new CustomError(400, `Invalid referral code "${rawReferralCode}". Please check the code or leave it empty.`);
-      }
-
-      if (!referralDoc.isActive) {
-        throw new CustomError(400, `The referral code "${rawReferralCode}" is no longer active.`);
-      }
-
-      if (referralDoc.expiresAt && new Date(referralDoc.expiresAt).getTime() < Date.now()) {
-        throw new CustomError(400, `The referral code "${rawReferralCode}" has expired.`);
-      }
-
-      if (typeof referralDoc.maxUses === 'number' && referralDoc.maxUses > 0 && referralDoc.usedCount >= referralDoc.maxUses) {
-        throw new CustomError(400, `The referral code "${rawReferralCode}" has reached its maximum redemption limit.`);
-      }
-
-      if (referralDoc.offerType === 'subscription_discount') {
-        extraTrialDays = 0; // standard trial only, discount is for subscription
+        affiliateValidation = await AffiliateReferralService.validateAffiliateCode(rawReferralCode);
+        if (!affiliateValidation) {
+          throw new CustomError(400, `Invalid referral code "${rawReferralCode}". Please check the code or leave it empty.`);
+        }
+        extraTrialDays = Number(affiliateValidation.extraDays ?? 10);
       } else {
-        extraTrialDays = Number(referralDoc.extraDays) >= 0 ? Number(referralDoc.extraDays) : 10;
+        if (!referralDoc.isActive) {
+          throw new CustomError(400, `The referral code "${rawReferralCode}" is no longer active.`);
+        }
+
+        if (referralDoc.expiresAt && new Date(referralDoc.expiresAt).getTime() < Date.now()) {
+          throw new CustomError(400, `The referral code "${rawReferralCode}" has expired.`);
+        }
+
+        if (typeof referralDoc.maxUses === 'number' && referralDoc.maxUses > 0 && referralDoc.usedCount >= referralDoc.maxUses) {
+          throw new CustomError(400, `The referral code "${rawReferralCode}" has reached its maximum redemption limit.`);
+        }
+
+        if (referralDoc.offerType === 'subscription_discount') {
+          extraTrialDays = 0; // standard trial only, discount is for subscription
+        } else {
+          extraTrialDays = Number(referralDoc.extraDays) >= 0 ? Number(referralDoc.extraDays) : 10;
+        }
       }
     }
 
@@ -126,8 +132,12 @@ const register = async (payload: Partial<IUser> & { storeName?: string; referral
       domain: undefined,
       customDomain: undefined,
       status: 'active',
-      referralCodeUsed: referralDoc ? referralDoc.code : undefined,
-      referredBy: referralDoc ? (referralDoc.referrerName || 'Referral Partner') : undefined,
+      referralCodeUsed: referralDoc ? referralDoc.code : affiliateValidation ? affiliateValidation.code : undefined,
+      referredBy: referralDoc
+        ? (referralDoc.referrerName || 'Referral Partner')
+        : affiliateValidation
+        ? (affiliateValidation.referrerName || 'Affiliate Partner')
+        : undefined,
       referralDiscount:
         referralDoc && (referralDoc.offerType === 'subscription_discount' || referralDoc.offerType === 'both')
           ? {
@@ -225,6 +235,16 @@ const register = async (payload: Partial<IUser> & { storeName?: string; referral
           }
           await referrerReward.save({ session });
         }
+      } else if (affiliateValidation) {
+        await AffiliateReferralService.attributeMerchantRegistration({
+          affiliateCode: affiliateValidation.code,
+          referredMerchantUserId: user._id,
+          referredTenantId: createdTenant._id,
+          referredStoreName: storeName,
+          referredEmail: user.email || '',
+          referredPhone: user.phone,
+          session,
+        });
       }
     }
 

@@ -9,7 +9,10 @@ export interface ISupportMessage {
 
 export interface ISupportTicket extends Document {
   ticketId: string;
-  tenantId: Types.ObjectId;
+  tenantId?: Types.ObjectId;
+  affiliateId?: Types.ObjectId;
+  userId?: Types.ObjectId;
+  category?: string;
   subject: string;
   status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
   priority: 'LOW' | 'MEDIUM' | 'HIGH';

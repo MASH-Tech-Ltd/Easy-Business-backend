@@ -9,6 +9,7 @@ import { notificationService } from '../notification/notification.service';
 import { User } from '../auth/auth.model';
 import { PlatformPaymentSubmission } from '../billing/billing.model';
 import { ReferralService } from '../referral/referral.service';
+import { AffiliateCommissionService } from '../affiliate/services/commission.service';
 
 
 const notifySubscriptionUpdate = async (tenantId?: string) => {
@@ -319,6 +320,10 @@ const assignPackage = async (payload: { tenantId: string, packageId: string }): 
   try {
     const populatedSub = await Subscription.findById(subscription._id).populate('packageId');
     await ReferralService.unlockReferralPointsForSubscription(payload.tenantId.toString(), populatedSub || subscription);
+    await AffiliateCommissionService.processQualifyingPayment({
+      tenantId: payload.tenantId,
+      subscription: populatedSub || subscription,
+    });
   } catch (err) {
     console.error('Failed to unlock referral points upon direct package assignment:', err);
   }
@@ -656,6 +661,13 @@ const approveSubscription = async (subscriptionId: string): Promise<ISubscriptio
         }
         await subscription.save();
       }
+
+      // Generate recurring affiliate commission if this merchant was referred by an Affiliate Partner
+      await AffiliateCommissionService.processQualifyingPayment({
+        tenantId: subscription.tenantId,
+        subscription,
+        paymentSubmission: pendingPayment || undefined,
+      });
     } catch (err) {
       console.error('Failed to sync payment submission on subscription approval:', err);
     }
@@ -928,10 +940,18 @@ const updateSubscription = async (subscriptionId: string, payload: any): Promise
   await subscription.save();
 
   // If this subscription was cancelled, and admin requested activateNextImmediately:
-  if (payload.status === 'cancelled' && prevStatus !== 'cancelled' && payload.activateNextImmediately) {
+  if (payload.status === 'cancelled' && prevStatus !== 'cancelled') {
     try {
-      await activateEarly(subscription.tenantId.toString());
+      await AffiliateCommissionService.reverseCommission({
+        subscriptionId: subscription._id,
+        reason: 'Subscription cancelled by administrator',
+      });
     } catch (_) {}
+    if (payload.activateNextImmediately) {
+      try {
+        await activateEarly(subscription.tenantId.toString());
+      } catch (_) {}
+    }
   }
 
   await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
