@@ -288,10 +288,17 @@ const loginAffiliate = async (params: {
     throw new CustomError(401, 'Invalid email or password.');
   }
 
+  if ((user.role as string) === 'tenant_admin') {
+    throw new CustomError(
+      403,
+      'Merchant accounts cannot log in to the Affiliate Dashboard. Please log in at https://merchant.masheco.com.'
+    );
+  }
+
   if (user.role !== 'affiliate_partner') {
     throw new CustomError(
       403,
-      'This account is not registered as an Affiliate Partner. Please use the Affiliate Partner Registration page.'
+      'This account is not registered as an Affiliate Partner. If you are a merchant, please log in at https://merchant.masheco.com.'
     );
   }
 
@@ -378,6 +385,13 @@ const refreshToken = async (rawRefreshToken: string) => {
     throw new CustomError(401, 'Affiliate account not found');
   }
 
+  if (user.role !== 'affiliate_partner') {
+    throw new CustomError(
+      403,
+      'Access denied. Merchant accounts cannot access the affiliate portal.'
+    );
+  }
+
   if (affiliate.status === 'deactivated') {
     throw new CustomError(403, 'Your affiliate account has been deactivated.');
   }
@@ -444,13 +458,19 @@ const refreshToken = async (rawRefreshToken: string) => {
     expiresIn: config.jwt.refreshExpiresIn as any,
   });
 
+  // Consume old token and rotate in the new one (allowing up to 3 active device sessions)
+  await User.updateOne(
+    { _id: user._id },
+    { $pull: { refreshTokens: { token: rawRefreshToken } } }
+  );
+
   await User.updateOne(
     { _id: user._id },
     {
       $push: {
         refreshTokens: {
           $each: [{ token: newRefreshToken, familyId }],
-          $slice: -5,
+          $slice: -3,
         },
       },
     }

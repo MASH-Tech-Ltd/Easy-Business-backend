@@ -290,10 +290,13 @@ const affiliateAuditLogSchema = new Schema<IAffiliateAuditLog>(
     reason: { type: String, default: '' },
     metadata: { type: Schema.Types.Mixed, default: {} },
     ipAddress: { type: String, default: '' },
-    createdAt: { type: Date, default: Date.now, index: true },
+    createdAt: { type: Date, default: Date.now, expires: 86400, index: true },
   },
   { timestamps: false }
 );
+
+// Auto-expire audit logs after 1 day (86,400 seconds) via MongoDB TTL index
+affiliateAuditLogSchema.index({ createdAt: 1 }, { expireAfterSeconds: 86400 });
 
 export const Affiliate = model<IAffiliate>('Affiliate', affiliateSchema);
 export const AffiliateReferral = model<IAffiliateReferral>(

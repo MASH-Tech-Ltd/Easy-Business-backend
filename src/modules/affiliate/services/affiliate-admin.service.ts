@@ -692,10 +692,12 @@ const processAffiliateWithdrawal = async (params: {
 };
 
 /**
- * Admin: Paginated Affiliate Audit Logs.
+ * Admin: Paginated Affiliate Audit Logs (auto-purged after 24h via TTL).
  */
 const getAdminAuditLogs = async (query: any = {}) => {
-  const { page, limit, skip } = paginationHelper(query?.page, query?.limit);
+  const page = Math.max(1, Number(query?.page) || 1);
+  const limit = Number(query?.limit) > 0 ? Number(query?.limit) : 20;
+  const skip = (page - 1) * limit;
   const { targetType, action, search } = query;
 
   const filter: any = {};
