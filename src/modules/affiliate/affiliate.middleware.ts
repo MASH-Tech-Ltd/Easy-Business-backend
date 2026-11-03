@@ -64,21 +64,89 @@ export const requireAffiliatePartner = (options: { allowReadOnlyWhenSuspended?: 
 };
 
 // Rate limiters tailored for Affiliate endpoints
+export const affiliatePublicConfigLimiter = customRateLimit(
+  1 * 60 * 1000, // 1 minute
+  120,
+  'Too many public affiliate configuration requests. Please try again in a minute.'
+);
+
+export const affiliateCodeValidationLimiter = customRateLimit(
+  1 * 60 * 1000, // 1 minute
+  45,
+  'Too many referral code validation attempts. Please slow down.'
+);
+
+export const affiliateTrackClickLimiter = customRateLimit(
+  1 * 60 * 1000, // 1 minute
+  90,
+  'Too many referral click events. Please wait a minute.'
+);
+
+export const affiliateAuthLimiter = customRateLimit(
+  15 * 60 * 1000, // 15 minutes
+  15,
+  'Too many affiliate login or registration attempts. Please wait 15 minutes before trying again.'
+);
+
+export const affiliateRefreshTokenLimiter = customRateLimit(
+  1 * 60 * 1000, // 1 minute
+  60,
+  'Too many token refresh requests. Please slow down.'
+);
+
 export const affiliateWithdrawalLimiter = customRateLimit(
   10 * 60 * 1000, // 10 minutes
-  10,
-  'Too many withdrawal requests. Please wait 10 minutes before trying again.'
+  8,
+  'Too many withdrawal requests. Please wait 10 minutes before requesting again.'
 );
 
 export const affiliateProfileLimiter = customRateLimit(
   5 * 60 * 1000, // 5 minutes
   25,
-  'Too many profile or settings update requests. Please slow down.'
+  'Too many profile update requests. Please slow down.'
 );
 
-export const affiliatePublicClickLimiter = customRateLimit(
-  1 * 60 * 1000, // 1 minute
-  60,
-  'Too many referral validation requests.'
+export const affiliatePasswordChangeLimiter = customRateLimit(
+  15 * 60 * 1000, // 15 minutes
+  6,
+  'Too many password change attempts. Please wait 15 minutes before trying again.'
 );
+
+export const affiliatePaymentMethodsLimiter = customRateLimit(
+  5 * 60 * 1000, // 5 minutes
+  15,
+  'Too many payment method update requests. Please wait 5 minutes before trying again.'
+);
+
+export const affiliateSupportCreateLimiter = customRateLimit(
+  10 * 60 * 1000, // 10 minutes
+  10,
+  'Too many support tickets created. Please wait before creating another ticket.'
+);
+
+export const affiliateSupportReplyLimiter = customRateLimit(
+  1 * 60 * 1000, // 1 minute
+  30,
+  'Too many support ticket replies. Please wait a moment.'
+);
+
+export const affiliateQueryLimiter = customRateLimit(
+  1 * 60 * 1000, // 1 minute
+  120,
+  'Too many dashboard queries. Please slow down.'
+);
+
+export const affiliateAdminActionLimiter = customRateLimit(
+  1 * 60 * 1000, // 1 minute
+  40,
+  'Too many admin affiliate actions. Please slow down.'
+);
+
+export const affiliateAdminFinancialLimiter = customRateLimit(
+  1 * 60 * 1000, // 1 minute
+  20,
+  'Too many withdrawal processing requests. Please wait a moment.'
+);
+
+export const affiliatePublicClickLimiter = affiliateCodeValidationLimiter;
 

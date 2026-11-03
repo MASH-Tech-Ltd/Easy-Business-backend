@@ -295,6 +295,13 @@ const loginAffiliate = async (params: {
     );
   }
 
+  if (user.role === 'tenant_admin') {
+    throw new CustomError(
+      403,
+      'Merchant accounts cannot log in to the Affiliate Dashboard. Please log in at https://merchant.masheco.com.'
+    );
+  }
+
   if (user.role !== 'affiliate_partner') {
     throw new CustomError(
       403,
