@@ -7,6 +7,7 @@ import { AffiliateReferralService } from './services/referral.service';
 import { AffiliateCommissionService } from './services/commission.service';
 import { AffiliateWithdrawalService } from './services/withdrawal.service';
 import { AffiliateAdminService } from './services/affiliate-admin.service';
+import { notificationService } from '../notification/notification.service';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public & Auth Endpoints
@@ -331,6 +332,29 @@ const updateSupportTicketStatus = asyncHandler(async (req: Request, res: Respons
   ApiResponse.sendSuccess(res, 200, 'Ticket status updated', result);
 });
 
+
+const getMyNotifications = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user._id;
+  const data = await notificationService.getUserNotifications(userId, req.query);
+  ApiResponse.sendSuccess(res, 200, 'Notifications retrieved', data);
+});
+
+const markNotificationRead = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const userId = (req as any).user._id;
+  const notification = await notificationService.markAsRead(id as string, userId.toString());
+  if (!notification) {
+    return ApiResponse.sendError(res, 404, 'Notification not found or not authorized');
+  }
+  ApiResponse.sendSuccess(res, 200, 'Notification marked as read', notification);
+});
+
+const markAllNotificationsRead = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user._id;
+  await notificationService.markAllAsRead(userId);
+  ApiResponse.sendSuccess(res, 200, 'All notifications marked as read');
+});
+
 export const AffiliateController = {
   getPublicConfig,
   validateCode,
@@ -356,6 +380,9 @@ export const AffiliateController = {
   getSupportTicketDetail,
   replySupportTicket,
   updateSupportTicketStatus,
+  getMyNotifications,
+  markNotificationRead,
+  markAllNotificationsRead,
   getAdminOverview,
   getAdminAffiliatesList,
   getAdminAffiliateDetail,

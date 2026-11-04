@@ -4,8 +4,8 @@ import { authMiddleware } from '../../middleware/authMiddleware';
 
 const router = Router();
 
-// Routes available to both merchants and admins
-router.use(authMiddleware('tenant_admin', 'super_admin'));
+// Routes available to merchants, admins, and affiliate partners
+router.use(authMiddleware('tenant_admin', 'super_admin', 'affiliate_partner'));
 
 router.get('/my-notifications', getMyNotifications);
 router.patch('/read-all', markAllAsRead);

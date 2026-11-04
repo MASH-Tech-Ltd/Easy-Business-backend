@@ -217,6 +217,32 @@ router.patch(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Affiliate Partner Notifications Routes
+// ─────────────────────────────────────────────────────────────────────────────
+router.get(
+  '/notifications',
+  authMiddleware('affiliate_partner'),
+  requireAffiliatePartner({ allowReadOnlyWhenSuspended: true }),
+  affiliateQueryLimiter,
+  AffiliateController.getMyNotifications
+);
+
+router.patch(
+  '/notifications/read-all',
+  authMiddleware('affiliate_partner'),
+  requireAffiliatePartner({ allowReadOnlyWhenSuspended: true }),
+  AffiliateController.markAllNotificationsRead
+);
+
+router.patch(
+  '/notifications/:id/read',
+  authMiddleware('affiliate_partner'),
+  requireAffiliatePartner({ allowReadOnlyWhenSuspended: true }),
+  AffiliateController.markNotificationRead
+);
+
 // Protected Super Admin Routes (`role: 'super_admin'`)
 // ─────────────────────────────────────────────────────────────────────────────
 router.get(

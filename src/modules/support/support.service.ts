@@ -357,6 +357,17 @@ export const supportService = {
         if (merchantId) {
           io.to(`user_${merchantId}`).emit("new_notification", ephemeralNotification);
           io.to(`user_${merchantId}`).emit("refresh_tickets");
+          try {
+            const { notificationService } = require("../notification/notification.service");
+            await notificationService.createNotification(
+              merchantId,
+              "TICKET_REPLY",
+              "New Ticket Reply",
+              `MASH ECO Support replied to your ticket: "${ticket.subject}"`,
+              ticket._id,
+              ticket.tenantId
+            );
+          } catch (_e) {}
         }
         if (ticket.affiliateId) {
           io.to(`affiliate_${ticket.affiliateId.toString()}`).emit("refresh_tickets");
