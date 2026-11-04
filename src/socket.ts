@@ -46,13 +46,19 @@ export const initSocket = (httpServer: http.Server): Server => {
 
     // Join a room for a specific ticket
     socket.on("join_ticket", (ticketId: string) => {
-      socket.join(`ticket_${ticketId}`);
-      console.log(`Socket ${socket.id} joined ticket_${ticketId}`);
+      if (!ticketId) return;
+      const cleanId = String(ticketId).replace(/^#/, '');
+      socket.join(`ticket_${cleanId}`);
+      if (cleanId !== ticketId) socket.join(`ticket_${ticketId}`);
+      console.log(`Socket ${socket.id} joined ticket_${cleanId}`);
     });
 
     socket.on("leave_ticket", (ticketId: string) => {
-      socket.leave(`ticket_${ticketId}`);
-      console.log(`Socket ${socket.id} left ticket_${ticketId}`);
+      if (!ticketId) return;
+      const cleanId = String(ticketId).replace(/^#/, '');
+      socket.leave(`ticket_${cleanId}`);
+      if (cleanId !== ticketId) socket.leave(`ticket_${ticketId}`);
+      console.log(`Socket ${socket.id} left ticket_${cleanId}`);
     });
 
     socket.on("join_user_room", async (userId: string) => {
@@ -107,11 +113,17 @@ export const initSocket = (httpServer: http.Server): Server => {
     });
 
     socket.on("typing_start", (data: { ticketId: string, senderName: string }) => {
-      socket.to(`ticket_${data.ticketId}`).emit("typing_start", data);
+      if (!data?.ticketId) return;
+      const cleanId = String(data.ticketId).replace(/^#/, '');
+      socket.to(`ticket_${cleanId}`).emit("typing_start", data);
+      if (cleanId !== data.ticketId) socket.to(`ticket_${data.ticketId}`).emit("typing_start", data);
     });
 
     socket.on("typing_end", (data: { ticketId: string }) => {
-      socket.to(`ticket_${data.ticketId}`).emit("typing_end", data);
+      if (!data?.ticketId) return;
+      const cleanId = String(data.ticketId).replace(/^#/, '');
+      socket.to(`ticket_${cleanId}`).emit("typing_end", data);
+      if (cleanId !== data.ticketId) socket.to(`ticket_${data.ticketId}`).emit("typing_end", data);
     });
 
     socket.on("disconnect", () => {

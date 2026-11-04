@@ -320,70 +320,36 @@ export const supportService = {
 
     const savedMessage = ticket.messages[ticket.messages.length - 1];
 
-    // Emit socket event
+    // Emit real-time message to all associated rooms
     try {
       const io = require("../../socket").getIO();
-      io.to(`ticket_${ticket.ticketId}`).emit("new_message", savedMessage);
-    } catch (err) {
-      console.error("Socket emit error:", err);
-    }
-
-    // Notify recipient via Socket.IO in real-time (shows screen toast and refreshes badges)
-    // without saving to the database (saving database storage space)
-    try {
-      const io = require("../../socket").getIO();
-      const { User } = require("../auth/auth.model");
-
-      const ephemeralNotification = {
-        _id: `temp_${Date.now()}`,
-        type: "TICKET_REPLY",
-        title: senderType === "ADMIN" ? "New Ticket Reply" : "New Ticket Reply",
-        message:
-          senderType === "ADMIN"
-            ? `An admin has replied to your ticket: "${ticket.subject}"`
-            : `A partner has replied to ticket: "${ticket.subject}"`,
-        relatedId: ticket._id,
-        tenantId: ticket.tenantId,
-        read: false,
-        createdAt: new Date().toISOString(),
+      const msgObj = (savedMessage as any)?.toObject ? (savedMessage as any).toObject() : savedMessage;
+      const messagePayload = {
+        ...(msgObj || {}),
+        ticketId: ticket.ticketId,
+        ticketMongoId: ticket._id.toString(),
       };
 
-      if (senderType === "ADMIN") {
-        const merchantUser = ticket.messages[0]?.senderId as any;
-        const merchantId = merchantUser?._id
-          ? merchantUser._id.toString()
-          : merchantUser?.toString();
+      // 1. Broadcast to ticket code room (e.g. ticket_TKT-R1PRI4I)
+      io.to(`ticket_${ticket.ticketId}`).emit("new_message", messagePayload);
+      // 2. Broadcast to ticket Mongo ID room (e.g. ticket_672...)
+      io.to(`ticket_${ticket._id.toString()}`).emit("new_message", messagePayload);
 
-        if (merchantId) {
-          io.to(`user_${merchantId}`).emit("new_notification", ephemeralNotification);
-          io.to(`user_${merchantId}`).emit("refresh_tickets");
-          try {
-            const { notificationService } = require("../notification/notification.service");
-            await notificationService.createNotification(
-              merchantId,
-              "TICKET_REPLY",
-              "New Ticket Reply",
-              `MASH ECO Support replied to your ticket: "${ticket.subject}"`,
-              ticket._id,
-              ticket.tenantId
-            );
-          } catch (_e) {}
-        }
-        if (ticket.affiliateId) {
-          io.to(`affiliate_${ticket.affiliateId.toString()}`).emit("refresh_tickets");
-        }
-      } else if (senderType === "MERCHANT") {
-        const superAdmins = await User.find({ role: "super_admin" });
-        for (const admin of superAdmins) {
-          const adminId = admin._id.toString();
-          io.to(`user_${adminId}`).emit("new_notification", ephemeralNotification);
-          io.to(`user_${adminId}`).emit("refresh_tickets");
-        }
+      // 3. Deliver to user/affiliate rooms directly for guaranteed delivery
+      const firstSender = ticket.messages[0]?.senderId as any;
+      const targetUserId = ticket.userId?.toString() || (firstSender?._id ? firstSender._id.toString() : firstSender?.toString());
+      if (targetUserId) {
+        io.to(`user_${targetUserId}`).emit("new_message", messagePayload);
+      }
+      if (ticket.affiliateId) {
+        io.to(`affiliate_${ticket.affiliateId.toString()}`).emit("new_message", messagePayload);
       }
     } catch (err) {
-      console.error("Socket notification error on reply:", err);
+      console.error("Socket emit error on reply:", err);
     }
 
+    // User requirement: Do NOT create notifications on every message reply.
+    // Notifications are only for START (Ticket Created) and END/SOLVE (Ticket Resolved/Closed).
     return ticket;
   },
 
