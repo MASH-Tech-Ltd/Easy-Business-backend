@@ -409,7 +409,11 @@ const getMerchantOverview = async (tenantId: string, query: any) => {
     },
   ]);
 
-  const prevStoreVisits = prevDailyStats[0]?.totalVisits || 0;
+  const prevLegacyVisitsCount = await StoreVisit.countDocuments({
+    tenantId: tenantObjectId,
+    createdAt: { $gte: prevStartDate, $lte: prevEndDate },
+  });
+  const prevStoreVisits = Math.max(prevDailyStats[0]?.totalVisits || 0, prevLegacyVisitsCount);
   const prevProductImpressions = prevDailyStats[0]?.totalImpressions || 0;
   const prevProductClicks = prevDailyStats[0]?.totalClicks || 0;
   const prevCtr =
@@ -461,12 +465,33 @@ const getMerchantTimeline = async (tenantId: string, query: any) => {
     query.endDate
   );
 
-  const dailyDocs = await StoreDailyAnalytics.find({
-    tenantId: tenantObjectId,
-    dateStr: { $gte: startStr, $lte: endStr },
-  })
-    .sort({ dateStr: 1 })
-    .lean();
+  const [dailyDocs, legacyVisitsAgg] = await Promise.all([
+    StoreDailyAnalytics.find({
+      tenantId: tenantObjectId,
+      dateStr: { $gte: startStr, $lte: endStr },
+    })
+      .sort({ dateStr: 1 })
+      .lean(),
+    StoreVisit.aggregate([
+      {
+        $match: {
+          tenantId: tenantObjectId,
+          createdAt: { $gte: startDate, $lte: endDate },
+        },
+      },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+          visits: { $sum: 1 },
+        },
+      },
+    ]),
+  ]);
+
+  const legacyVisitsMap = new Map<string, number>();
+  legacyVisitsAgg.forEach((v) => {
+    legacyVisitsMap.set(v._id, v.visits);
+  });
 
   const dataMap = new Map<string, { impressions: number; clicks: number; visits: number }>();
   dailyDocs.forEach((d) => {
@@ -491,6 +516,8 @@ const getMerchantTimeline = async (tenantId: string, query: any) => {
   while (curr <= endDate) {
     const dStr = formatDateYMD(curr);
     const item = dataMap.get(dStr) || { impressions: 0, clicks: 0, visits: 0 };
+    const legacyVisits = legacyVisitsMap.get(dStr) || 0;
+    const effectiveVisits = Math.max(item.visits, legacyVisits);
     const ctr =
       item.impressions > 0
         ? parseFloat(((item.clicks / item.impressions) * 100).toFixed(2))
@@ -501,7 +528,7 @@ const getMerchantTimeline = async (tenantId: string, query: any) => {
       formattedDate: curr.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
       impressions: item.impressions,
       clicks: item.clicks,
-      visits: item.visits,
+      visits: effectiveVisits,
       ctr,
     });
     curr.setDate(curr.getDate() + 1);
@@ -735,22 +762,42 @@ const getAdminOverview = async (query: any) => {
       : 0;
 
   // Platform Timeline over the date range
-  const dailyTimelineAgg = await StoreDailyAnalytics.aggregate([
-    {
-      $match: {
-        dateStr: { $gte: startStr, $lte: endStr },
+  const [dailyTimelineAgg, platformStoreVisitsAgg] = await Promise.all([
+    StoreDailyAnalytics.aggregate([
+      {
+        $match: {
+          dateStr: { $gte: startStr, $lte: endStr },
+        },
       },
-    },
-    {
-      $group: {
-        _id: '$dateStr',
-        impressions: { $sum: '$impressions' },
-        clicks: { $sum: '$clicks' },
-        visits: { $sum: '$visits' },
+      {
+        $group: {
+          _id: '$dateStr',
+          impressions: { $sum: '$impressions' },
+          clicks: { $sum: '$clicks' },
+          visits: { $sum: '$visits' },
+        },
       },
-    },
-    { $sort: { _id: 1 } },
+      { $sort: { _id: 1 } },
+    ]),
+    StoreVisit.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: startDate, $lte: endDate },
+        },
+      },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+          visits: { $sum: 1 },
+        },
+      },
+    ]),
   ]);
+
+  const platformVisitsMap = new Map<string, number>();
+  platformStoreVisitsAgg.forEach((v) => {
+    platformVisitsMap.set(v._id, v.visits);
+  });
 
   const timelineMap = new Map<string, { impressions: number; clicks: number; visits: number }>();
   dailyTimelineAgg.forEach((d) => {
@@ -774,6 +821,8 @@ const getAdminOverview = async (query: any) => {
   while (curr <= endDate) {
     const dStr = formatDateYMD(curr);
     const item = timelineMap.get(dStr) || { impressions: 0, clicks: 0, visits: 0 };
+    const legacyVisits = platformVisitsMap.get(dStr) || 0;
+    const effectiveVisits = Math.max(item.visits, legacyVisits);
     const ctr =
       item.impressions > 0
         ? parseFloat(((item.clicks / item.impressions) * 100).toFixed(2))
@@ -784,7 +833,7 @@ const getAdminOverview = async (query: any) => {
       formattedDate: curr.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
       impressions: item.impressions,
       clicks: item.clicks,
-      visits: item.visits,
+      visits: effectiveVisits,
       ctr,
     });
     curr.setDate(curr.getDate() + 1);

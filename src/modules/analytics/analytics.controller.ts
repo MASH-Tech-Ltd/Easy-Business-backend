@@ -3,6 +3,7 @@ import { Request, Response } from "express";
 import { Order } from "../order/order.model";
 import { Customer } from "../customer/customer.model";
 import { StoreVisit } from "./storeVisit.model";
+import { StoreDailyAnalytics } from "./analytics.model";
 import { VisitorLog } from "../system/security.model";
 import { Tenant } from "../tenant/tenant.model";
 import { getClientIp, isCloudflareProxyIp } from "../../utils/ipHelper";
@@ -28,6 +29,21 @@ const recordVisit = asyncHandler(async (req: Request, res: Response) => {
 
   if (!existingVisit) {
     await StoreVisit.create({ tenantId, sessionId });
+
+    // Also increment StoreDailyAnalytics so daily visits are recorded immediately
+    try {
+      if (mongoose.Types.ObjectId.isValid(tenantId)) {
+        const now = new Date();
+        const dateStr = now.toISOString().split('T')[0] || '';
+        await StoreDailyAnalytics.updateOne(
+          { tenantId: new mongoose.Types.ObjectId(tenantId), dateStr },
+          { $inc: { visits: 1 } },
+          { upsert: true }
+        );
+      }
+    } catch (err) {
+      console.error('Failed to increment StoreDailyAnalytics in recordVisit:', err);
+    }
   }
 
   // Record a Customer VisitorLog for the Super Admin Dashboard Security view
