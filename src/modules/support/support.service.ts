@@ -330,8 +330,10 @@ export const supportService = {
         ticketMongoId: ticket._id.toString(),
       };
 
-      // 1. Broadcast to ticket code room (e.g. ticket_TKT-R1PRI4I)
-      io.to(`ticket_${ticket.ticketId}`).emit("new_message", messagePayload);
+      // 1. Broadcast to ticket code room (e.g. ticket_TKT-R1PRI4I and ticket_#TKT-R1PRI4I)
+      const cleanCode = String(ticket.ticketId).replace(/^#/, '');
+      io.to(`ticket_${cleanCode}`).emit("new_message", messagePayload);
+      io.to(`ticket_#${cleanCode}`).emit("new_message", messagePayload);
       // 2. Broadcast to ticket Mongo ID room (e.g. ticket_672...)
       io.to(`ticket_${ticket._id.toString()}`).emit("new_message", messagePayload);
 

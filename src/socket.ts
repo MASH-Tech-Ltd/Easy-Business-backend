@@ -116,14 +116,14 @@ export const initSocket = (httpServer: http.Server): Server => {
       if (!data?.ticketId) return;
       const cleanId = String(data.ticketId).replace(/^#/, '');
       socket.to(`ticket_${cleanId}`).emit("typing_start", data);
-      if (cleanId !== data.ticketId) socket.to(`ticket_${data.ticketId}`).emit("typing_start", data);
+      socket.to(`ticket_#${cleanId}`).emit("typing_start", data);
     });
 
     socket.on("typing_end", (data: { ticketId: string }) => {
       if (!data?.ticketId) return;
       const cleanId = String(data.ticketId).replace(/^#/, '');
       socket.to(`ticket_${cleanId}`).emit("typing_end", data);
-      if (cleanId !== data.ticketId) socket.to(`ticket_${data.ticketId}`).emit("typing_end", data);
+      socket.to(`ticket_#${cleanId}`).emit("typing_end", data);
     });
 
     socket.on("disconnect", () => {
