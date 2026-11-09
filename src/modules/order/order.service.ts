@@ -139,15 +139,19 @@ const createOrder = async (payload: IOrder): Promise<IOrder> => {
     if (existingCustomer) {
       await Customer.findByIdAndUpdate(existingCustomer._id, {
         $inc: { totalOrders: 1, totalSpent: payload.totalPrice },
-        $set: { name: payload.customerName }
+        $set: {
+          name: payload.customerName,
+          ...(payload.shippingAddress ? { address: payload.shippingAddress } : {}),
+        },
       });
     } else {
       await Customer.create({
         name: payload.customerName,
         phone: payload.customerPhone,
+        ...(payload.shippingAddress ? { address: payload.shippingAddress } : {}),
         tenantId: payload.tenantId,
         totalOrders: 1,
-        totalSpent: payload.totalPrice
+        totalSpent: payload.totalPrice,
       });
     }
   } catch (error) {
@@ -394,6 +398,7 @@ const createManualOrder = async (
     if (existingCustomer) {
       const updateCustomerFields: Record<string, any> = {
         name: (payload.customerName || '').trim(),
+        address: (payload.shippingAddress || '').trim(),
       };
       if (payload.customerEmail && payload.customerEmail.trim()) {
         updateCustomerFields.email = payload.customerEmail.trim();
@@ -406,6 +411,7 @@ const createManualOrder = async (
       await Customer.create({
         name: (payload.customerName || '').trim(),
         phone: cleanPhone,
+        address: (payload.shippingAddress || '').trim(),
         ...(payload.customerEmail?.trim() ? { email: payload.customerEmail.trim() } : {}),
         tenantId: tenantId as any,
         totalOrders: 1,

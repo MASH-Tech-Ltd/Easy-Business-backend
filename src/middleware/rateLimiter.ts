@@ -193,22 +193,42 @@ export const storefrontPublicLimiter = rateLimit({
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 3. SEARCH LIMITER
-//    Applied to /storefront/:slug/products?search=... (the search endpoint).
-//    Frontend already debounces 1 second — this adds server-side protection.
-//    Must be generous enough for real typing, but limit bots hammering search.
+//    Applied to /storefront/:slug/products?search=... (the search endpoint)
+//    and merchant search endpoints. 300 req per 15 minutes.
 // ──────────────────────────────────────────────────────────────────────────────
 export const searchLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000,  // 1 minute window
-  max: 60,                    // 60 search req / min (1/sec) — perfect for 1s debounce
+  windowMs: 15 * 60 * 1000, // 15 minutes window
+  max: 300,                   // 300 search req / 15 min
   message: { success: false, message: 'Search rate limit reached. Please wait a moment before searching again.' },
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false, default: false, singleCount: false },
   store: new BoundedMemoryStore(10_000),
-  keyGenerator: (req: Request) => getClientIp(req),
+  keyGenerator: (req: Request) => req.user?.userId || getClientIp(req),
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
     const ip = getClientIp(req);
-    await handleRateLimitViolation(ip, req, 15, `Search limit exceeded (${options.max}/min)`);
+    await handleRateLimitViolation(ip, req, 15, `Search limit exceeded (${options.max}/15min)`);
+    res.status(options.statusCode).json(options.message);
+  },
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 3b. MANUAL ORDER & MERCHANT SEARCH LIMITER
+//     Dedicated high-capacity limiter (300 requests per 15 minutes) for
+//     manual order creation and product/customer search lookups.
+// ──────────────────────────────────────────────────────────────────────────────
+export const manualOrderLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes window
+  max: 300,                   // 300 requests per 15 minutes
+  message: { success: false, message: 'Manual order & search rate limit reached (300/15min). Please wait a moment.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { xForwardedForHeader: false, default: false, singleCount: false },
+  store: new BoundedMemoryStore(10_000),
+  keyGenerator: (req: Request) => req.user?.userId || getClientIp(req),
+  handler: async (req: Request, res: Response, _next: NextFunction, options) => {
+    const ip = getClientIp(req);
+    await handleRateLimitViolation(ip, req, 30, `Manual order/search limit exceeded (${options.max}/15min)`);
     res.status(options.statusCode).json(options.message);
   },
 });
@@ -277,8 +297,8 @@ export const authLimiter = rateLimit({
 //    Authenticated dashboard users get a generous limit.
 // ──────────────────────────────────────────────────────────────────────────────
 export const dashboardLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000,  // 1 minute
-  max: 200,                   // 200 req / min for authenticated dashboard users
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 3000,                  // 3000 req / 15 min for authenticated dashboard users
   message: { success: false, message: 'Dashboard API rate limit exceeded. Please slow down.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -287,7 +307,7 @@ export const dashboardLimiter = rateLimit({
   keyGenerator: (req: Request) => req.user?.userId || getClientIp(req),
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
     const ip = getClientIp(req);
-    await handleRateLimitViolation(ip, req, 30, `Dashboard limit exceeded (${options.max}/min)`);
+    await handleRateLimitViolation(ip, req, 30, `Dashboard limit exceeded (${options.max}/15min)`);
     res.status(options.statusCode).json(options.message);
   },
 });
