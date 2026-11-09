@@ -16,10 +16,48 @@ import { BackupLogModel } from "../../database/backupLog.model";
 import config from "../../config";
 import { recordAffiliateAuditLog } from "../affiliate/affiliate.utils";
 
+const DEFAULT_SIDEBAR_MENU: {
+  id: string;
+  isActive: boolean;
+  badge: "none" | "new" | "beta";
+  message?: string;
+}[] = [
+  { id: "manualOrders", isActive: true, badge: "new", message: "" },
+  { id: "courier", isActive: true, badge: "beta", message: "" },
+  { id: "fraudCheck", isActive: true, badge: "beta", message: "" },
+  { id: "checkoutLeads", isActive: true, badge: "beta", message: "" },
+  { id: "apiKeys", isActive: true, badge: "beta", message: "" },
+];
+
+const ensureSidebarMenuDefaults = async (settings: any) => {
+  if (!Array.isArray(settings.sidebarMenu)) {
+    settings.sidebarMenu = [...DEFAULT_SIDEBAR_MENU];
+    await settings.save();
+    return;
+  }
+  let modified = false;
+  for (const defItem of DEFAULT_SIDEBAR_MENU) {
+    if (!settings.sidebarMenu.some((item: any) => item.id === defItem.id)) {
+      if (defItem.id === "manualOrders") {
+        settings.sidebarMenu.unshift(defItem);
+      } else {
+        settings.sidebarMenu.push(defItem);
+      }
+      modified = true;
+    }
+  }
+  if (modified) {
+    settings.markModified("sidebarMenu");
+    await settings.save();
+  }
+};
+
 const getGlobalSettings = asyncHandler(async (req: Request, res: Response) => {
   let settings = await GlobalSetting.findOne();
   if (!settings) {
     settings = await GlobalSetting.create({});
+  } else {
+    await ensureSidebarMenuDefaults(settings);
   }
   ApiResponse.sendSuccess(res, 200, "Global settings retrieved", settings);
 });
@@ -134,6 +172,8 @@ const getPublicSettings = asyncHandler(async (req: Request, res: Response) => {
   let settings = await GlobalSetting.findOne();
   if (!settings) {
     settings = await GlobalSetting.create({});
+  } else {
+    await ensureSidebarMenuDefaults(settings);
   }
   
   const publicData = {

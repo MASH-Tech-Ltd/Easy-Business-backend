@@ -110,6 +110,7 @@ const globalSettingsSchema = new Schema<IGlobalSettings>(
         }
       ],
       default: [
+        { id: 'manualOrders', isActive: true, badge: 'new', message: '' },
         { id: 'courier', isActive: true, badge: 'beta', message: '' },
         { id: 'fraudCheck', isActive: true, badge: 'beta', message: '' },
         { id: 'checkoutLeads', isActive: true, badge: 'beta', message: '' },
