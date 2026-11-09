@@ -6,6 +6,7 @@ const orderSchema = new Schema<IOrder>(
     orderId: { type: String, unique: true },
     customerName: { type: String, required: true },
     customerPhone: { type: String, required: true },
+    customerEmail: { type: String, trim: true },
     shippingAddress: { type: String, required: true },
     note: { type: String },
     items: [
@@ -22,6 +23,7 @@ const orderSchema = new Schema<IOrder>(
     ],
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true },
     subTotal: { type: Number, required: true },
+    discount: { type: Number, default: 0 },
     shippingCharge: { type: Number, default: 0 },
     totalPrice: { type: Number, required: true },
     isDeliveryChargePaid: { type: Boolean, default: false },
@@ -35,6 +37,20 @@ const orderSchema = new Schema<IOrder>(
       enum: ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled', 'returned'],
       default: 'pending',
     },
+    orderSourceType: {
+      type: String,
+      enum: ['storefront', 'manual'],
+      default: 'storefront',
+    },
+    orderSource: {
+      type: String,
+      default: 'Website',
+      trim: true,
+    },
+    createdBy: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+    },
     courierProvider: { type: String },
     consignmentId: { type: String },
     trackingUrl: { type: String },
@@ -46,6 +62,7 @@ const orderSchema = new Schema<IOrder>(
 
 orderSchema.index({ tenantId: 1, createdAt: -1 });
 orderSchema.index({ tenantId: 1, status: 1, createdAt: -1 });
+orderSchema.index({ tenantId: 1, orderSourceType: 1, createdAt: -1 });
 orderSchema.index({ customerPhone: 1 });
 
 export const Order = model<IOrder>('Order', orderSchema);

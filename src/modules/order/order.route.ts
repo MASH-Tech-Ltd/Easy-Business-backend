@@ -10,6 +10,9 @@ const router = Router();
 // Storefront creates order (public) — protected by checkout rate limiter and Zod validation
 router.post('/create-order', checkoutLimiter, validateRequest(OrderValidation.createOrderValidation), OrderController.createOrder);
 
+// Merchant creates manual order (protected) — scoped strictly to merchant's own store
+router.post('/manual-order', authMiddleware('tenant_admin'), dashboardLimiter, validateRequest(OrderValidation.createManualOrderValidation), OrderController.createManualOrder);
+
 // Storefront tracks order (public) — light rate limit via global
 router.get('/track/:id', OrderController.trackOrder);
 

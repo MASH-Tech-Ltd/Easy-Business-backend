@@ -277,6 +277,12 @@ const forwardOrder = async (
   if (order.status === "cancelled") {
     throw new CustomError(400, "Cancelled orders cannot be forwarded to a courier");
   }
+  if (order.status === "pending") {
+    throw new CustomError(
+      400,
+      "Please confirm the order first before forwarding it to a courier",
+    );
+  }
   if (order.consignmentId) {
     throw new CustomError(400, "Order is already forwarded to a courier");
   }

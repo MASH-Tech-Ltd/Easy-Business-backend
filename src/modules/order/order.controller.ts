@@ -16,6 +16,17 @@ const createOrder = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 201, 'Order created successfully', result);
 });
 
+const createManualOrder = asyncHandler(async (req: Request, res: Response) => {
+  // SECURITY: Always resolve tenantId and userId strictly from the verified merchant JWT
+  const tenantId = (req as any).user?.tenantId;
+  const userId = (req as any).user?._id;
+  if (!tenantId) {
+    return ApiResponse.sendError(res, 401, 'Unauthorized: Tenant context could not be resolved');
+  }
+  const result = await OrderService.createManualOrder(req.body, tenantId, userId);
+  ApiResponse.sendSuccess(res, 201, 'Manual order created successfully', result);
+});
+
 const getMyOrders = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = (req as any).user.tenantId;
   const result = await OrderService.getOrdersByTenant(tenantId, req.query);
@@ -65,6 +76,7 @@ const trackOrder = asyncHandler(async (req: Request, res: Response) => {
 
 export const OrderController = {
   createOrder,
+  createManualOrder,
   getMyOrders,
   updateOrder,
   deleteOrder,
