@@ -665,11 +665,28 @@ const getProductBySlug = asyncHandler(async (req: Request, res: Response) => {
   // For storefront only: product must belong to an active category
   const activeCategoryIds = await getActiveCategoryIds(tenantId);
 
+  let decodedSlug = slug;
+  try {
+    decodedSlug = decodeURIComponent(slug);
+  } catch {
+    decodedSlug = slug;
+  }
+
+  const slugOrConditions: any[] = [
+    { slug },
+    { slug: decodedSlug },
+    { slug: slug.trim() },
+    { slug: decodedSlug.trim() },
+  ];
+  if (Types.ObjectId.isValid(decodedSlug.trim())) {
+    slugOrConditions.push({ _id: new Types.ObjectId(decodedSlug.trim()) });
+  }
+
   const product = await Product.findOne({
     tenantId,
-    slug,
     status: "ACTIVE",
     categoryId: { $in: activeCategoryIds },
+    $or: slugOrConditions,
   }).populate("categoryId").lean();
   if (!product) {
     return ApiResponse.sendError(res, 404, "Product not found");

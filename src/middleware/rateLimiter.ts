@@ -177,12 +177,19 @@ export const globalRateLimiter = rateLimit({
 // ──────────────────────────────────────────────────────────────────────────────
 export const storefrontPublicLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,  // 1 minute window
-  max: 120,                   // 120 req / min — approx 2 req/sec (covers rapid browsing, infinite scroll, etc.)
+  max: 300,                   // 300 req / min
   message: { success: false, message: 'You are browsing too fast. Please wait a moment and try again.' },
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false, default: false, singleCount: false },
   store: new BoundedMemoryStore(20_000),
+  skip: (req: Request) => {
+    const ip = getClientIp(req);
+    if (isInternalOrWhitelistedIp(ip)) return true;
+    const validApiKey = process.env.STOREFRONT_API_KEY || config.storefront.apiKey;
+    if (validApiKey && req.headers['x-storefront-api-key'] === validApiKey) return true;
+    return false;
+  },
   keyGenerator: (req: Request) => getClientIp(req),
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
     const ip = getClientIp(req);
