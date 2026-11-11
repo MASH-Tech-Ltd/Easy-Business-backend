@@ -39,6 +39,11 @@ function setToCache<T>(key: string, data: T, ttlSeconds = 60): T {
   return data;
 }
 
+export function invalidateStorefrontThemeCache(tenantId: string) {
+  if (!tenantId) return;
+  memoryCache.delete(`store_theme:${tenantId}`);
+}
+
 // Helper to set public CDN / browser caching headers on responses
 const setStorefrontCacheHeaders = (res: Response, maxAge = 30, sMaxAge = 60) => {
   res.setHeader('Cache-Control', `public, max-age=${maxAge}, s-maxage=${sMaxAge}, stale-while-revalidate=120`);

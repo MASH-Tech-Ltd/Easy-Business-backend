@@ -1,6 +1,7 @@
 import { Theme } from './theme.model';
 import { ITheme } from './theme.model';
 import { Tenant } from '../tenant/tenant.model';
+import { invalidateStorefrontThemeCache } from '../storefront/storefront.controller';
 
 export const generateDefaultPolicies = (
   storeName: string,
@@ -20,6 +21,7 @@ const updateTheme = async (tenantId: string, payload: Partial<ITheme>) => {
     { ...payload },
     { returnDocument: 'after', upsert: true }
   );
+  invalidateStorefrontThemeCache(String(tenantId));
   return result;
 };
 

@@ -47,6 +47,18 @@ export interface IShippingZone {
   districts?: string[];
 }
 
+export interface IChatWidgetSetting {
+  enabled?: boolean;
+  whatsappEnabled?: boolean;
+  whatsappNumber?: string;
+  whatsappMessage?: string;
+  messengerEnabled?: boolean;
+  messengerUsername?: string;
+  autoOpen?: boolean;
+  displayStyle?: 'expandable' | 'stacked';
+  greetingText?: string;
+}
+
 export interface ITheme extends Document {
   tenantId: Types.ObjectId;
   themeId: string;
@@ -56,6 +68,7 @@ export interface ITheme extends Document {
   currencySymbol?: string;
   footer?: IFooterSetting;
   banner?: IBannerSetting;
+  chatWidget?: IChatWidgetSetting;
   buttonColors?: {
     addToCart?: string;
     buyNow?: string;
@@ -104,6 +117,18 @@ const bannerSchema = new Schema<IBannerSetting>({
   announcementTextColor: { type: String, default: '#ffffff' },
 }, { _id: false });
 
+const chatWidgetSchema = new Schema<IChatWidgetSetting>({
+  enabled: { type: Boolean, default: false },
+  whatsappEnabled: { type: Boolean, default: false },
+  whatsappNumber: { type: String, default: '' },
+  whatsappMessage: { type: String, default: 'Hello! I have a question about a product on your store.' },
+  messengerEnabled: { type: Boolean, default: false },
+  messengerUsername: { type: String, default: '' },
+  autoOpen: { type: Boolean, default: false },
+  displayStyle: { type: String, enum: ['expandable', 'stacked'], default: 'expandable' },
+  greetingText: { type: String, default: 'Need help? Chat with us!' },
+}, { _id: false });
+
 const themeSchema = new Schema<ITheme>(
   {
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, unique: true },
@@ -114,6 +139,7 @@ const themeSchema = new Schema<ITheme>(
     currencySymbol: { type: String, default: '৳' },
     footer: { type: footerSchema, default: () => ({}) },
     banner: { type: bannerSchema, default: () => ({}) },
+    chatWidget: { type: chatWidgetSchema, default: () => ({}) },
     buttonColors: {
       addToCart: { type: String, default: '' },
       buyNow: { type: String, default: '' },
