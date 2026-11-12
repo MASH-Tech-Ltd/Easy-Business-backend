@@ -21,10 +21,11 @@ const sanitizeLeadItems = (rawItems: unknown) => {
     }));
 };
 
-const trackLead = async (tenantId: string, payload: Partial<ICheckoutLead>) => {
-  const sanitizedItems = sanitizeLeadItems((payload as any).items);
+const trackLead = async (tenantId: string, payload: Partial<ICheckoutLead> & { leadId?: string }) => {
+  const { leadId, ...restPayload } = payload as any;
+  const sanitizedItems = sanitizeLeadItems(restPayload.items);
   const cleanPayload: Partial<ICheckoutLead> = {
-    ...payload,
+    ...restPayload,
     ...(sanitizedItems
       ? {
           items: sanitizedItems,
@@ -62,23 +63,31 @@ const trackLead = async (tenantId: string, payload: Partial<ICheckoutLead>) => {
     await subscription.save();
   };
 
-  // Try to find if an abandoned lead already exists for this phone or email in this tenant
-  const query: any = { tenantId, status: 'abandoned' };
-  
-  if (payload.phone && payload.email) {
-    query.$or = [{ phone: payload.phone }, { email: payload.email }];
-  } else if (payload.phone) {
-    query.phone = payload.phone;
-  } else if (payload.email) {
-    query.email = payload.email;
-  } else {
-    // If no phone or email, we just create a new one, checking limit first.
-    if (addonInfo.used >= addonInfo.limit) return null; // Limit reached
-    await deductUsage();
-    return await CheckoutLead.create({ ...cleanPayload, tenantId });
+  // First try to match by leadId (so editing phone/email/name/address updates the exact same lead)
+  let existingLead = null;
+  if (leadId && Types.ObjectId.isValid(leadId)) {
+    existingLead = await CheckoutLead.findOne({ _id: leadId, tenantId, status: 'abandoned' });
   }
 
-  const existingLead = await CheckoutLead.findOne(query).sort({ createdAt: -1 });
+  // Fallback: match by phone or email in this tenant
+  if (!existingLead) {
+    const query: any = { tenantId, status: 'abandoned' };
+
+    if (cleanPayload.phone && cleanPayload.email) {
+      query.$or = [{ phone: cleanPayload.phone }, { email: cleanPayload.email }];
+    } else if (cleanPayload.phone) {
+      query.phone = cleanPayload.phone;
+    } else if (cleanPayload.email) {
+      query.email = cleanPayload.email;
+    } else {
+      // If no phone or email, we just create a new one, checking limit first.
+      if (addonInfo.used >= addonInfo.limit) return null; // Limit reached
+      await deductUsage();
+      return await CheckoutLead.create({ ...cleanPayload, tenantId });
+    }
+
+    existingLead = await CheckoutLead.findOne(query).sort({ createdAt: -1 });
+  }
 
   if (existingLead) {
     // Update existing lead with new info (does not consume a limit point)

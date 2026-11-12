@@ -12,6 +12,7 @@ const checkoutLeadItemSchema = z.object({
 
 export const trackLeadValidation = z.object({
   body: z.object({
+    leadId: z.string().trim().max(64).optional(),
     firstName: z.string().trim().max(120).optional(),
     lastName: z.string().trim().max(120).optional(),
     phone: z.string().trim().max(30).optional(),
