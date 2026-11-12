@@ -5,7 +5,36 @@ import { syncSubscriptionAddonCredits } from '../subscription/subscription.servi
 import CustomError from '../../helpers/CustomError';
 import { Types } from 'mongoose';
 
+const sanitizeLeadItems = (rawItems: unknown) => {
+  if (!Array.isArray(rawItems)) return undefined;
+  return rawItems
+    .slice(0, 50)
+    .filter((item): item is Record<string, any> => !!item && typeof item === 'object' && !!item.title)
+    .map((item) => ({
+      productId: item.productId ? String(item.productId) : item.id ? String(item.id) : undefined,
+      title: String(item.title).trim().slice(0, 200),
+      price: typeof item.price === 'number' && item.price >= 0 ? item.price : Number(item.price) || 0,
+      quantity: Math.max(1, Math.min(999, Number(item.quantity) || 1)),
+      image: typeof item.image === 'string' ? item.image.trim() : undefined,
+      color: typeof item.color === 'string' ? item.color.trim() : undefined,
+      size: typeof item.size === 'string' ? item.size.trim() : undefined,
+    }));
+};
+
 const trackLead = async (tenantId: string, payload: Partial<ICheckoutLead>) => {
+  const sanitizedItems = sanitizeLeadItems((payload as any).items);
+  const cleanPayload: Partial<ICheckoutLead> = {
+    ...payload,
+    ...(sanitizedItems
+      ? {
+          items: sanitizedItems,
+          subTotal: sanitizedItems.reduce(
+            (sum, it) => sum + (it.price || 0) * (it.quantity || 1),
+            0
+          ),
+        }
+      : {}),
+  };
   // Check addon active status and limit
   const subscription = await Subscription.findOne({ tenantId, status: 'active' }).populate('purchasedAddons.addonId');
   if (!subscription || !subscription.purchasedAddons) return null; // Silently fail if no subscription
@@ -46,20 +75,20 @@ const trackLead = async (tenantId: string, payload: Partial<ICheckoutLead>) => {
     // If no phone or email, we just create a new one, checking limit first.
     if (addonInfo.used >= addonInfo.limit) return null; // Limit reached
     await deductUsage();
-    return await CheckoutLead.create({ ...payload, tenantId });
+    return await CheckoutLead.create({ ...cleanPayload, tenantId });
   }
 
   const existingLead = await CheckoutLead.findOne(query).sort({ createdAt: -1 });
 
   if (existingLead) {
     // Update existing lead with new info (does not consume a limit point)
-    Object.assign(existingLead, payload);
+    Object.assign(existingLead, cleanPayload);
     return await existingLead.save();
   } else {
     // Create new lead, must check limit
     if (addonInfo.used >= addonInfo.limit) return null; // Limit reached
     await deductUsage();
-    return await CheckoutLead.create({ ...payload, tenantId });
+    return await CheckoutLead.create({ ...cleanPayload, tenantId });
   }
 };
 

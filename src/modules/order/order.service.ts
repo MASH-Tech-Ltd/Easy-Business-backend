@@ -10,13 +10,8 @@ import { Theme } from '../theme/theme.model';
 import { computeShipping } from '../../utils/computeShipping';
 import { paginationHelper } from '../../helpers/paginationHelper';
 import { User } from '../auth/auth.model';
-
-const normalizeBDPhone = (phone: string): string => {
-  const digits = (phone || '').replace(/[\s\-()]/g, '').trim();
-  if (digits.startsWith('+880')) return '0' + digits.slice(4);
-  if (digits.startsWith('880')) return '0' + digits.slice(3);
-  return digits;
-};
+import { normalizeBDPhone } from '../../utils/phoneHelper';
+import { BlockedPhoneService } from '../blockedPhone/blockedPhone.service';
 
 const generateUniqueOrderId = async (): Promise<string> => {
   let newOrderId = '';
@@ -30,6 +25,19 @@ const generateUniqueOrderId = async (): Promise<string> => {
 };
 
 const createOrder = async (payload: IOrder): Promise<IOrder> => {
+  // ─── PER-MERCHANT PHONE BLOCK CHECK ─────────────────────────────────────────
+  // Strictly isolated to this merchant's tenantId — other stores are unaffected.
+  const isBlockedPhone = await BlockedPhoneService.isPhoneBlockedForTenant(
+    String(payload.tenantId),
+    payload.customerPhone
+  );
+  if (isBlockedPhone) {
+    throw new CustomError(
+      403,
+      'Sorry, this phone number has been restricted from placing orders on this store.'
+    );
+  }
+
   // ─── SECURITY: Recalculate shipping from the DB, ignore client-sent values ───
   // Extract the shipping address parts (expected format: "street, upazila, district, division")
   const addressParts = (payload.shippingAddress || '').split(',').map((p: string) => p.trim());

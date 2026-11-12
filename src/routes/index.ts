@@ -27,6 +27,7 @@ import { CourierSyncRoutes } from '../modules/courierSync/courierSync.route';
 import { ReferralRoutes } from '../modules/referral/referral.route';
 import { BlogRoutes } from '../modules/blog/blog.route';
 import { AffiliateRoutes } from '../modules/affiliate/affiliate.route';
+import { BlockedPhoneRoutes } from '../modules/blockedPhone/blockedPhone.route';
 
 
 const router = Router();
@@ -139,6 +140,10 @@ const moduleRoutes = [
   {
     path: '/affiliates',
     route: AffiliateRoutes,
+  },
+  {
+    path: '/blocked-phones',
+    route: BlockedPhoneRoutes,
   },
 ];
 
