@@ -18,17 +18,11 @@ const app: Application = express();
 // Do not trust arbitrary hops to prevent IP spoofing via X-Forwarded-For.
 app.set("trust proxy", "loopback");
 
-// Cloudflare verified client IP extraction middleware
-// Extracts CF-Connecting-IP directly from Cloudflare edge proxy when present.
-// Does NOT delete or tamper with X-Forwarded-For so internal reverse proxies and Next.js SSR are preserved.
-app.use((req: Request, res: Response, next) => {
-  const rawCfIp = req.headers["cf-connecting-ip"];
-  if (rawCfIp) {
-    const cfIp = Array.isArray(rawCfIp) ? rawCfIp[0] : rawCfIp;
-    if (cfIp && typeof cfIp === "string" && cfIp.trim()) {
-      req.realUserIp = cfIp.trim();
-    }
-  }
+// Centralised, verified client IP resolution (see utils/ipHelper.ts).
+// Resolved once per request; every module reads it through getClientIp()/resolveClientIp().
+// Forwarding headers are only honoured when the immediate TCP peer is a trusted proxy.
+app.use((req: Request, _res: Response, next) => {
+  resolveClientIp(req);
   next();
 });
 
@@ -38,7 +32,7 @@ import {
   attackDetectionMiddleware
 } from './middleware/security.middleware';
 import { visitorTrackingMiddleware } from './middleware/visitorTracking.middleware';
-import { getClientIp } from './utils/ipHelper';
+import { getClientIp, resolveClientIp } from './utils/ipHelper';
 
 // SECURITY FIX: Strict CORS allow-list — never trust unknown origins
 const allowedOrigins = [
@@ -146,7 +140,11 @@ app.use((req: Request, res: Response, next) => {
 });
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 morgan.token('real-ip', (req: Request) => getClientIp(req));
-app.use(morgan(':real-ip - :method :url HTTP/:http-version :status :res[content-length] - :response-time ms', {
+morgan.token('ip-source', (req: Request) => {
+  const info = resolveClientIp(req);
+  return `${info.source}${info.verified ? '' : '?'} peer=${info.peerIp ?? '-'}`;
+});
+app.use(morgan(':real-ip [:ip-source] - :method :url HTTP/:http-version :status :res[content-length] - :response-time ms', {
   skip: (req) => req.url.startsWith('/socket.io')
 }));
 

@@ -2,7 +2,7 @@ import rateLimit, { Store } from 'express-rate-limit';
 import { Request, Response, NextFunction } from 'express';
 import { SecurityLog, BlockedIp } from '../modules/system/security.model';
 import { getRequestedFrom } from './security.middleware';
-import { getClientIp, isCloudflareProxyIp, isInternalOrWhitelistedIp } from '../utils/ipHelper';
+import { getClientIp, getRateLimitKey, canAutoBlockIp, isInternalOrWhitelistedIp } from '../utils/ipHelper';
 import config from '../config/index';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -121,8 +121,8 @@ const handleRateLimitViolation = async (
       userAgent: req.headers['user-agent'] || 'Unknown',
     });
 
-    // Never auto-block Cloudflare edge proxy node IPs or loopback/internal IPs
-    if (!isInternalOrWhitelistedIp(ip)) {
+    // Never auto-block Cloudflare edge proxy node IPs, loopback/internal IPs, or unverified/spoofable headers
+    if (canAutoBlockIp(req) && !isInternalOrWhitelistedIp(ip)) {
       const now = Date.now();
       const existing = warningCache.get(ip);
 
@@ -167,7 +167,7 @@ export const globalRateLimiter = rateLimit({
     if (validApiKey && req.headers['x-storefront-api-key'] === validApiKey) return true;
     return false;
   },
-  keyGenerator: (req: Request) => getClientIp(req),
+  keyGenerator: (req: Request) => getRateLimitKey(req),
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -190,7 +190,7 @@ export const storefrontPublicLimiter = rateLimit({
     if (validApiKey && req.headers['x-storefront-api-key'] === validApiKey) return true;
     return false;
   },
-  keyGenerator: (req: Request) => getClientIp(req),
+  keyGenerator: (req: Request) => getRateLimitKey(req),
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
     const ip = getClientIp(req);
     await handleRateLimitViolation(ip, req, 20, `Storefront browse limit exceeded (${options.max}/min)`);
@@ -211,7 +211,7 @@ export const searchLimiter = rateLimit({
   legacyHeaders: false,
   validate: { xForwardedForHeader: false, default: false, singleCount: false },
   store: new BoundedMemoryStore(10_000),
-  keyGenerator: (req: Request) => req.user?.userId || getClientIp(req),
+  keyGenerator: (req: Request) => req.user?.userId || getRateLimitKey(req),
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
     const ip = getClientIp(req);
     await handleRateLimitViolation(ip, req, 15, `Search limit exceeded (${options.max}/15min)`);
@@ -232,7 +232,7 @@ export const manualOrderLimiter = rateLimit({
   legacyHeaders: false,
   validate: { xForwardedForHeader: false, default: false, singleCount: false },
   store: new BoundedMemoryStore(10_000),
-  keyGenerator: (req: Request) => req.user?.userId || getClientIp(req),
+  keyGenerator: (req: Request) => req.user?.userId || getRateLimitKey(req),
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
     const ip = getClientIp(req);
     await handleRateLimitViolation(ip, req, 30, `Manual order/search limit exceeded (${options.max}/15min)`);
@@ -252,7 +252,7 @@ export const checkoutLimiter = rateLimit({
   legacyHeaders: false,
   validate: { xForwardedForHeader: false, default: false, singleCount: false },
   store: new BoundedMemoryStore(5_000),
-  keyGenerator: (req: Request) => getClientIp(req),
+  keyGenerator: (req: Request) => getRateLimitKey(req),
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
     const ip = getClientIp(req);
     await handleRateLimitViolation(ip, req, 5, `Checkout limit exceeded (${options.max}/10min)`);
@@ -272,7 +272,7 @@ export const checkoutLeadLimiter = rateLimit({
   legacyHeaders: false,
   validate: { xForwardedForHeader: false, default: false, singleCount: false },
   store: new BoundedMemoryStore(10_000),
-  keyGenerator: (req: Request) => getClientIp(req),
+  keyGenerator: (req: Request) => getRateLimitKey(req),
   // Silent handler — don't log or ban for this, it's automatic client-side
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
     res.status(options.statusCode).json(options.message);
@@ -291,7 +291,7 @@ export const authLimiter = rateLimit({
   legacyHeaders: false,
   validate: { xForwardedForHeader: false, default: false, singleCount: false },
   store: new BoundedMemoryStore(10_000),
-  keyGenerator: (req: Request) => getClientIp(req),
+  keyGenerator: (req: Request) => getRateLimitKey(req),
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
     const ip = getClientIp(req);
     await handleRateLimitViolation(ip, req, 5, `Auth limit exceeded (${options.max}/15min) — possible brute force`);
@@ -311,7 +311,7 @@ export const dashboardLimiter = rateLimit({
   legacyHeaders: false,
   validate: { xForwardedForHeader: false, default: false, singleCount: false },
   store: new BoundedMemoryStore(10_000),
-  keyGenerator: (req: Request) => req.user?.userId || getClientIp(req),
+  keyGenerator: (req: Request) => req.user?.userId || getRateLimitKey(req),
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
     const ip = getClientIp(req);
     await handleRateLimitViolation(ip, req, 30, `Dashboard limit exceeded (${options.max}/15min)`);
@@ -330,7 +330,7 @@ export const uploadLimiter = rateLimit({
   legacyHeaders: false,
   validate: { xForwardedForHeader: false, default: false, singleCount: false },
   store: new BoundedMemoryStore(5_000),
-  keyGenerator: (req: Request) => req.user?.userId || getClientIp(req),
+  keyGenerator: (req: Request) => req.user?.userId || getRateLimitKey(req),
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
     const ip = getClientIp(req);
     await handleRateLimitViolation(ip, req, 10, `Upload limit exceeded (${options.max}/5min)`);
@@ -350,7 +350,7 @@ export const customRateLimit = (windowMs: number, max: number, messageText: stri
     legacyHeaders: false,
     validate: { xForwardedForHeader: false, default: false, singleCount: false },
     store: new BoundedMemoryStore(5_000),
-    keyGenerator: (req: Request) => getClientIp(req),
+    keyGenerator: (req: Request) => getRateLimitKey(req),
     handler: async (req: Request, res: Response, _next: NextFunction, options) => {
       const ip = getClientIp(req);
       await handleRateLimitViolation(ip, req, 10, `Rate limit exceeded (${max} req / ${windowMs / 1000 / 60}m): ${messageText}`);
@@ -372,7 +372,7 @@ export const roleBasedRateLimiter = rateLimit({
     if (role === 'customer' || role === 'store_admin') return 500;
     return 300;
   },
-  keyGenerator: (req: Request) => req.user?.userId || getClientIp(req),
+  keyGenerator: (req: Request) => req.user?.userId || getRateLimitKey(req),
   message: { success: false, message: 'Rate limit exceeded for your role.' },
   standardHeaders: true,
   legacyHeaders: false,

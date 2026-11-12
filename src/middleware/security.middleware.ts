@@ -2,7 +2,8 @@ import { Request, Response, NextFunction } from "express";
 import { BlockedIp, SecurityLog } from "../modules/system/security.model";
 import {
   getClientIp,
-  isCloudflareProxyIp,
+  resolveClientIp,
+  canAutoBlockIp,
   isInternalOrWhitelistedIp,
 } from "../utils/ipHelper";
 import config from "../config/index";
@@ -221,8 +222,9 @@ export const directClientBlockMiddleware = async (
     return next();
   }
 
-  // Allow requests forwarded from internal Next.js with tenant client IP
-  if (req.headers["x-tenant-client-ip"]) {
+  // Allow verified internal BFF / SSR calls (only when TCP peer / Nginx edge verified it)
+  const ipInfo = resolveClientIp(req);
+  if (ipInfo.source === "bff" || ipInfo.source === "internal") {
     return next();
   }
 
@@ -247,7 +249,7 @@ export const directClientBlockMiddleware = async (
         userAgent,
       );
 
-    if (isVulnerabilityScanner && !isInternalOrWhitelistedIp(ip)) {
+    if (isVulnerabilityScanner && canAutoBlockIp(req) && !isInternalOrWhitelistedIp(ip)) {
       try {
         const requestedFrom = getRequestedFrom(req);
         const incidentReason = `Automated vulnerability scanner blocked in production: ${directClientCheck.toolName}`;
@@ -447,6 +449,7 @@ export const attackDetectionMiddleware = async (
       // Critical attack → immediate block; otherwise two-strike rule
       if (
         (isCriticalAttack || hasValidWarning) &&
+        canAutoBlockIp(req) &&
         !isInternalOrWhitelistedIp(ip)
       ) {
         await BlockedIp.findOneAndUpdate(

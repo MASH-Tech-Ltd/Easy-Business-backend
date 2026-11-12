@@ -11,7 +11,8 @@ import { initCourierCron } from './modules/courier/courier.cron';
 import { initBackupCron } from './database/backup.cron';
 import { initSubscriptionCron } from './modules/subscription/subscription.cron';
 
-const PORT = config.app.port || 8000;
+const PORT = Number(config.app.port) || 8000;
+const HOST = process.env.HOST?.trim();
 
 connectDatabase()
   .then(async () => {
@@ -19,9 +20,12 @@ connectDatabase()
     await ensurePackageFreeCredits();
     await ensureAddons();
     await BlogService.seedInitialBlogs();
-    const server = app.listen(PORT, () => {
-      console.log(`Server running at http://localhost:${PORT}`);
-    });
+    const onListening = () => {
+      console.log(`Server running at http://${HOST || 'localhost'}:${PORT}`);
+    };
+    const server = HOST
+      ? app.listen(PORT, HOST, onListening)
+      : app.listen(PORT, onListening);
     
     // Initialize Socket.io
     initSocket(server);
