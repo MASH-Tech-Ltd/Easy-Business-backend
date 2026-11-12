@@ -4,7 +4,11 @@ import { authMiddleware } from '../../middleware/authMiddleware';
 import { tenantMiddleware } from '../../middleware/tenant.middleware';
 import { checkoutLeadLimiter, dashboardLimiter } from '../../middleware/rateLimiter';
 import { validateRequest } from '../../middleware/validateRequest';
-import { getMerchantLeadsValidation, trackLeadValidation } from './checkoutLead.validation';
+import {
+  getMerchantLeadsValidation,
+  trackLeadValidation,
+  updateLeadStatusValidation,
+} from './checkoutLead.validation';
 
 const router = express.Router();
 
@@ -26,5 +30,12 @@ router.get(
   CheckoutLeadController.getMerchantLeads
 );
 router.get('/stats', authMiddleware('tenant_admin'), dashboardLimiter, CheckoutLeadController.getLeadStats);
+router.patch(
+  '/:id/status',
+  authMiddleware('tenant_admin'),
+  dashboardLimiter,
+  validateRequest(updateLeadStatusValidation),
+  CheckoutLeadController.updateLeadStatus
+);
 
 export const CheckoutLeadRoutes = router;

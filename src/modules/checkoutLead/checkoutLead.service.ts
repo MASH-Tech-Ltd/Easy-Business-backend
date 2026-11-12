@@ -121,10 +121,13 @@ const getMerchantLeads = async (tenantId: string, query: any) => {
 
   const limitReached = addonInfo.used >= addonInfo.limit;
 
-  const { page = 1, limit = 10, search = '' } = query;
+  const { page = 1, limit = 10, search = '', status = 'all' } = query;
   const skip = (Number(page) - 1) * Number(limit);
 
-  const filter: any = { tenantId, status: 'abandoned' };
+  const filter: any = { tenantId };
+  if (status === 'abandoned' || status === 'completed') {
+    filter.status = status;
+  }
   
   if (search) {
     filter.$or = [
@@ -188,8 +191,31 @@ const getLeadStats = async (tenantId: string) => {
   return { allTime, thisWeek, thisMonth, thisYear };
 };
 
+const updateLeadStatus = async (
+  tenantId: string,
+  leadId: string,
+  status: 'abandoned' | 'completed'
+) => {
+  if (!Types.ObjectId.isValid(leadId)) {
+    throw new CustomError(400, 'Invalid checkout lead ID');
+  }
+
+  const updated = await CheckoutLead.findOneAndUpdate(
+    { _id: leadId, tenantId },
+    { $set: { status } },
+    { returnDocument: 'after' }
+  );
+
+  if (!updated) {
+    throw new CustomError(404, 'Checkout lead not found');
+  }
+
+  return updated;
+};
+
 export const CheckoutLeadService = {
   trackLead,
   getMerchantLeads,
   getLeadStats,
+  updateLeadStatus,
 };

@@ -35,3 +35,14 @@ export const getMerchantLeadsValidation = z.object({
     status: z.enum(['all', 'abandoned', 'completed']).optional(),
   }),
 });
+
+export const updateLeadStatusValidation = z.object({
+  params: z.object({
+    id: z.string({ message: 'Lead ID is required' }).trim().min(1),
+  }),
+  body: z.object({
+    status: z.enum(['abandoned', 'completed'], {
+      message: 'Status must be either abandoned or completed',
+    }),
+  }),
+});
