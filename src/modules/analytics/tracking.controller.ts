@@ -272,46 +272,65 @@ const updatePlatformTrackingConfig = asyncHandler(async (req: Request, res: Resp
   let tokenCleared = false;
 
   if (metaPixel) {
-    const existingMeta = configDoc.metaPixel || ({} as any);
-    let nextEncryptedToken = existingMeta.capiAccessTokenEncrypted || '';
-    let nextMaskedToken = existingMeta.capiTokenMasked || '';
+    if (!configDoc.metaPixel) {
+      configDoc.metaPixel = {
+        enabled: false,
+        pixelId: '',
+        capiEnabled: false,
+        capiAccessTokenEncrypted: '',
+        capiTokenMasked: '',
+        graphApiVersion: 'v21.0',
+        testEventCode: '',
+        events: { ...PlatformCapiService.DEFAULT_EVENTS },
+        diagnostics: {
+          lastTestAt: null,
+          lastTestStatus: 'idle',
+          lastTestMessage: '',
+          lastEventAt: null,
+          lastEventName: '',
+          lastEventStatus: 'idle',
+          lastErrorMessage: '',
+          lastErrorAt: null,
+        },
+      } as any;
+    }
 
     const rawIncomingToken = typeof metaPixel.capiAccessToken === 'string' ? metaPixel.capiAccessToken.trim() : '';
 
     if (metaPixel.clearCapiToken === true) {
-      nextEncryptedToken = '';
-      nextMaskedToken = '';
+      configDoc.metaPixel.capiAccessTokenEncrypted = '';
+      configDoc.metaPixel.capiTokenMasked = '';
       tokenCleared = true;
     } else if (rawIncomingToken && !rawIncomingToken.includes('••••')) {
-      nextEncryptedToken = encryptSecretGCM(rawIncomingToken);
-      nextMaskedToken = maskSecretToken(rawIncomingToken);
+      configDoc.metaPixel.capiAccessTokenEncrypted = encryptSecretGCM(rawIncomingToken);
+      configDoc.metaPixel.capiTokenMasked = maskSecretToken(rawIncomingToken);
       tokenChanged = true;
     }
 
     const incomingEvents = (metaPixel.events || {}) as Record<string, boolean | undefined>;
-    const existingEvents = (existingMeta.events || {}) as Record<string, boolean | undefined>;
 
-    configDoc.metaPixel = {
-      enabled: Boolean(metaPixel.enabled),
-      pixelId: (metaPixel.pixelId || '').trim(),
-      capiEnabled: Boolean(metaPixel.capiEnabled),
-      capiAccessTokenEncrypted: nextEncryptedToken,
-      capiTokenMasked: nextMaskedToken,
-      graphApiVersion: (metaPixel.graphApiVersion || existingMeta.graphApiVersion || 'v21.0').trim(),
-      testEventCode:
-        metaPixel.testEventCode !== undefined
-          ? String(metaPixel.testEventCode).trim()
-          : existingMeta.testEventCode || '',
-      events: {
-        PageView: incomingEvents.PageView ?? existingEvents.PageView ?? true,
-        ViewContent: incomingEvents.ViewContent ?? existingEvents.ViewContent ?? true,
-        CompleteRegistration: incomingEvents.CompleteRegistration ?? existingEvents.CompleteRegistration ?? true,
-        StartTrial: incomingEvents.StartTrial ?? existingEvents.StartTrial ?? true,
-        InitiateCheckout: incomingEvents.InitiateCheckout ?? existingEvents.InitiateCheckout ?? true,
-        Purchase: incomingEvents.Purchase ?? existingEvents.Purchase ?? true,
-        Contact: incomingEvents.Contact ?? existingEvents.Contact ?? true,
-      },
-      diagnostics: existingMeta.diagnostics || {
+    configDoc.metaPixel.enabled = Boolean(metaPixel.enabled);
+    configDoc.metaPixel.pixelId = (metaPixel.pixelId || '').trim();
+    configDoc.metaPixel.capiEnabled = Boolean(metaPixel.capiEnabled);
+    configDoc.metaPixel.graphApiVersion = (metaPixel.graphApiVersion || configDoc.metaPixel.graphApiVersion || 'v21.0').trim();
+
+    if (metaPixel.testEventCode !== undefined) {
+      configDoc.metaPixel.testEventCode = String(metaPixel.testEventCode).trim();
+    }
+
+    if (!configDoc.metaPixel.events) {
+      configDoc.metaPixel.events = { ...PlatformCapiService.DEFAULT_EVENTS };
+    }
+    configDoc.metaPixel.events.PageView = incomingEvents.PageView ?? configDoc.metaPixel.events.PageView ?? true;
+    configDoc.metaPixel.events.ViewContent = incomingEvents.ViewContent ?? configDoc.metaPixel.events.ViewContent ?? true;
+    configDoc.metaPixel.events.CompleteRegistration = incomingEvents.CompleteRegistration ?? configDoc.metaPixel.events.CompleteRegistration ?? true;
+    configDoc.metaPixel.events.StartTrial = incomingEvents.StartTrial ?? configDoc.metaPixel.events.StartTrial ?? true;
+    configDoc.metaPixel.events.InitiateCheckout = incomingEvents.InitiateCheckout ?? configDoc.metaPixel.events.InitiateCheckout ?? true;
+    configDoc.metaPixel.events.Purchase = incomingEvents.Purchase ?? configDoc.metaPixel.events.Purchase ?? true;
+    configDoc.metaPixel.events.Contact = incomingEvents.Contact ?? configDoc.metaPixel.events.Contact ?? true;
+
+    if (!configDoc.metaPixel.diagnostics) {
+      configDoc.metaPixel.diagnostics = {
         lastTestAt: null,
         lastTestStatus: 'idle',
         lastTestMessage: '',
@@ -320,8 +339,8 @@ const updatePlatformTrackingConfig = asyncHandler(async (req: Request, res: Resp
         lastEventStatus: 'idle',
         lastErrorMessage: '',
         lastErrorAt: null,
-      },
-    };
+      };
+    }
   }
 
   if (googleTagManager) {
