@@ -15,6 +15,7 @@ import { runBackup } from "../../database/backup.cron";
 import { BackupLogModel } from "../../database/backupLog.model";
 import config from "../../config";
 import { recordAffiliateAuditLog } from "../affiliate/affiliate.utils";
+import { PlatformCapiService } from "../analytics/platformCapi.service";
 
 const DEFAULT_SIDEBAR_MENU: {
   id: string;
@@ -175,6 +176,23 @@ const getPublicSettings = asyncHandler(async (req: Request, res: Response) => {
   } else {
     await ensureSidebarMenuDefaults(settings);
   }
+
+  const platformTracking = await PlatformCapiService.getPlatformConfig();
+  const metaPixel = platformTracking?.metaPixel;
+  const publicMetaPixel = {
+    enabled: Boolean(metaPixel?.enabled && metaPixel?.pixelId),
+    pixelId: metaPixel?.enabled ? metaPixel?.pixelId || "" : "",
+    capiEnabled: Boolean(metaPixel?.capiEnabled && metaPixel?.pixelId && metaPixel?.capiAccessTokenEncrypted),
+    events: {
+      PageView: metaPixel?.events?.PageView ?? true,
+      ViewContent: metaPixel?.events?.ViewContent ?? true,
+      CompleteRegistration: metaPixel?.events?.CompleteRegistration ?? true,
+      StartTrial: metaPixel?.events?.StartTrial ?? true,
+      InitiateCheckout: metaPixel?.events?.InitiateCheckout ?? true,
+      Purchase: metaPixel?.events?.Purchase ?? true,
+      Contact: metaPixel?.events?.Contact ?? true,
+    },
+  };
   
   const publicData = {
     platformName: settings.platformName,
@@ -183,6 +201,13 @@ const getPublicSettings = asyncHandler(async (req: Request, res: Response) => {
     couriers: settings.couriers,
     sidebarMenu: settings.sidebarMenu,
     socialLinks: settings.socialLinks || {},
+    metaPixel: publicMetaPixel,
+    googleAnalytics: platformTracking?.googleAnalytics?.enabled
+      ? platformTracking.googleAnalytics
+      : { enabled: false, measurementId: "" },
+    googleTagManager: platformTracking?.googleTagManager?.enabled
+      ? platformTracking.googleTagManager
+      : { enabled: false, containerId: "" },
     affiliateProgram: {
       programEnabled: settings.affiliateSettings?.programEnabled ?? true,
       allowAffiliateRegistration: settings.affiliateSettings?.allowAffiliateRegistration ?? true,

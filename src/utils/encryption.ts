@@ -41,3 +41,49 @@ export const decryptText = (encryptedData: string): string => {
     return '*** DECRYPTION_FAILED ***';
   }
 };
+
+const GCM_PREFIX = 'gcm:';
+const GCM_IV_LENGTH = 12;
+
+export const encryptSecretGCM = (plainText: string): string => {
+  if (!plainText) return '';
+  const iv = crypto.randomBytes(GCM_IV_LENGTH);
+  const cipher = crypto.createCipheriv('aes-256-gcm', getEncryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(plainText, 'utf8'), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return `${GCM_PREFIX}${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted.toString('hex')}`;
+};
+
+export const decryptSecretGCM = (payload: string): string => {
+  if (!payload) return '';
+  if (!payload.startsWith(GCM_PREFIX)) {
+    const legacy = decryptText(payload);
+    return legacy === '*** DECRYPTION_FAILED ***' ? '' : legacy;
+  }
+
+  try {
+    const body = payload.slice(GCM_PREFIX.length);
+    const [ivHex, authTagHex, encryptedHex] = body.split(':');
+    if (!ivHex || !authTagHex || encryptedHex === undefined) return '';
+
+    const iv = Buffer.from(ivHex, 'hex');
+    const authTag = Buffer.from(authTagHex, 'hex');
+    const encrypted = Buffer.from(encryptedHex, 'hex');
+
+    if (iv.length !== GCM_IV_LENGTH || authTag.length !== 16) return '';
+
+    const decipher = crypto.createDecipheriv('aes-256-gcm', getEncryptionKey(), iv);
+    decipher.setAuthTag(authTag);
+    const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+    return decrypted.toString('utf8');
+  } catch {
+    return '';
+  }
+};
+
+export const maskSecretToken = (token: string): string => {
+  const clean = (token || '').trim();
+  if (!clean) return '';
+  if (clean.length <= 8) return '••••••••';
+  return `${clean.slice(0, 4)}••••••••${clean.slice(-4)}`;
+};

@@ -80,7 +80,15 @@ const clearAllAuthCookies = (res: Response, role?: string) => {
 };
 
 const register = asyncHandler(async (req: Request, res: Response) => {
-  const result = await AuthService.register(req.body);
+  const trackingContext = {
+    clientIpAddress: getClientIp(req),
+    clientUserAgent: (req.headers['user-agent'] as string) || '',
+    fbp: req.body?.fbp,
+    fbc: req.body?.fbc,
+    eventSourceUrl: req.body?.eventSourceUrl || (req.headers.referer as string) || '',
+  };
+
+  const result = await AuthService.register(req.body, trackingContext);
 
   if (result.accessToken && result.refreshToken) {
     const { refreshToken, ...others } = result;

@@ -22,6 +22,7 @@ import { Referral, ReferralUsage, ReferralReward } from '../referral/referral.mo
 import { notificationService } from '../notification/notification.service';
 import { GlobalSetting } from '../system/globalSetting.model';
 import { AffiliateReferralService } from '../affiliate/services/referral.service';
+import { PlatformCapiService, PlatformTrackingUserContext } from '../analytics/platformCapi.service';
 
 const assertMerchantNotBanned = async (user: any) => {
   if (user.role === 'tenant_admin') {
@@ -39,7 +40,10 @@ const assertMerchantNotBanned = async (user: any) => {
 };
 
 
-const register = async (payload: Partial<IUser> & { storeName?: string; referralCode?: string }): Promise<{ user: any; accessToken: string; refreshToken: string }> => {
+const register = async (
+  payload: Partial<IUser> & { storeName?: string; referralCode?: string; fbp?: string; fbc?: string; eventSourceUrl?: string },
+  trackingContext?: Partial<PlatformTrackingUserContext> & { eventSourceUrl?: string }
+): Promise<{ user: any; accessToken: string; refreshToken: string; trackingEvents?: any }> => {
   // CRITICAL SECURITY FIX: Check if public registration is globally enabled
   const globalSettings = await GlobalSetting.findOne();
   if (globalSettings && globalSettings.allowRegistration === false) {
@@ -156,6 +160,9 @@ const register = async (payload: Partial<IUser> & { storeName?: string; referral
     const user = new User(payload);
     await user.save({ session });
 
+    let freeSubscription: any = null;
+    let totalTrialDays = 5;
+
     if (createdTenant) {
       createdTenant.ownerId = user._id;
       await createdTenant.save({ session });
@@ -163,13 +170,13 @@ const register = async (payload: Partial<IUser> & { storeName?: string; referral
       // Create free trial subscription
       // Standard trial is 5 days. If a referral code is used, add extra trial days (default +10 days -> 15 days total!)
       const baseTrialDays = 5;
-      const totalTrialDays = baseTrialDays + extraTrialDays;
+      totalTrialDays = baseTrialDays + extraTrialDays;
 
       const trialStart = new Date();
       const trialEnd = new Date();
       trialEnd.setDate(trialEnd.getDate() + totalTrialDays);
 
-      const freeSubscription = new Subscription({
+      freeSubscription = new Subscription({
         tenantId: createdTenant._id,
         packageId: null,   // No paid package needed for free tier
         startDate: trialStart,
@@ -250,6 +257,58 @@ const register = async (payload: Partial<IUser> & { storeName?: string; referral
 
     await session.commitTransaction();
     session.endSession();
+
+    const registrationEventId = `reg_${user._id.toString()}`;
+    const startTrialEventId = freeSubscription ? `trial_${freeSubscription._id.toString()}` : null;
+
+    const capiUserContext: PlatformTrackingUserContext = {
+      email: user.email,
+      phone: user.phone,
+      name: user.name,
+      externalId: createdTenant?._id?.toString(),
+      country: 'bd',
+      clientIpAddress: trackingContext?.clientIpAddress,
+      clientUserAgent: trackingContext?.clientUserAgent,
+      fbp: trackingContext?.fbp || payload.fbp,
+      fbc: trackingContext?.fbc || payload.fbc,
+    };
+
+    const sourceUrl = trackingContext?.eventSourceUrl || payload.eventSourceUrl || '';
+
+    // Dispatch CompleteRegistration & StartTrial to Meta CAPI after transaction commits
+    const capiPromises: Promise<any>[] = [
+      PlatformCapiService.trackPlatformEvent({
+        eventName: 'CompleteRegistration',
+        eventId: registrationEventId,
+        eventSourceUrl: sourceUrl,
+        user: capiUserContext,
+        customData: {
+          content_name: 'Merchant Account Registration',
+          status: 'completed',
+          currency: 'BDT',
+          value: 0,
+        },
+      }),
+    ];
+
+    if (startTrialEventId) {
+      capiPromises.push(
+        PlatformCapiService.trackPlatformEvent({
+          eventName: 'StartTrial',
+          eventId: startTrialEventId,
+          eventSourceUrl: sourceUrl,
+          user: capiUserContext,
+          customData: {
+            content_name: `${totalTrialDays}-Day Free Trial`,
+            predicted_ltv: 0,
+            currency: 'BDT',
+            value: 0,
+          },
+        })
+      );
+    }
+
+    Promise.all(capiPromises).catch(() => undefined);
 
     try {
       // Send welcome email to newly registered user
@@ -348,6 +407,32 @@ const register = async (payload: Partial<IUser> & { storeName?: string; referral
       user: userObj,
       accessToken,
       refreshToken,
+      trackingEvents: {
+        completeRegistration: {
+          eventName: 'CompleteRegistration',
+          eventId: registrationEventId,
+          customData: {
+            content_name: 'Merchant Account Registration',
+            status: 'completed',
+            currency: 'BDT',
+            value: 0,
+          },
+        },
+        ...(startTrialEventId
+          ? {
+              startTrial: {
+                eventName: 'StartTrial',
+                eventId: startTrialEventId,
+                customData: {
+                  content_name: `${totalTrialDays}-Day Free Trial`,
+                  predicted_ltv: 0,
+                  currency: 'BDT',
+                  value: 0,
+                },
+              },
+            }
+          : {}),
+      },
     };
   } catch (error) {
     await session.abortTransaction();

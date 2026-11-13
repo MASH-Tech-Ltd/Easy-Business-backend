@@ -8,6 +8,62 @@ import { Tenant } from '../tenant/tenant.model';
 import CustomError from '../../helpers/CustomError';
 import { User } from '../auth/auth.model';
 import { Subscription } from '../subscription/subscription.model';
+import { encryptSecretGCM, maskSecretToken } from '../../utils/encryption';
+import { PlatformCapiService } from './platformCapi.service';
+import { PlatformTrackingEvent } from './platformTrackingEvent.model';
+import { SecurityLog } from '../system/security.model';
+import { getClientIp } from '../../utils/ipHelper';
+
+const sanitizePublicPlatformMetaPixel = (metaPixel: any) => ({
+  enabled: Boolean(metaPixel?.enabled && metaPixel?.pixelId),
+  pixelId: metaPixel?.enabled ? metaPixel?.pixelId || '' : '',
+  capiEnabled: Boolean(metaPixel?.capiEnabled && metaPixel?.pixelId && metaPixel?.capiAccessTokenEncrypted),
+  events: {
+    PageView: metaPixel?.events?.PageView ?? true,
+    ViewContent: metaPixel?.events?.ViewContent ?? true,
+    CompleteRegistration: metaPixel?.events?.CompleteRegistration ?? true,
+    StartTrial: metaPixel?.events?.StartTrial ?? true,
+    InitiateCheckout: metaPixel?.events?.InitiateCheckout ?? true,
+    Purchase: metaPixel?.events?.Purchase ?? true,
+    Contact: metaPixel?.events?.Contact ?? true,
+  },
+});
+
+const sanitizeAdminPlatformConfig = (configDoc: any) => {
+  const plain = typeof configDoc?.toObject === 'function' ? configDoc.toObject() : { ...configDoc };
+  const meta = plain.metaPixel || {};
+  return {
+    ...plain,
+    metaPixel: {
+      enabled: Boolean(meta.enabled),
+      pixelId: meta.pixelId || '',
+      capiEnabled: Boolean(meta.capiEnabled),
+      hasCapiToken: Boolean(meta.capiAccessTokenEncrypted),
+      capiTokenMasked: meta.capiTokenMasked || '',
+      graphApiVersion: meta.graphApiVersion || 'v21.0',
+      testEventCode: meta.testEventCode || '',
+      events: {
+        PageView: meta.events?.PageView ?? true,
+        ViewContent: meta.events?.ViewContent ?? true,
+        CompleteRegistration: meta.events?.CompleteRegistration ?? true,
+        StartTrial: meta.events?.StartTrial ?? true,
+        InitiateCheckout: meta.events?.InitiateCheckout ?? true,
+        Purchase: meta.events?.Purchase ?? true,
+        Contact: meta.events?.Contact ?? true,
+      },
+      diagnostics: {
+        lastTestAt: meta.diagnostics?.lastTestAt || null,
+        lastTestStatus: meta.diagnostics?.lastTestStatus || 'idle',
+        lastTestMessage: meta.diagnostics?.lastTestMessage || '',
+        lastEventAt: meta.diagnostics?.lastEventAt || null,
+        lastEventName: meta.diagnostics?.lastEventName || '',
+        lastEventStatus: meta.diagnostics?.lastEventStatus || 'idle',
+        lastErrorMessage: meta.diagnostics?.lastErrorMessage || '',
+        lastErrorAt: meta.diagnostics?.lastErrorAt || null,
+      },
+    },
+  };
+};
 
 // Helper to resolve tenantId from authenticated user request
 const resolveUserTenantId = async (req: Request) => {
@@ -161,12 +217,30 @@ const getPlatformTrackingConfig = asyncHandler(async (req: Request, res: Respons
     configDoc = await TrackingConfig.create({
       isPlatform: true,
       googleAnalytics: { enabled: false, measurementId: '' },
-      metaPixel: { enabled: false, pixelId: '' },
+      metaPixel: {
+        enabled: false,
+        pixelId: '',
+        capiEnabled: false,
+        capiAccessTokenEncrypted: '',
+        capiTokenMasked: '',
+        graphApiVersion: 'v21.0',
+        testEventCode: '',
+        events: { ...PlatformCapiService.DEFAULT_EVENTS },
+      },
       googleTagManager: { enabled: false, containerId: '' },
     });
   }
 
-  ApiResponse.sendSuccess(res, 200, 'Platform tracking configuration retrieved successfully', configDoc);
+  const recentEvents = await PlatformTrackingEvent.find()
+    .sort({ createdAt: -1 })
+    .limit(15)
+    .select('eventName eventId status attempts httpStatus fbTraceId errorMessage sentAt createdAt')
+    .lean();
+
+  ApiResponse.sendSuccess(res, 200, 'Platform tracking configuration retrieved successfully', {
+    ...sanitizeAdminPlatformConfig(configDoc),
+    recentEvents,
+  });
 });
 
 // 5. Update Platform Tracking Config (Super Admin Dashboard)
@@ -194,10 +268,59 @@ const updatePlatformTrackingConfig = asyncHandler(async (req: Request, res: Resp
     };
   }
 
+  let tokenChanged = false;
+  let tokenCleared = false;
+
   if (metaPixel) {
+    const existingMeta = configDoc.metaPixel || ({} as any);
+    let nextEncryptedToken = existingMeta.capiAccessTokenEncrypted || '';
+    let nextMaskedToken = existingMeta.capiTokenMasked || '';
+
+    const rawIncomingToken = typeof metaPixel.capiAccessToken === 'string' ? metaPixel.capiAccessToken.trim() : '';
+
+    if (metaPixel.clearCapiToken === true) {
+      nextEncryptedToken = '';
+      nextMaskedToken = '';
+      tokenCleared = true;
+    } else if (rawIncomingToken && !rawIncomingToken.includes('••••')) {
+      nextEncryptedToken = encryptSecretGCM(rawIncomingToken);
+      nextMaskedToken = maskSecretToken(rawIncomingToken);
+      tokenChanged = true;
+    }
+
+    const incomingEvents = (metaPixel.events || {}) as Record<string, boolean | undefined>;
+    const existingEvents = (existingMeta.events || {}) as Record<string, boolean | undefined>;
+
     configDoc.metaPixel = {
       enabled: Boolean(metaPixel.enabled),
       pixelId: (metaPixel.pixelId || '').trim(),
+      capiEnabled: Boolean(metaPixel.capiEnabled),
+      capiAccessTokenEncrypted: nextEncryptedToken,
+      capiTokenMasked: nextMaskedToken,
+      graphApiVersion: (metaPixel.graphApiVersion || existingMeta.graphApiVersion || 'v21.0').trim(),
+      testEventCode:
+        metaPixel.testEventCode !== undefined
+          ? String(metaPixel.testEventCode).trim()
+          : existingMeta.testEventCode || '',
+      events: {
+        PageView: incomingEvents.PageView ?? existingEvents.PageView ?? true,
+        ViewContent: incomingEvents.ViewContent ?? existingEvents.ViewContent ?? true,
+        CompleteRegistration: incomingEvents.CompleteRegistration ?? existingEvents.CompleteRegistration ?? true,
+        StartTrial: incomingEvents.StartTrial ?? existingEvents.StartTrial ?? true,
+        InitiateCheckout: incomingEvents.InitiateCheckout ?? existingEvents.InitiateCheckout ?? true,
+        Purchase: incomingEvents.Purchase ?? existingEvents.Purchase ?? true,
+        Contact: incomingEvents.Contact ?? existingEvents.Contact ?? true,
+      },
+      diagnostics: existingMeta.diagnostics || {
+        lastTestAt: null,
+        lastTestStatus: 'idle',
+        lastTestMessage: '',
+        lastEventAt: null,
+        lastEventName: '',
+        lastEventStatus: 'idle',
+        lastErrorMessage: '',
+        lastErrorAt: null,
+      },
     };
   }
 
@@ -209,8 +332,101 @@ const updatePlatformTrackingConfig = asyncHandler(async (req: Request, res: Resp
   }
 
   await configDoc.save();
+  await PlatformCapiService.invalidatePlatformConfigCache();
 
-  ApiResponse.sendSuccess(res, 200, 'Platform tracking configuration updated successfully', configDoc);
+  // Audit log sensitive platform tracking configuration updates
+  try {
+    const adminUser = (req as any).user;
+    await SecurityLog.create({
+      incidentType: 'PLATFORM_TRACKING_CONFIG_UPDATED',
+      endpoint: '/api/v1/tracking/platform',
+      ipAddress: getClientIp(req),
+      reason: `Pixel:${Boolean(configDoc.metaPixel?.enabled)}, CAPI:${Boolean(configDoc.metaPixel?.capiEnabled)}, TokenUpdated:${tokenChanged}, TokenCleared:${tokenCleared}`,
+      requestedFrom: 'Super Admin',
+      user: adminUser?.email || adminUser?._id?.toString() || 'super_admin',
+      userAgent: (req.headers['user-agent'] as string) || 'Unknown',
+    });
+  } catch {
+    // Audit failure must not block configuration save
+  }
+
+  ApiResponse.sendSuccess(
+    res,
+    200,
+    'Platform tracking configuration updated successfully',
+    sanitizeAdminPlatformConfig(configDoc)
+  );
+});
+
+// 5B. Public Platform Tracking Config Endpoint (Used ONLY by MASH ECO Platform Next.js App)
+const getPublicPlatformTrackingConfig = asyncHandler(async (req: Request, res: Response) => {
+  const platformConfig = await PlatformCapiService.getPlatformConfig();
+  ApiResponse.sendSuccess(res, 200, 'Public platform tracking config retrieved', {
+    googleAnalytics: platformConfig?.googleAnalytics?.enabled
+      ? platformConfig.googleAnalytics
+      : { enabled: false, measurementId: '' },
+    metaPixel: sanitizePublicPlatformMetaPixel(platformConfig?.metaPixel),
+    googleTagManager: platformConfig?.googleTagManager?.enabled
+      ? platformConfig.googleTagManager
+      : { enabled: false, containerId: '' },
+    isPlatform: true,
+  });
+});
+
+// 5C. Public Platform Browser-to-CAPI Forwarding (Only PageView & ViewContent for Deduplication)
+const trackPlatformBrowserEvent = asyncHandler(async (req: Request, res: Response) => {
+  const { eventName, eventId, eventSourceUrl, fbp, fbc, customData } = req.body;
+
+  const result = await PlatformCapiService.trackPlatformEvent({
+    eventName,
+    eventId,
+    eventSourceUrl: eventSourceUrl || (req.headers.referer as string) || '',
+    user: {
+      clientIpAddress: getClientIp(req),
+      clientUserAgent: (req.headers['user-agent'] as string) || '',
+      fbp,
+      fbc,
+      country: 'bd',
+    },
+    customData,
+  });
+
+  ApiResponse.sendSuccess(res, 200, 'Platform event processed', result);
+});
+
+// 5D. Super Admin Test CAPI Event Connection
+const testPlatformMetaCapi = asyncHandler(async (req: Request, res: Response) => {
+  const { testEventCode, graphApiVersion, pixelId } = req.body || {};
+  const result = await PlatformCapiService.sendTestEvent(
+    getClientIp(req),
+    (req.headers['user-agent'] as string) || '',
+    { testEventCode, graphApiVersion, pixelId }
+  );
+
+  try {
+    const adminUser = (req as any).user;
+    await SecurityLog.create({
+      incidentType: 'PLATFORM_TRACKING_TEST_CAPI',
+      endpoint: '/api/v1/tracking/platform/test-capi',
+      ipAddress: getClientIp(req),
+      reason: `Test status: ${result.success ? 'SUCCESS' : 'FAILED'} (${result.message})`,
+      requestedFrom: 'Super Admin',
+      user: adminUser?.email || adminUser?._id?.toString() || 'super_admin',
+      userAgent: (req.headers['user-agent'] as string) || 'Unknown',
+    });
+  } catch {
+    // Non-fatal
+  }
+
+  if (!result.success) {
+    return res.status(400).json({
+      success: false,
+      message: result.message,
+      data: result,
+    });
+  }
+
+  ApiResponse.sendSuccess(res, 200, result.message, result);
 });
 
 // 6. Public Storefront Tracking Endpoint (Used by Tenant App)
@@ -218,11 +434,11 @@ const getStorefrontTrackingConfig = asyncHandler(async (req: Request, res: Respo
   const tenantSlug = req.params.tenantSlug as string;
 
   if (tenantSlug === 'main') {
-    // Return Platform tracking configuration ONLY for main landing page
+    // Return Sanitized Platform tracking configuration ONLY for main landing page
     const platformConfig = await TrackingConfig.findOne({ isPlatform: true });
     return ApiResponse.sendSuccess(res, 200, 'Platform tracking active', {
       googleAnalytics: platformConfig?.googleAnalytics?.enabled ? platformConfig.googleAnalytics : { enabled: false, measurementId: '' },
-      metaPixel: platformConfig?.metaPixel?.enabled ? platformConfig.metaPixel : { enabled: false, pixelId: '' },
+      metaPixel: sanitizePublicPlatformMetaPixel(platformConfig?.metaPixel),
       googleTagManager: platformConfig?.googleTagManager?.enabled ? platformConfig.googleTagManager : { enabled: false, containerId: '' },
       isPlatform: true,
     });
@@ -268,5 +484,8 @@ export const TrackingController = {
   testMerchantTrackingConfig,
   getPlatformTrackingConfig,
   updatePlatformTrackingConfig,
+  getPublicPlatformTrackingConfig,
+  trackPlatformBrowserEvent,
+  testPlatformMetaCapi,
   getStorefrontTrackingConfig,
 };

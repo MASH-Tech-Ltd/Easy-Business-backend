@@ -10,6 +10,7 @@ import { User } from '../auth/auth.model';
 import { PlatformPaymentSubmission } from '../billing/billing.model';
 import { ReferralService } from '../referral/referral.service';
 import { AffiliateCommissionService } from '../affiliate/services/commission.service';
+import { PlatformCapiService, PlatformTrackingUserContext } from '../analytics/platformCapi.service';
 
 
 const notifySubscriptionUpdate = async (tenantId?: string) => {
@@ -329,6 +330,19 @@ const assignPackage = async (payload: { tenantId: string, packageId: string }): 
   }
 
   await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
+
+  const numericAssignedPrice = Number(selectedPackage.price || 0);
+  if (numericAssignedPrice > 0) {
+    PlatformCapiService.trackVerifiedSubscriptionPurchase({
+      subscriptionId: subscription._id.toString(),
+      endDate: subscription.endDate,
+      tenantId: payload.tenantId.toString(),
+      packageName: selectedPackage.name,
+      packageId: selectedPackage._id.toString(),
+      paidAmount: numericAssignedPrice,
+    }).catch(() => undefined);
+  }
+
   return subscription;
 };
 
@@ -469,8 +483,9 @@ const getTenantSubscription = async (tenantId: string): Promise<ISubscription | 
 const requestPackage = async (
   tenantId: string,
   packageId: string,
-  activationType: 'immediate' | 'queue' = 'immediate'
-): Promise<ISubscription> => {
+  activationType: 'immediate' | 'queue' = 'immediate',
+  trackingContext?: Partial<PlatformTrackingUserContext> & { eventSourceUrl?: string }
+): Promise<any> => {
   const selectedPackage = await Package.findById(packageId);
   if (!selectedPackage) {
     throw new CustomError(404, 'Package not found');
@@ -546,7 +561,62 @@ const requestPackage = async (
   }
 
   await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
-  return subscription;
+
+  // Track InitiateCheckout via Meta CAPI and return exact matching eventId to client
+  const minuteBucket = Math.floor(Date.now() / 60000);
+  const initiateCheckoutEventId = `ic_${subscription._id.toString()}_${selectedPackage._id.toString()}_${minuteBucket}`;
+  const checkoutCustomData = {
+    content_name: selectedPackage.name,
+    content_ids: [selectedPackage._id.toString()],
+    content_type: 'product',
+    value: Number(paidAmount || 0),
+    currency: 'BDT',
+    num_items: 1,
+  };
+
+  try {
+    let ownerEmail = tenant?.contactEmail;
+    let ownerPhone = tenant?.contactPhone;
+    let ownerName = tenant?.name;
+    if (tenant?.ownerId) {
+      const owner = await User.findById(tenant.ownerId).select('email phone name').lean();
+      if (owner) {
+        ownerEmail = ownerEmail || owner.email;
+        ownerPhone = ownerPhone || (owner as any).phone;
+        ownerName = ownerName || owner.name;
+      }
+    }
+
+    PlatformCapiService.trackPlatformEvent({
+      eventName: 'InitiateCheckout',
+      eventId: initiateCheckoutEventId,
+      eventSourceUrl: trackingContext?.eventSourceUrl || '',
+      user: {
+        email: ownerEmail,
+        phone: ownerPhone,
+        name: ownerName,
+        externalId: tenantId?.toString(),
+        country: 'bd',
+        clientIpAddress: trackingContext?.clientIpAddress,
+        clientUserAgent: trackingContext?.clientUserAgent,
+        fbp: trackingContext?.fbp,
+        fbc: trackingContext?.fbc,
+      },
+      customData: checkoutCustomData,
+    }).catch(() => undefined);
+  } catch {
+    // Non-fatal
+  }
+
+  const subObj = subscription.toObject ? subscription.toObject() : { ...subscription };
+  return {
+    ...subObj,
+    trackingEvent: {
+      eventName: 'InitiateCheckout',
+      eventId: initiateCheckoutEventId,
+      customData: checkoutCustomData,
+    },
+  };
 };
 
 const approveSubscription = async (subscriptionId: string): Promise<ISubscription> => {
@@ -674,6 +744,22 @@ const approveSubscription = async (subscriptionId: string): Promise<ISubscriptio
   }
 
   await notifySubscriptionUpdate((subscription as any)?.tenantId?.toString());
+
+  // Track Purchase authoritatively via CAPI only after verified subscription approval
+  const verifiedPaidAmount = Number(
+    subscription.paidAmount ?? subscription.originalPrice ?? selectedPackage?.price ?? 0
+  );
+  if (!subscription.isTrial && verifiedPaidAmount > 0 && subscription.tenantId) {
+    PlatformCapiService.trackVerifiedSubscriptionPurchase({
+      subscriptionId: subscription._id.toString(),
+      endDate: subscription.endDate,
+      tenantId: subscription.tenantId.toString(),
+      packageName: selectedPackage?.name || 'Subscription Plan',
+      packageId: selectedPackage?._id?.toString() || '',
+      paidAmount: verifiedPaidAmount,
+    }).catch(() => undefined);
+  }
+
   return subscription;
 };
 

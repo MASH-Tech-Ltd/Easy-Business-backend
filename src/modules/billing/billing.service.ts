@@ -13,6 +13,7 @@ import { SubscriptionService } from '../subscription/subscription.service';
 import { AffiliateCommissionService } from '../affiliate/services/commission.service';
 import { sendEmail } from '../../utils/sendEmail';
 import { paymentConfirmationTemplate } from '../../templates/paymentConfirmation';
+import { PlatformCapiService } from '../analytics/platformCapi.service';
 
 const getPlatformPaymentSettings = async () => {
   let settings = await PlatformPaymentSettings.findOne();
@@ -546,6 +547,20 @@ const verifyPaymentSubmission = async (id: string, status: 'approved' | 'rejecte
             subscription: activeSub,
             paymentSubmission: submission,
           });
+
+          // Dispatch verified Purchase CAPI event (idempotent on subscription + endDate)
+          const verifiedAmount = Number(submission.amount ?? activeSub.paidAmount ?? 0);
+          if (verifiedAmount > 0) {
+            PlatformCapiService.trackVerifiedSubscriptionPurchase({
+              subscriptionId: activeSub._id.toString(),
+              endDate: activeSub.endDate,
+              invoiceNumber: submission.transactionId || submission._id.toString(),
+              tenantId: submission.tenantId.toString(),
+              packageName: (activeSub.packageId as any)?.name || submission.purposeTitle || 'Subscription Plan',
+              packageId: (activeSub.packageId as any)?._id?.toString() || '',
+              paidAmount: verifiedAmount,
+            }).catch(() => undefined);
+          }
         }
       } catch (err) {
         console.error('Failed to unlock referral points upon payment verification fallback:', err);

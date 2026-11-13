@@ -3,6 +3,7 @@ import { SubscriptionService } from './subscription.service';
 import ApiResponse from '../../utils/apiResponse';
 import { asyncHandler } from '../../utils/asyncHandler';
 import {Subscription} from './subscription.model';
+import { getClientIp } from '../../utils/ipHelper';
 
 const assignPackage = asyncHandler(async (req: Request, res: Response) => {
   const result = await SubscriptionService.assignPackage(req.body);
@@ -50,7 +51,19 @@ const getMySubscription = asyncHandler(async (req: Request, res: Response) => {
 
 const requestPackage = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = (req as any).user.tenantId;
-  const result = await SubscriptionService.requestPackage(tenantId, req.body.packageId, req.body.activationType);
+  const trackingContext = {
+    clientIpAddress: getClientIp(req),
+    clientUserAgent: (req.headers['user-agent'] as string) || '',
+    fbp: req.body?.fbp,
+    fbc: req.body?.fbc,
+    eventSourceUrl: req.body?.eventSourceUrl || (req.headers.referer as string) || '',
+  };
+  const result = await SubscriptionService.requestPackage(
+    tenantId,
+    req.body.packageId,
+    req.body.activationType,
+    trackingContext
+  );
   ApiResponse.sendSuccess(res, 201, 'Package requested successfully', result);
 });
 

@@ -1,12 +1,49 @@
 import { Request, Response } from 'express';
 import { contactInquiryService } from './contactInquiry.service';
 import { getClientIp } from '../../utils/ipHelper';
+import { PlatformCapiService } from '../analytics/platformCapi.service';
 
 export const createInquiry = async (req: Request, res: Response) => {
   try {
     const ipAddress = getClientIp(req);
     const inquiry = await contactInquiryService.createInquiry({ ...req.body, ipAddress });
-    res.status(201).json({ success: true, data: inquiry, message: 'Inquiry submitted successfully' });
+
+    const contactEventId = `contact_${(inquiry as any)._id.toString()}`;
+    const eventSourceUrl = req.body?.eventSourceUrl || (req.headers.referer as string) || '';
+
+    PlatformCapiService.trackPlatformEvent({
+      eventName: 'Contact',
+      eventId: contactEventId,
+      eventSourceUrl,
+      user: {
+        email: req.body?.email,
+        phone: req.body?.phone,
+        name: req.body?.name,
+        country: 'bd',
+        clientIpAddress: ipAddress,
+        clientUserAgent: (req.headers['user-agent'] as string) || '',
+        fbp: req.body?.fbp,
+        fbc: req.body?.fbc,
+      },
+      customData: {
+        content_name: 'Platform Contact Inquiry',
+        content_category: req.body?.shopType || req.body?.topic || 'general',
+      },
+    }).catch(() => undefined);
+
+    res.status(201).json({
+      success: true,
+      data: inquiry,
+      trackingEvent: {
+        eventName: 'Contact',
+        eventId: contactEventId,
+        customData: {
+          content_name: 'Platform Contact Inquiry',
+          content_category: req.body?.shopType || req.body?.topic || 'general',
+        },
+      },
+      message: 'Inquiry submitted successfully',
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }
