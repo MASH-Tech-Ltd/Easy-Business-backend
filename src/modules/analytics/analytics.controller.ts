@@ -538,7 +538,27 @@ const getSuperAdminStats = asyncHandler(async (req: Request, res: Response) => {
   const allSubscriptions = await Subscription.find({})
     .populate("packageId")
     .populate("tenantId", "name")
-    .populate("purchasedAddons.addonId", "name price");
+    .populate("purchasedAddons.addonId", "name price slug");
+
+  const isFreeCreditAddon = (pa: any, sub: any): boolean => {
+    // During a free trial, all allocated addons are 100% free credits
+    if (sub.isTrial) return true;
+
+    const slug = (pa.addonId?.slug || "").toLowerCase();
+    const name = (pa.addonId?.name || "").toLowerCase();
+
+    // Courier Automation and Abandoned Checkout are free credits included with packages
+    const isPackageFreeAddon =
+      slug === "courier_automation" ||
+      slug === "courier-automation" ||
+      slug === "abandoned_checkout" ||
+      slug === "abandoned-checkout" ||
+      name.includes("courier automation") ||
+      name.includes("abandoned checkout");
+
+    // Free credits included with the package have paidLimit <= 0
+    return isPackageFreeAddon && (!pa.paidLimit || pa.paidLimit <= 0);
+  };
 
   const activeSubscriptions = allSubscriptions.filter(
     (sub: any) => sub.status === "active",
@@ -547,14 +567,15 @@ const getSuperAdminStats = asyncHandler(async (req: Request, res: Response) => {
   const activePackages = activeSubscriptions.length;
   const monthlyMRR = activeSubscriptions.reduce((acc: number, sub: any) => {
     let addonTotal = 0;
-    if (sub.purchasedAddons && sub.purchasedAddons.length > 0) {
+    if (!sub.isTrial && sub.purchasedAddons && sub.purchasedAddons.length > 0) {
       sub.purchasedAddons.forEach((pa: any) => {
         if (pa.status === "active" && pa.addonId) {
+          if (isFreeCreditAddon(pa, sub)) return;
           addonTotal += pa.addonId.price || 0;
         }
       });
     }
-    const pkgPrice = sub.isTrial ? 0 : sub.packageId?.price || 0;
+    const pkgPrice = sub.isTrial ? 0 : (sub.paidAmount ?? sub.packageId?.price ?? 0);
     return acc + pkgPrice + addonTotal;
   }, 0);
 
@@ -575,8 +596,12 @@ const getSuperAdminStats = asyncHandler(async (req: Request, res: Response) => {
       if (sub.purchasedAddons && sub.purchasedAddons.length > 0) {
         sub.purchasedAddons.forEach((pa: any) => {
           if (pa.status === "active" && pa.addonId) {
-            addonPrice += pa.addonId.price || 0;
             addonNames.push(pa.addonId.name);
+
+            // Free trial and package-included free credits do not add price
+            if (isFreeCreditAddon(pa, sub)) return;
+
+            addonPrice += pa.addonId.price || 0;
           }
         });
       }
@@ -587,10 +612,10 @@ const getSuperAdminStats = asyncHandler(async (req: Request, res: Response) => {
         !sub.isTrial &&
         (sub.status === "active" || sub.status === "expired")
       ) {
-        packagePrice = sub.packageId?.price || 0;
+        packagePrice = sub.paidAmount ?? sub.packageId?.price ?? 0;
       }
 
-      const price = packagePrice + addonPrice;
+      const price = sub.isTrial || sub.status === "cancelled" ? 0 : (packagePrice + addonPrice);
       const subDate = new Date(sub.createdAt);
 
       totalSales += price;
@@ -605,7 +630,7 @@ const getSuperAdminStats = asyncHandler(async (req: Request, res: Response) => {
       return {
         id: sub._id,
         tenantName: sub.tenantId?.name || "Unknown",
-        packageName: sub.packageId?.name || "Free tier",
+        packageName: sub.isTrial ? "Free tier" : (sub.packageId?.name || "Free tier"),
         addons: addonNames.join(", "),
         amount: price,
         status: sub.status,
