@@ -2,7 +2,12 @@ import { Request, Response } from 'express';
 import { SubscriptionService } from './subscription.service';
 import ApiResponse from '../../utils/apiResponse';
 import { asyncHandler } from '../../utils/asyncHandler';
-import {Subscription} from './subscription.model';
+import { Subscription } from './subscription.model';
+import { User } from '../auth/auth.model';
+import { sendEmail } from '../../utils/sendEmail';
+import { subscriptionExpiryReminderTemplate } from '../../templates/subscriptionExpiryReminder';
+import { notificationService } from '../notification/notification.service';
+import config from '../../config';
 import { getClientIp } from '../../utils/ipHelper';
 
 const assignPackage = asyncHandler(async (req: Request, res: Response) => {
@@ -169,6 +174,98 @@ const triggerExpiryReminders = asyncHandler(async (req: Request, res: Response) 
   ApiResponse.sendSuccess(res, 200, 'Subscription expiry scan completed successfully', result);
 });
 
+
+const sendManualExpiryWarning = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const sub = await Subscription.findById(id).populate('packageId').populate('tenantId');
+  if (!sub) {
+    return ApiResponse.sendError(res, 404, 'Subscription not found');
+  }
+
+  const tenant = sub.tenantId as any;
+  if (!tenant) {
+    return ApiResponse.sendError(res, 400, 'Associated tenant not found for this subscription');
+  }
+
+  let ownerUser: any = null;
+  if (tenant.ownerId) {
+    ownerUser = await User.findById(tenant.ownerId);
+  }
+
+  const recipientEmail = ownerUser?.email || tenant.contactEmail;
+  if (!recipientEmail) {
+    return ApiResponse.sendError(res, 400, `No email address found on file for store "${tenant.name || 'Store'}"`);
+  }
+
+  const storeName = tenant.name || 'আপনার অনলাইন স্টোর';
+  const ownerName = ownerUser?.name || tenant.name || 'সম্মানিত মার্চেন্ট';
+  const isTrial = Boolean(sub.isTrial);
+  const planName = isTrial ? 'ফ্রি ট্রায়াল' : (sub.packageId as any)?.name || 'পেইড প্ল্যান';
+
+  const now = new Date();
+  const endDate = sub.endDate ? new Date(sub.endDate) : now;
+  const diffMs = endDate.getTime() - now.getTime();
+  const diffHours = Math.round(diffMs / (1000 * 60 * 60));
+  const daysRemaining = diffMs > 0 ? Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24))) : 0;
+
+  const renewalUrl = `${config.app.frontendUrl || 'https://merchant.masheco.com'}/dashboard/subscription`;
+
+  const daysText = daysRemaining === 1 ? '১ দিন' : `${daysRemaining} দিন`;
+  const subject = diffMs > 0
+    ? (isTrial
+        ? `⚠️ আপনার MASH ECO ফ্রি ট্রায়ালের মেয়াদ আর মাত্র ${daysText} বাকি!`
+        : `⚠️ আপনার MASH ECO সাবস্ক্রিপশনের মেয়াদ আর মাত্র ${daysText} বাকি!`)
+    : (isTrial
+        ? `⚠️ আপনার MASH ECO ফ্রি ট্রায়ালের মেয়াদ শেষ হয়ে গেছে!`
+        : `⚠️ আপনার MASH ECO সাবস্ক্রিপশনের মেয়াদ শেষ হয়ে গেছে!`);
+
+  const html = subscriptionExpiryReminderTemplate({
+    storeName,
+    ownerName,
+    planName,
+    isTrial,
+    expiryDate: sub.endDate,
+    daysRemaining: Math.max(1, daysRemaining),
+    renewalUrl,
+  });
+
+  // 1. Send Email to merchant
+  await sendEmail(recipientEmail, subject, html);
+
+  // 2. Create In-App Notification in Merchant Dashboard
+  if (tenant.ownerId) {
+    try {
+      await notificationService.createNotification(
+        tenant.ownerId,
+        'SUBSCRIPTION_EXPIRING_SOON',
+        isTrial ? 'ফ্রি ট্রায়াল শেষের সতর্কতা' : 'সাবস্ক্রিপশনের মেয়াদ শেষের সতর্কতা',
+        diffMs > 0
+          ? `আপনার "${storeName}" স্টোরের ${isTrial ? 'ফ্রি ট্রায়ালের' : 'সাবস্ক্রিপশনের'} মেয়াদ আর মাত্র ${daysRemaining} দিন বাকি আছে। মেয়াদ শেষ হওয়ার আগেই রিনিউ সম্পন্ন করুন।`
+          : `আপনার "${storeName}" স্টোরের ${isTrial ? 'ফ্রি ট্রায়ালের' : 'সাবস্ক্রিপশনের'} মেয়াদ শেষ হয়ে গেছে। স্টোর সচল রাখতে এখনই রিনিউ সম্পন্ন করুন।`,
+        sub._id,
+        tenant._id
+      );
+    } catch (notifErr) {
+      console.error('[sendManualExpiryWarning] Failed to send in-app notification:', notifErr);
+    }
+  }
+
+  // 3. Mark Warning as Sent with exact timestamp
+  sub.expiryWarningSent = true;
+  sub.expiryWarningSentAt = new Date();
+  await sub.save();
+
+  ApiResponse.sendSuccess(res, 200, `Warning notification & email sent successfully to ${recipientEmail}`, {
+    recipientEmail,
+    sentAt: sub.expiryWarningSentAt,
+    daysRemaining,
+    diffHours,
+    isTrial,
+    storeName,
+    subscriptionId: sub._id,
+  });
+});
+
 export const SubscriptionController = {
   assignPackage,
   getTenantSubscription,
@@ -190,5 +287,6 @@ export const SubscriptionController = {
   removeAddon,
   activateEarly,
   activateEarlyById,
-  triggerExpiryReminders
+  triggerExpiryReminders,
+  sendManualExpiryWarning
 };
