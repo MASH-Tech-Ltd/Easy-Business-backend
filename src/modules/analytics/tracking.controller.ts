@@ -11,6 +11,8 @@ import { Subscription } from '../subscription/subscription.model';
 import { encryptSecretGCM, maskSecretToken } from '../../utils/encryption';
 import { PlatformCapiService } from './platformCapi.service';
 import { PlatformTrackingEvent } from './platformTrackingEvent.model';
+import { TenantCapiService } from './tenantCapi.service';
+import { TenantTrackingEvent } from './tenantTrackingEvent.model';
 import { SecurityLog } from '../system/security.model';
 import { getClientIp } from '../../utils/ipHelper';
 
@@ -40,6 +42,7 @@ const sanitizeAdminPlatformConfig = (configDoc: any) => {
       capiEnabled: Boolean(meta.capiEnabled),
       hasCapiToken: Boolean(meta.capiAccessTokenEncrypted),
       capiTokenMasked: meta.capiTokenMasked || '',
+      mode: meta.mode || (meta.testEventCode ? 'test' : 'live'),
       graphApiVersion: meta.graphApiVersion || 'v21.0',
       testEventCode: meta.testEventCode || '',
       events: {
@@ -47,6 +50,42 @@ const sanitizeAdminPlatformConfig = (configDoc: any) => {
         ViewContent: meta.events?.ViewContent ?? true,
         CompleteRegistration: meta.events?.CompleteRegistration ?? true,
         StartTrial: meta.events?.StartTrial ?? true,
+        InitiateCheckout: meta.events?.InitiateCheckout ?? true,
+        Purchase: meta.events?.Purchase ?? true,
+        Contact: meta.events?.Contact ?? true,
+      },
+      diagnostics: {
+        lastTestAt: meta.diagnostics?.lastTestAt || null,
+        lastTestStatus: meta.diagnostics?.lastTestStatus || 'idle',
+        lastTestMessage: meta.diagnostics?.lastTestMessage || '',
+        lastEventAt: meta.diagnostics?.lastEventAt || null,
+        lastEventName: meta.diagnostics?.lastEventName || '',
+        lastEventStatus: meta.diagnostics?.lastEventStatus || 'idle',
+        lastErrorMessage: meta.diagnostics?.lastErrorMessage || '',
+        lastErrorAt: meta.diagnostics?.lastErrorAt || null,
+      },
+    },
+  };
+};
+
+const sanitizeMerchantTrackingConfig = (configDoc: any) => {
+  const plain = typeof configDoc?.toObject === 'function' ? configDoc.toObject() : { ...configDoc };
+  const meta = plain.metaPixel || {};
+  return {
+    ...plain,
+    metaPixel: {
+      enabled: Boolean(meta.enabled),
+      pixelId: meta.pixelId || '',
+      capiEnabled: Boolean(meta.capiEnabled),
+      hasCapiToken: Boolean(meta.capiAccessTokenEncrypted),
+      capiTokenMasked: meta.capiTokenMasked || '',
+      mode: meta.mode || (meta.testEventCode ? 'test' : 'live'),
+      graphApiVersion: meta.graphApiVersion || 'v21.0',
+      testEventCode: meta.testEventCode || '',
+      events: {
+        PageView: meta.events?.PageView ?? true,
+        ViewContent: meta.events?.ViewContent ?? true,
+        AddToCart: meta.events?.AddToCart ?? true,
         InitiateCheckout: meta.events?.InitiateCheckout ?? true,
         Purchase: meta.events?.Purchase ?? true,
         Contact: meta.events?.Contact ?? true,
@@ -100,19 +139,41 @@ const normalizeTenantQuery = (slugOrDomain: string) => {
 // 1. Get Merchant Tracking Config (Merchant Dashboard)
 const getMerchantTrackingConfig = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = await resolveUserTenantId(req);
-  let configDoc = await TrackingConfig.findOne({ tenantId });
+  let configDoc = await TrackingConfig.findOne({ tenantId, isPlatform: false });
 
   if (!configDoc) {
     configDoc = await TrackingConfig.create({
       tenantId,
       isPlatform: false,
       googleAnalytics: { enabled: false, measurementId: '' },
-      metaPixel: { enabled: false, pixelId: '' },
+      metaPixel: {
+        enabled: false,
+        pixelId: '',
+        capiEnabled: false,
+        capiAccessTokenEncrypted: '',
+        capiTokenMasked: '',
+        mode: 'live',
+        graphApiVersion: 'v21.0',
+        testEventCode: '',
+        events: { ...TenantCapiService.DEFAULT_MERCHANT_EVENTS },
+      },
       googleTagManager: { enabled: false, containerId: '' },
     });
   }
 
-  ApiResponse.sendSuccess(res, 200, 'Tracking configuration retrieved successfully', configDoc);
+  // Auto-prune older deliveries beyond 100 max
+  await TenantCapiService.pruneOldTenantTrackingEvents(tenantId, 100);
+
+  const recentEvents = await TenantTrackingEvent.find({ tenantId })
+    .sort({ createdAt: -1 })
+    .limit(100)
+    .select('eventName eventId status attempts httpStatus fbTraceId errorMessage sentAt createdAt')
+    .lean();
+
+  ApiResponse.sendSuccess(res, 200, 'Tracking configuration retrieved successfully', {
+    ...sanitizeMerchantTrackingConfig(configDoc),
+    recentEvents,
+  });
 });
 
 // 2. Update Merchant Tracking Config (Merchant Dashboard)
@@ -140,7 +201,7 @@ const updateMerchantTrackingConfig = asyncHandler(async (req: Request, res: Resp
   const isTrial = Boolean(subscription.isTrial);
 
   const wantsGA = Boolean(googleAnalytics?.enabled);
-  const wantsPixel = Boolean(metaPixel?.enabled);
+  const wantsPixel = Boolean(metaPixel?.enabled || metaPixel?.capiEnabled);
   const wantsGTM = Boolean(googleTagManager?.enabled);
 
   if (isTrial && (wantsGA || wantsPixel || wantsGTM)) {
@@ -164,7 +225,7 @@ const updateMerchantTrackingConfig = asyncHandler(async (req: Request, res: Resp
     );
   }
 
-  let configDoc = await TrackingConfig.findOne({ tenantId });
+  let configDoc = await TrackingConfig.findOne({ tenantId, isPlatform: false });
   if (!configDoc) {
     configDoc = new TrackingConfig({ tenantId, isPlatform: false });
   }
@@ -177,9 +238,62 @@ const updateMerchantTrackingConfig = asyncHandler(async (req: Request, res: Resp
   }
 
   if (metaPixel) {
-    configDoc.metaPixel = {
-      enabled: Boolean(metaPixel.enabled),
-      pixelId: (metaPixel.pixelId || '').trim(),
+    if (!configDoc.metaPixel) {
+      configDoc.metaPixel = {
+        enabled: false,
+        pixelId: '',
+        capiEnabled: false,
+        capiAccessTokenEncrypted: '',
+        capiTokenMasked: '',
+        mode: 'live',
+        graphApiVersion: 'v21.0',
+        testEventCode: '',
+        events: { ...TenantCapiService.DEFAULT_MERCHANT_EVENTS },
+        diagnostics: {
+          lastTestAt: null,
+          lastTestStatus: 'idle',
+          lastTestMessage: '',
+          lastEventAt: null,
+          lastEventName: '',
+          lastEventStatus: 'idle',
+          lastErrorMessage: '',
+          lastErrorAt: null,
+        },
+      } as any;
+    }
+
+    const rawIncomingToken = typeof metaPixel.capiAccessToken === 'string' ? metaPixel.capiAccessToken.trim() : '';
+
+    if (metaPixel.clearCapiToken === true) {
+      configDoc.metaPixel.capiAccessTokenEncrypted = '';
+      configDoc.metaPixel.capiTokenMasked = '';
+    } else if (rawIncomingToken && !rawIncomingToken.includes('••••')) {
+      configDoc.metaPixel.capiAccessTokenEncrypted = encryptSecretGCM(rawIncomingToken);
+      configDoc.metaPixel.capiTokenMasked = maskSecretToken(rawIncomingToken);
+    }
+
+    const incomingEvents = (metaPixel.events || {}) as Record<string, boolean | undefined>;
+
+    configDoc.metaPixel.enabled = Boolean(metaPixel.enabled);
+    configDoc.metaPixel.pixelId = (metaPixel.pixelId || '').trim();
+    configDoc.metaPixel.capiEnabled = Boolean(metaPixel.capiEnabled);
+    configDoc.metaPixel.mode = metaPixel.mode === 'test' ? 'test' : 'live';
+    configDoc.metaPixel.graphApiVersion = (metaPixel.graphApiVersion || configDoc.metaPixel.graphApiVersion || 'v21.0').trim();
+
+    if (metaPixel.testEventCode !== undefined) {
+      configDoc.metaPixel.testEventCode = String(metaPixel.testEventCode).trim();
+    }
+
+    const currentEvents = (configDoc.metaPixel.events || { ...TenantCapiService.DEFAULT_MERCHANT_EVENTS }) as any;
+    configDoc.metaPixel.events = {
+      PageView: incomingEvents.PageView ?? currentEvents.PageView ?? true,
+      ViewContent: incomingEvents.ViewContent ?? currentEvents.ViewContent ?? true,
+      AddToCart: incomingEvents.AddToCart ?? currentEvents.AddToCart ?? true,
+      InitiateCheckout: incomingEvents.InitiateCheckout ?? currentEvents.InitiateCheckout ?? true,
+      Purchase: incomingEvents.Purchase ?? currentEvents.Purchase ?? true,
+      Contact: incomingEvents.Contact ?? currentEvents.Contact ?? true,
+      CompleteRegistration: incomingEvents.CompleteRegistration ?? currentEvents.CompleteRegistration ?? true,
+      StartTrial: incomingEvents.StartTrial ?? currentEvents.StartTrial ?? true,
     };
   }
 
@@ -191,8 +305,52 @@ const updateMerchantTrackingConfig = asyncHandler(async (req: Request, res: Resp
   }
 
   await configDoc.save();
+  await TenantCapiService.invalidateTenantConfigCache(tenantId);
 
-  ApiResponse.sendSuccess(res, 200, 'Tracking configuration updated successfully', configDoc);
+  const recentEvents = await TenantTrackingEvent.find({ tenantId })
+    .sort({ createdAt: -1 })
+    .limit(100)
+    .select('eventName eventId status attempts httpStatus fbTraceId errorMessage sentAt createdAt')
+    .lean();
+
+  ApiResponse.sendSuccess(res, 200, 'Tracking configuration updated successfully', {
+    ...sanitizeMerchantTrackingConfig(configDoc),
+    recentEvents,
+  });
+});
+
+// 2B. Test Merchant Meta CAPI Connection (Merchant Dashboard)
+const testMerchantMetaCapi = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = await resolveUserTenantId(req);
+
+  // Enforce plan check for testing
+  const subscription = await Subscription.findOne({ tenantId, status: 'active' }).populate('packageId');
+  if (!subscription) {
+    throw new CustomError(403, 'An active subscription is required to test CAPI integration.');
+  }
+  const pkg = subscription.packageId as any;
+  const planName = (pkg?.name || '').toLowerCase().trim();
+  if (subscription.isTrial || planName.includes('basic')) {
+    throw new CustomError(403, 'Server-Side Conversions API (CAPI) testing requires a Standard or Premium plan.');
+  }
+
+  const { testEventCode, graphApiVersion, pixelId } = req.body || {};
+  const result = await TenantCapiService.sendTestEvent(
+    tenantId,
+    getClientIp(req),
+    (req.headers['user-agent'] as string) || '',
+    { testEventCode, graphApiVersion, pixelId }
+  );
+
+  if (!result.success) {
+    return res.status(400).json({
+      success: false,
+      message: result.message,
+      data: result,
+    });
+  }
+
+  ApiResponse.sendSuccess(res, 200, 'Test event sent to Meta CAPI successfully', result);
 });
 
 // 3. Test/Verify Merchant Tracking Config (Merchant Dashboard)
@@ -223,6 +381,7 @@ const getPlatformTrackingConfig = asyncHandler(async (req: Request, res: Respons
         capiEnabled: false,
         capiAccessTokenEncrypted: '',
         capiTokenMasked: '',
+        mode: 'live',
         graphApiVersion: 'v21.0',
         testEventCode: '',
         events: { ...PlatformCapiService.DEFAULT_EVENTS },
@@ -231,9 +390,12 @@ const getPlatformTrackingConfig = asyncHandler(async (req: Request, res: Respons
     });
   }
 
+  // Keep only latest 100 events in database, delete older ones
+  await PlatformCapiService.pruneOldTrackingEvents(100);
+
   const recentEvents = await PlatformTrackingEvent.find()
     .sort({ createdAt: -1 })
-    .limit(15)
+    .limit(100)
     .select('eventName eventId status attempts httpStatus fbTraceId errorMessage sentAt createdAt')
     .lean();
 
@@ -279,6 +441,7 @@ const updatePlatformTrackingConfig = asyncHandler(async (req: Request, res: Resp
         capiEnabled: false,
         capiAccessTokenEncrypted: '',
         capiTokenMasked: '',
+        mode: 'live',
         graphApiVersion: 'v21.0',
         testEventCode: '',
         events: { ...PlatformCapiService.DEFAULT_EVENTS },
@@ -312,6 +475,7 @@ const updatePlatformTrackingConfig = asyncHandler(async (req: Request, res: Resp
     configDoc.metaPixel.enabled = Boolean(metaPixel.enabled);
     configDoc.metaPixel.pixelId = (metaPixel.pixelId || '').trim();
     configDoc.metaPixel.capiEnabled = Boolean(metaPixel.capiEnabled);
+    configDoc.metaPixel.mode = metaPixel.mode === 'test' ? 'test' : 'live';
     configDoc.metaPixel.graphApiVersion = (metaPixel.graphApiVersion || configDoc.metaPixel.graphApiVersion || 'v21.0').trim();
 
     if (metaPixel.testEventCode !== undefined) {
@@ -501,6 +665,7 @@ export const TrackingController = {
   getMerchantTrackingConfig,
   updateMerchantTrackingConfig,
   testMerchantTrackingConfig,
+  testMerchantMetaCapi,
   getPlatformTrackingConfig,
   updatePlatformTrackingConfig,
   getPublicPlatformTrackingConfig,

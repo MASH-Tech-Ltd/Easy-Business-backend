@@ -292,8 +292,9 @@ const deliverEvent = async (eventDocId: string): Promise<void> => {
     data: [eventPayload],
   };
 
+  const isTestMode = meta.mode ? meta.mode === 'test' : Boolean(meta.testEventCode?.trim());
   const testCode = (meta.testEventCode || '').trim();
-  if (testCode) {
+  if (isTestMode && testCode) {
     requestBody.test_event_code = testCode;
   }
 
@@ -390,6 +391,7 @@ const trackPlatformEvent = async (
 
     setImmediate(() => {
       deliverEvent(created._id.toString()).catch(() => undefined);
+      pruneOldTrackingEvents(100).catch(() => undefined);
     });
 
     return { queued: true, eventId };
@@ -573,6 +575,29 @@ const sendTestEvent = async (
   }
 };
 
+const pruneOldTrackingEvents = async (keepCount = 100): Promise<number> => {
+  try {
+    const totalCount = await PlatformTrackingEvent.countDocuments();
+    if (totalCount <= keepCount) return 0;
+
+    const latestEvents = await PlatformTrackingEvent.find()
+      .sort({ createdAt: -1 })
+      .limit(keepCount)
+      .select('_id')
+      .lean();
+
+    const keepIds = latestEvents.map((e) => e._id);
+    const deleteResult = await PlatformTrackingEvent.deleteMany({
+      _id: { $nin: keepIds },
+    });
+
+    return deleteResult.deletedCount || 0;
+  } catch (error) {
+    console.error('[PlatformCAPI] Error pruning old tracking events:', error);
+    return 0;
+  }
+};
+
 const processPendingRetries = async (): Promise<void> => {
   try {
     const dueEvents = await PlatformTrackingEvent.find({
@@ -598,6 +623,7 @@ export const initPlatformCapiCron = (): void => {
   cronStarted = true;
   cron.schedule('* * * * *', () => {
     processPendingRetries().catch(() => undefined);
+    pruneOldTrackingEvents(100).catch(() => undefined);
   });
 };
 
@@ -609,4 +635,5 @@ export const PlatformCapiService = {
   trackVerifiedSubscriptionPurchase,
   sendTestEvent,
   processPendingRetries,
+  pruneOldTrackingEvents,
 };

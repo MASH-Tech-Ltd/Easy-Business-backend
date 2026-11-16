@@ -12,6 +12,7 @@ import { paginationHelper } from '../../helpers/paginationHelper';
 import { User } from '../auth/auth.model';
 import { normalizeBDPhone } from '../../utils/phoneHelper';
 import { BlockedPhoneService } from '../blockedPhone/blockedPhone.service';
+import { TenantCapiService } from '../analytics/tenantCapi.service';
 
 const generateUniqueOrderId = async (): Promise<string> => {
   let newOrderId = '';
@@ -186,6 +187,15 @@ const createOrder = async (payload: IOrder): Promise<IOrder> => {
     }
   } catch (error) {
     console.error('Socket emit error for new_order:', error);
+  }
+
+  // Authoritatively dispatch Merchant Meta Conversions API (CAPI) Purchase event
+  try {
+    TenantCapiService.trackTenantOrderPurchase(result, (payload as any).trackingContext).catch((err) => {
+      console.error('[TenantCAPI] Order purchase tracking error:', err);
+    });
+  } catch (capiErr) {
+    // Non-fatal tracking error
   }
 
   return result;

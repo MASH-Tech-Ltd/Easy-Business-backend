@@ -15,11 +15,13 @@ const trackingConfigSchema = new Schema<ITrackingConfig>(
       capiEnabled: { type: Boolean, default: false },
       capiAccessTokenEncrypted: { type: String, default: '' },
       capiTokenMasked: { type: String, default: '' },
+      mode: { type: String, enum: ['live', 'test'], default: 'live' },
       graphApiVersion: { type: String, default: 'v21.0', trim: true },
       testEventCode: { type: String, default: '', trim: true },
       events: {
         PageView: { type: Boolean, default: true },
         ViewContent: { type: Boolean, default: true },
+        AddToCart: { type: Boolean, default: true },
         CompleteRegistration: { type: Boolean, default: true },
         StartTrial: { type: Boolean, default: true },
         InitiateCheckout: { type: Boolean, default: true },

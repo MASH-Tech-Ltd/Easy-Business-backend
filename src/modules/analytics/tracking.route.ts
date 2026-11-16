@@ -10,6 +10,7 @@ const router = Router();
 router.get('/merchant', authMiddleware('tenant_admin'), TrackingController.getMerchantTrackingConfig);
 router.put('/merchant', authMiddleware('tenant_admin'), TrackingController.updateMerchantTrackingConfig);
 router.post('/merchant/test', authMiddleware('tenant_admin'), TrackingController.testMerchantTrackingConfig);
+router.post('/merchant/test-capi', authMiddleware('tenant_admin'), TrackingController.testMerchantMetaCapi);
 
 // Public Platform Meta Pixel / CAPI endpoints (strictly MASH ECO platform only)
 router.get('/platform/public', TrackingController.getPublicPlatformTrackingConfig);

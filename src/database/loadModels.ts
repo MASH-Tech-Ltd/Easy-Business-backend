@@ -23,6 +23,8 @@ import '../modules/contactInquiry/contactInquiry.model';
 import '../modules/fraudCheck/fraudCheck.model';
 import '../modules/analytics/storeVisit.model';
 import '../modules/analytics/tracking.model';
+import '../modules/analytics/platformTrackingEvent.model';
+import '../modules/analytics/tenantTrackingEvent.model';
 import '../modules/system/globalSetting.model';
 import '../modules/system/security.model';
 import './backupLog.model';

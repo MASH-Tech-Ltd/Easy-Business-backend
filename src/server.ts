@@ -11,6 +11,7 @@ import { initCourierCron } from './modules/courier/courier.cron';
 import { initBackupCron } from './database/backup.cron';
 import { initSubscriptionCron } from './modules/subscription/subscription.cron';
 import { initPlatformCapiCron } from './modules/analytics/platformCapi.service';
+import { initTenantCapiCron } from './modules/analytics/tenantCapi.service';
 
 const PORT = Number(config.app.port) || 8000;
 const HOST = process.env.HOST?.trim();
@@ -36,6 +37,7 @@ connectDatabase()
     initBackupCron();
     initSubscriptionCron();
     initPlatformCapiCron();
+    initTenantCapiCron();
   })
   .catch((error: unknown) => {
     console.error("Database connection failed!!", error);

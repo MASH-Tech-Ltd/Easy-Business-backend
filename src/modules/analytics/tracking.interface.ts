@@ -10,8 +10,9 @@ export interface IProviderConfig {
 export interface IMetaEventToggles {
   PageView: boolean;
   ViewContent: boolean;
-  CompleteRegistration: boolean;
-  StartTrial: boolean;
+  AddToCart?: boolean;
+  CompleteRegistration?: boolean;
+  StartTrial?: boolean;
   InitiateCheckout: boolean;
   Purchase: boolean;
   Contact: boolean;
@@ -41,6 +42,7 @@ export interface ITrackingConfig extends Document {
     capiEnabled?: boolean;
     capiAccessTokenEncrypted?: string;
     capiTokenMasked?: string;
+    mode?: 'live' | 'test';
     graphApiVersion?: string;
     testEventCode?: string;
     events?: IMetaEventToggles;

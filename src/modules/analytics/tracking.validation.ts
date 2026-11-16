@@ -14,7 +14,10 @@ export const validateTrackingConfig = (data: any) => {
   }
 
   if (data?.metaPixel) {
-    const { enabled, capiEnabled, pixelId, graphApiVersion, testEventCode, capiAccessToken } = data.metaPixel;
+    const { enabled, capiEnabled, pixelId, mode, graphApiVersion, testEventCode, capiAccessToken } = data.metaPixel;
+    if (mode && !['live', 'test'].includes(mode)) {
+      errors.mode = 'Mode must be either "live" or "test"';
+    }
     if ((enabled || capiEnabled) && pixelId) {
       const clean = String(pixelId).trim();
       if (!/^\d{5,20}$/.test(clean)) {
