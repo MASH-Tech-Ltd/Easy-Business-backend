@@ -32,6 +32,23 @@ const uploadBlogImage = asyncHandler(async (req: Request, res: Response) => {
 });
 
 const createBlog = asyncHandler(async (req: Request, res: Response) => {
+  if (req.file) {
+    const uploadResult = await uploadCloudinary(req.file.path);
+    req.body.thumbnail = uploadResult.secure_url;
+  }
+  if (typeof req.body.isPublished === 'string') {
+    req.body.isPublished = req.body.isPublished === 'true';
+  }
+  if (typeof req.body.featured === 'string') {
+    req.body.featured = req.body.featured === 'true';
+  }
+  if (typeof req.body.tags === 'string') {
+    try {
+      req.body.tags = JSON.parse(req.body.tags);
+    } catch {
+      req.body.tags = req.body.tags.split(',').map((t: string) => t.trim()).filter(Boolean);
+    }
+  }
   const result = await BlogService.createBlog(req.body);
   ApiResponse.sendSuccess(res, 201, 'Blog post created successfully', result);
 });
@@ -63,6 +80,23 @@ const getBlogBySlug = asyncHandler(async (req: Request, res: Response) => {
 });
 
 const updateBlog = asyncHandler(async (req: Request, res: Response) => {
+  if (req.file) {
+    const uploadResult = await uploadCloudinary(req.file.path);
+    req.body.thumbnail = uploadResult.secure_url;
+  }
+  if (typeof req.body.isPublished === 'string') {
+    req.body.isPublished = req.body.isPublished === 'true';
+  }
+  if (typeof req.body.featured === 'string') {
+    req.body.featured = req.body.featured === 'true';
+  }
+  if (typeof req.body.tags === 'string') {
+    try {
+      req.body.tags = JSON.parse(req.body.tags);
+    } catch {
+      req.body.tags = req.body.tags.split(',').map((t: string) => t.trim()).filter(Boolean);
+    }
+  }
   const result = await BlogService.updateBlog(req.params.id as string, req.body);
   ApiResponse.sendSuccess(res, 200, 'Blog post updated successfully', result);
 });
