@@ -138,7 +138,7 @@ const themeSchema = new Schema<ITheme>(
     themeId: { type: String, default: 'light' },
     primaryColor: { type: String, default: '#5022C3' },
     fontFamily: { type: String, default: 'Inter' },
-    storeTitleFont: { type: String, default: 'Playfair Display' },
+    storeTitleFont: { type: String, default: 'Inter' },
     language: { type: String, enum: ['en', 'bn'], default: 'en' },
     currencySymbol: { type: String, default: '৳' },
     footer: { type: footerSchema, default: () => ({}) },
