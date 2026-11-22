@@ -7,7 +7,7 @@ import path from "path";
 import mongoose from "mongoose";
 import v8 from "v8";
 import { SecurityLog, BlockedIp, VisitorLog } from "./security.model";
-import { GlobalSetting } from "./globalSetting.model";
+import { GlobalSetting, DEFAULT_DEMO_VIDEOS } from "./globalSetting.model";
 import { Tenant } from "../tenant/tenant.model";
 import { isCloudflareProxyIp, isInternalOrWhitelistedIp, getClientIp } from "../../utils/ipHelper";
 import { unblockIpFromCache, refreshBlockedIpsCache } from "../../middleware/security.middleware";
@@ -53,12 +53,41 @@ const ensureSidebarMenuDefaults = async (settings: any) => {
   }
 };
 
+const ensureDemoVideosDefaults = async (settings: any) => {
+  if (!Array.isArray(settings.demoVideos) || settings.demoVideos.length === 0) {
+    settings.demoVideos = [...DEFAULT_DEMO_VIDEOS];
+    settings.markModified("demoVideos");
+    await settings.save();
+    return;
+  }
+  let modified = false;
+  for (const defItem of DEFAULT_DEMO_VIDEOS) {
+    const existing = settings.demoVideos.find((item: any) => item.pageId === defItem.pageId || item.path === defItem.path);
+    if (!existing) {
+      settings.demoVideos.push(defItem);
+      modified = true;
+    } else {
+      if (!existing.path || !existing.section || !existing.pageName) {
+        existing.path = existing.path || defItem.path;
+        existing.section = existing.section || defItem.section;
+        existing.pageName = existing.pageName || defItem.pageName;
+        modified = true;
+      }
+    }
+  }
+  if (modified) {
+    settings.markModified("demoVideos");
+    await settings.save();
+  }
+};
+
 const getGlobalSettings = asyncHandler(async (req: Request, res: Response) => {
   let settings = await GlobalSetting.findOne();
   if (!settings) {
     settings = await GlobalSetting.create({});
   } else {
     await ensureSidebarMenuDefaults(settings);
+    await ensureDemoVideosDefaults(settings);
   }
   ApiResponse.sendSuccess(res, 200, "Global settings retrieved", settings);
 });
@@ -101,6 +130,13 @@ const updateGlobalSettings = asyncHandler(
         ...payload.socialLinks,
       };
       settings.markModified('socialLinks');
+    }
+    if (payload.demoVideosMasterEnabled !== undefined) {
+      settings.demoVideosMasterEnabled = Boolean(payload.demoVideosMasterEnabled);
+    }
+    if (payload.demoVideos !== undefined && Array.isArray(payload.demoVideos)) {
+      settings.demoVideos = payload.demoVideos;
+      settings.markModified('demoVideos');
     }
     if (payload.affiliateSettings !== undefined) {
       const currentAff = (settings as any).affiliateSettings
@@ -176,6 +212,7 @@ const getPublicSettings = asyncHandler(async (req: Request, res: Response) => {
     settings = await GlobalSetting.create({});
   } else {
     await ensureSidebarMenuDefaults(settings);
+    await ensureDemoVideosDefaults(settings);
   }
 
   const platformTracking = await PlatformCapiService.getPlatformConfig();
@@ -202,6 +239,8 @@ const getPublicSettings = asyncHandler(async (req: Request, res: Response) => {
     couriers: settings.couriers,
     sidebarMenu: settings.sidebarMenu,
     socialLinks: settings.socialLinks || {},
+    demoVideosMasterEnabled: settings.demoVideosMasterEnabled ?? true,
+    demoVideos: settings.demoVideos || [],
     metaPixel: publicMetaPixel,
     googleAnalytics: platformTracking?.googleAnalytics?.enabled
       ? platformTracking.googleAnalytics
