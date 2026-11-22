@@ -101,10 +101,11 @@ const updateTheme = asyncHandler(async (req: Request, res: Response) => {
 
     const b = payload.banner;
     const hasBannerImages = finalBannerImages.length > 0;
-    const hasBannerContent = !!b.title || !!b.subtitle || !!b.description || !!b.buttonText || !!b.buttonLink || hasBannerImages;
+    const isContentVisible = b.showBannerContent !== false;
 
-    if (hasBannerContent) {
-      if (!b.title || !b.subtitle || !b.description || !b.buttonText || !b.buttonLink || !hasBannerImages) {
+    if (isContentVisible) {
+      const hasAnyContent = !!b.title || !!b.subtitle || !!b.description || !!b.buttonText || !!b.buttonLink;
+      if (hasAnyContent && (!b.title || !b.subtitle || !b.description || !b.buttonText || !b.buttonLink || !hasBannerImages)) {
         throw new CustomError(400, 'All banner fields (title, subtitle, description, button text, button link, and at least 1 image) must be provided.');
       }
     }
@@ -137,6 +138,7 @@ const getThemePreviews = asyncHandler(async (req: Request, res: Response) => {
     'design-03': '',
     'design-04': '',
     'design-05': '',
+    'design-06': '',
   };
   ApiResponse.sendSuccess(res, 200, 'Theme preview links retrieved', themePreviews);
 });

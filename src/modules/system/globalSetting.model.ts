@@ -14,6 +14,7 @@ export interface IGlobalSettings extends Document {
     'design-03'?: string;
     'design-04'?: string;
     'design-05'?: string;
+    'design-06'?: string;
     [key: string]: string | undefined;
   };
   couriers: {
@@ -84,6 +85,7 @@ const globalSettingsSchema = new Schema<IGlobalSettings>(
       'design-03': { type: String, default: '' },
       'design-04': { type: String, default: '' },
       'design-05': { type: String, default: '' },
+      'design-06': { type: String, default: '' },
     },
     couriers: {
       type: [

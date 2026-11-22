@@ -33,6 +33,7 @@ export interface IBannerSetting {
   description?: string;
   buttonText?: string;
   buttonLink?: string;
+  showBannerContent?: boolean;
   showAnnouncement?: boolean;
   announcementText?: string;
   isSliding?: boolean;
@@ -64,6 +65,7 @@ export interface ITheme extends Document {
   themeId: string;
   primaryColor: string;
   fontFamily: string;
+  storeTitleFont?: string;
   language?: string;
   currencySymbol?: string;
   footer?: IFooterSetting;
@@ -110,6 +112,7 @@ const bannerSchema = new Schema<IBannerSetting>({
   description: { type: String, default: '' },
   buttonText: { type: String, default: '' },
   buttonLink: { type: String, default: '' },
+  showBannerContent: { type: Boolean, default: true },
   showAnnouncement: { type: Boolean, default: false },
   announcementText: { type: String, default: '' },
   isSliding: { type: Boolean, default: false },
@@ -135,6 +138,7 @@ const themeSchema = new Schema<ITheme>(
     themeId: { type: String, default: 'light' },
     primaryColor: { type: String, default: '#5022C3' },
     fontFamily: { type: String, default: 'Inter' },
+    storeTitleFont: { type: String, default: 'Playfair Display' },
     language: { type: String, enum: ['en', 'bn'], default: 'en' },
     currencySymbol: { type: String, default: '৳' },
     footer: { type: footerSchema, default: () => ({}) },

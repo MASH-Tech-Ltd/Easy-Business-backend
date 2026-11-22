@@ -160,6 +160,7 @@ const getThemePreviews = asyncHandler(async (req: Request, res: Response) => {
     "design-03": "",
     "design-04": "",
     "design-05": "",
+    "design-06": "",
   };
   ApiResponse.sendSuccess(
     res,

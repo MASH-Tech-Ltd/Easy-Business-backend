@@ -246,6 +246,7 @@ const getTheme = asyncHandler(async (req: Request, res: Response) => {
     const defaultTheme = {
       primaryColor: "#5022C3",
       fontFamily: "Inter",
+      storeTitleFont: "Playfair Display",
       themeId: "light",
     };
     return ApiResponse.sendSuccess(res, 200, "Default Theme", defaultTheme);

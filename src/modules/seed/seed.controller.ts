@@ -629,6 +629,68 @@ const DEMO_STORE_CONFIGS: Record<string, any> = {
         "© 2026 LuxeTech Boutique Store. All rights reserved. Powered by MASH ECO.",
     },
   },
+  "design-06": {
+    defaultSubdomain: "store6",
+    name: "Poshak Hart Boutique",
+    themeId: "design-06",
+    primaryColor: "#000000",
+    logo: "https://images.unsplash.com/photo-1584917865442-de89df76afd3?w=250&h=250&fit=crop&q=80",
+    description:
+      "Exclusive modest couture, embroidered borkas, imported hijabs, and abaya collections designed with modern elegance.",
+    banner: {
+      title: "Embroidered borka collection",
+      subtitle: "Modest Elegance & Luxury Craftsmanship",
+      description:
+        "Handcrafted with breathable premium georgette and fine silk threads. Delivered within 20 minutes across express zones.",
+      buttonText: "Buy Now",
+      buttonLink: "/products",
+      showAnnouncement: true,
+      announcementText:
+        "Get 30% OFF your first order 30% OFF  ✦  Order now and get it delivered within 20 minutes",
+      isSliding: true,
+      announcementBgColor: "#0b0f17",
+      announcementTextColor: "#ffffff",
+      images: [
+        {
+          public_id: "seed/banner-16",
+          secure_url:
+            "https://images.unsplash.com/photo-1585487000160-6ebcfceb0d03?w=1600&q=80",
+        },
+        {
+          public_id: "seed/banner-17",
+          secure_url:
+            "https://images.unsplash.com/photo-1584917865442-de89df76afd3?w=1600&q=80",
+        },
+        {
+          public_id: "seed/banner-18",
+          secure_url:
+            "https://images.unsplash.com/photo-1549465220-1a8b9238cd48?w=1600&q=80",
+        },
+      ],
+    },
+    footer: {
+      socialLinks: {
+        facebook: "https://facebook.com/poshakhart",
+        youtube: "https://youtube.com/@poshakhart",
+        tiktok: "https://tiktok.com/@poshakhart",
+      },
+      contactInfo: {
+        email: "store6@masheco.com",
+        phone: "+880 1800-000006",
+        address: "Gulshan-2, Dhaka, Bangladesh",
+      },
+      policies: {
+        aboutUs:
+          "Poshak Hart brings timeless modest fashion and handcrafted designer borkas to modern women.",
+        privacyPolicy: "We safeguard all customer orders and transaction records with high-grade encryption.",
+        termsAndConditions:
+          "Includes 7-day doorstep size replacement and exchange policy across Bangladesh.",
+        returnPolicy: "Easy 7-day exchange or refund if items are unworn and in original tags.",
+      },
+      copyrightText:
+        "© 2026 Poshak Hart Boutique. All rights reserved. Powered by MASH ECO.",
+    },
+  },
 };
 
 const resolvePreviewUrl = (subdomain: string) => {
@@ -942,6 +1004,7 @@ const generateAllDemoStores = asyncHandler(
       "design-03",
       "design-04",
       "design-05",
+      "design-06",
     ];
 
     // Seed all 5 demo stores concurrently for ultra-fast response
@@ -1034,6 +1097,7 @@ const deleteAllDemoStores = asyncHandler(
       "design-03",
       "design-04",
       "design-05",
+      "design-06",
     ];
     const results: any[] = [];
 
