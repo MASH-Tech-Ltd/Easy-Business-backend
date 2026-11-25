@@ -40,7 +40,14 @@ const updateLeadStatus = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 200, 'Lead status updated successfully', result);
 });
 
+const getLeadsForAdmin = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = String(req.params.tenantId);
+  const result = await CheckoutLeadService.getLeadsForAdmin(tenantId, req.query);
+  ApiResponse.sendSuccess(res, 200, 'Leads retrieved successfully', result.data, result.meta);
+});
+
 export const CheckoutLeadController = {
+  getLeadsForAdmin,
   trackLead,
   getMerchantLeads,
   getLeadStats,

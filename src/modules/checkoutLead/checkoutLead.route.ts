@@ -38,4 +38,7 @@ router.patch(
   CheckoutLeadController.updateLeadStatus
 );
 
+// Super admin (read-only)
+router.get('/admin/:tenantId', authMiddleware('super_admin'), dashboardLimiter, CheckoutLeadController.getLeadsForAdmin);
+
 export const CheckoutLeadRoutes = router;

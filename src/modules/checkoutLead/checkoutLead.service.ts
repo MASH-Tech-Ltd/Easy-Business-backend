@@ -213,9 +213,51 @@ const updateLeadStatus = async (
   return updated;
 };
 
+// Super admin: read-only abandoned checkout list for a given tenant (no add-on gating)
+const getLeadsForAdmin = async (tenantId: string, query: any = {}) => {
+  if (!Types.ObjectId.isValid(tenantId)) {
+    throw new CustomError(400, 'Invalid tenant ID');
+  }
+  const tenantObjectId = new Types.ObjectId(tenantId);
+  const page = Math.max(1, Number(query.page) || 1);
+  const limit = Math.min(100, Math.max(1, Number(query.limit) || 10));
+  const { search = '', status = 'all' } = query;
+
+  const filter: any = { tenantId: tenantObjectId };
+  if (status === 'abandoned' || status === 'completed') {
+    filter.status = status;
+  }
+  if (search) {
+    const escaped = String(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    filter.$or = [
+      { firstName: { $regex: escaped, $options: 'i' } },
+      { lastName: { $regex: escaped, $options: 'i' } },
+      { phone: { $regex: escaped, $options: 'i' } },
+      { email: { $regex: escaped, $options: 'i' } },
+    ];
+  }
+
+  const [data, total, abandoned, completed] = await Promise.all([
+    CheckoutLead.find(filter)
+      .sort({ updatedAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean(),
+    CheckoutLead.countDocuments(filter),
+    CheckoutLead.countDocuments({ tenantId: tenantObjectId, status: 'abandoned' }),
+    CheckoutLead.countDocuments({ tenantId: tenantObjectId, status: 'completed' }),
+  ]);
+
+  return {
+    data,
+    meta: { page, limit, total, totalPages: Math.ceil(total / limit), abandoned, completed },
+  };
+};
+
 export const CheckoutLeadService = {
   trackLead,
   getMerchantLeads,
   getLeadStats,
   updateLeadStatus,
+  getLeadsForAdmin,
 };

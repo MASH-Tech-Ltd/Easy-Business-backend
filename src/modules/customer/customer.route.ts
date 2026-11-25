@@ -10,4 +10,7 @@ const router = Router();
 router.post('/create-customer', authMiddleware('tenant_admin'), dashboardLimiter, validateRequest(CustomerValidation.createCustomerValidation), CustomerController.createCustomer);
 router.get('/my-customers', authMiddleware('tenant_admin'), manualOrderLimiter, CustomerController.getMyCustomers);
 
+// Super admin (read-only)
+router.get('/admin/:tenantId', authMiddleware('super_admin'), dashboardLimiter, CustomerController.getCustomersForAdmin);
+
 export const CustomerRoutes = router;

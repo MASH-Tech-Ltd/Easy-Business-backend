@@ -1,3 +1,5 @@
+import { Types } from 'mongoose';
+import CustomError from '../../helpers/CustomError';
 import { Customer } from './customer.model';
 import { ICustomer } from './customer.interface';
 import { Order } from '../order/order.model';
@@ -76,7 +78,36 @@ const getCustomersByTenant = async (tenantId: string, query: any = {}) => {
   };
 };
 
+// Super admin: read-only customer list for a given tenant
+const getCustomersForAdmin = async (tenantId: string, query: any = {}) => {
+  if (!Types.ObjectId.isValid(tenantId)) {
+    throw new CustomError(400, 'Invalid tenant ID');
+  }
+  const { page, limit, skip } = paginationHelper(query.page, query.limit);
+
+  const filter: any = { tenantId: new Types.ObjectId(tenantId) };
+  if (query.search) {
+    const escaped = String(query.search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    filter.$or = [
+      { name: { $regex: escaped, $options: 'i' } },
+      { phone: { $regex: escaped, $options: 'i' } },
+      { email: { $regex: escaped, $options: 'i' } },
+    ];
+  }
+
+  const [data, total] = await Promise.all([
+    Customer.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    Customer.countDocuments(filter),
+  ]);
+
+  return {
+    data,
+    meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+  };
+};
+
 export const CustomerService = {
   createCustomer,
   getCustomersByTenant,
+  getCustomersForAdmin,
 };

@@ -15,7 +15,14 @@ const getMyCustomers = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 200, 'Customers retrieved successfully', result.data, result.meta);
 });
 
+const getCustomersForAdmin = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = String(req.params.tenantId);
+  const result = await CustomerService.getCustomersForAdmin(tenantId, req.query);
+  ApiResponse.sendSuccess(res, 200, 'Customers retrieved successfully', result.data, result.meta);
+});
+
 export const CustomerController = {
   createCustomer,
   getMyCustomers,
+  getCustomersForAdmin,
 };
