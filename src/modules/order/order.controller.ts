@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { OrderService } from './order.service';
 import ApiResponse from '../../utils/apiResponse';
 import { asyncHandler } from '../../utils/asyncHandler';
@@ -74,7 +75,17 @@ const trackOrder = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 200, 'Order found', result);
 });
 
+const getOrdersForAdmin = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = String(req.params.tenantId);
+  if (!mongoose.Types.ObjectId.isValid(tenantId)) {
+    return ApiResponse.sendError(res, 400, 'Invalid tenant ID');
+  }
+  const result = await OrderService.getOrdersByTenant(tenantId, req.query);
+  ApiResponse.sendSuccess(res, 200, 'Orders retrieved successfully', result.data, result.meta);
+});
+
 export const OrderController = {
+  getOrdersForAdmin,
   createOrder,
   createManualOrder,
   getMyOrders,

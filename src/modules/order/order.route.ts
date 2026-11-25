@@ -17,6 +17,7 @@ router.post('/manual-order', authMiddleware('tenant_admin'), manualOrderLimiter,
 router.get('/track/:id', OrderController.trackOrder);
 
 // Dashboard gets orders (protected)
+router.get('/admin/:tenantId', authMiddleware('super_admin'), dashboardLimiter, OrderController.getOrdersForAdmin);
 router.get('/my-orders', authMiddleware('tenant_admin'), dashboardLimiter, OrderController.getMyOrders);
 
 // Dashboard updates order (protected)
