@@ -7,6 +7,7 @@ import { StoreDailyAnalytics } from "./analytics.model";
 import { VisitorLog } from "../system/security.model";
 import { Tenant } from "../tenant/tenant.model";
 import { getClientIp, isCloudflareProxyIp } from "../../utils/ipHelper";
+import { canCallIpApi } from "../../middleware/visitorTracking.middleware";
 import ApiResponse from "../../utils/apiResponse";
 import { asyncHandler } from "../../utils/asyncHandler";
 const mongoose = require("mongoose");
@@ -57,13 +58,54 @@ const recordVisit = asyncHandler(async (req: Request, res: Response) => {
       if (tenant) {
         const storeName = tenant.name || tenant.customDomain || tenant.domain || `${tenant.slug}.masheco.com`;
         
-        VisitorLog.create({
-          role: 'Customer',
-          ipAddress: ip,
-          userAgent,
-          storeName,
-          ownerName: (tenant as any).ownerName || tenant.name || 'Storefront Visitor'
-        }).catch(err => {
+        const cfCountry = req.headers['cf-ipcountry'] as string | undefined;
+        const ownerName = (tenant as any).ownerName || tenant.name || 'Storefront Visitor';
+
+        // Non-blocking: geo lookup (shared ip-api throttle + Cloudflare fallback) then write log
+        (async () => {
+          let location = 'Unknown';
+
+          if (canCallIpApi()) {
+            try {
+              const controller = new AbortController();
+              const timeout = setTimeout(() => controller.abort(), 3000);
+              const response = await fetch(
+                `http://ip-api.com/json/${ip}?fields=status,country,regionName,city,zip,isp`,
+                { signal: controller.signal }
+              );
+              clearTimeout(timeout);
+
+              if (response.ok) {
+                const data: any = await response.json();
+                if (data.status === 'success') {
+                  const parts: string[] = [];
+                  if (data.city) parts.push(data.city);
+                  if (data.regionName && data.regionName !== data.city) parts.push(data.regionName);
+                  if (data.country) parts.push(data.country);
+                  let loc = parts.join(', ');
+                  if (data.zip) loc += ` - ${data.zip}`;
+                  if (data.isp) loc += ` (ISP: ${data.isp})`;
+                  if (loc) location = loc;
+                }
+              }
+            } catch (_e) {
+              // timeout / network error — fall back to Cloudflare header
+            }
+          }
+
+          if (location === 'Unknown' && cfCountry && cfCountry !== 'XX') {
+            location = cfCountry;
+          }
+
+          await VisitorLog.create({
+            role: 'Customer',
+            ipAddress: ip,
+            userAgent,
+            storeName,
+            ownerName,
+            location,
+          });
+        })().catch(err => {
           console.error('Failed to create Customer VisitorLog in recordVisit:', err);
         });
       }

@@ -35,7 +35,7 @@ const IP_API_WINDOW_MS  = 60_000;  // 1-minute window
 let ipApiCallCount = 0;
 let ipApiWindowStart = Date.now();
 
-const canCallIpApi = (): boolean => {
+export const canCallIpApi = (): boolean => {
   const now = Date.now();
   if (now - ipApiWindowStart > IP_API_WINDOW_MS) {
     // New window — reset counter
