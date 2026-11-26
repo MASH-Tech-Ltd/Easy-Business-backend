@@ -5,6 +5,8 @@ import CustomError from '../../helpers/CustomError';
 import { isMerchantOnline } from '../../socket';
 import { Tenant } from '../tenant/tenant.model';
 import { User } from '../auth/auth.model';
+import { Subscription } from '../subscription/subscription.model';
+import { Addon } from '../addon/addon.model';
 import { SmsLog, SmsTriggerType } from './smsLog.model';
 
 /** Converts 01XXXXXXXXX / +8801XXXXXXXXX / 8801XXXXXXXXX to 8801XXXXXXXXX for BulkSMSBD. */
@@ -102,10 +104,20 @@ const getCreditBalance = async () => {
   };
 };
 
+const SMS_ADDON_SLUGS = ['sms_notifications', 'sms-notifications'];
+
+export const hasRemainingSmsAddonQuota = (entry?: { limit?: number; used?: number } | null): boolean => {
+  if (!entry) return false;
+  const limit = Number(entry.limit) || 0;
+  const used = Number(entry.used) || 0;
+  return limit > 0 && used < limit;
+};
+
 /**
- * Sends an SMS to the merchant when a new order arrives AND the merchant is offline
- * (no active Socket.io connection on tenant_{id} or user_{adminId}).
- * Never throws so checkout is never disrupted.
+ * Sends an SMS to the merchant when a new order arrives AND:
+ *   1. The merchant is offline (no active Socket.io connection)
+ *   2. The merchant has an active `sms_notifications` add-on with remaining quota (`used < limit`)
+ * Increments the add-on's `used` counter upon successful submission. Never throws.
  */
 const notifyOfflineMerchantOnNewOrder = async (opts: {
   tenantId: string;
@@ -120,6 +132,27 @@ const notifyOfflineMerchantOnNewOrder = async (opts: {
 
   if (isMerchantOnline(opts.tenantId, opts.tenantAdminId)) {
     return { sent: false, reason: 'merchant_online' };
+  }
+
+  const smsAddon = await Addon.findOne({ slug: { $in: SMS_ADDON_SLUGS } }).select('_id').lean();
+  if (!smsAddon) {
+    return { sent: false, reason: 'sms_addon_not_defined' };
+  }
+
+  const activeSub = await Subscription.findOne({
+    tenantId: new Types.ObjectId(opts.tenantId),
+    status: 'active',
+    'purchasedAddons.addonId': smsAddon._id,
+  })
+    .select('_id purchasedAddons')
+    .lean();
+
+  const addonEntry = activeSub?.purchasedAddons?.find(
+    (pa: any) => pa.addonId?.toString() === smsAddon._id.toString(),
+  );
+
+  if (!hasRemainingSmsAddonQuota(addonEntry)) {
+    return { sent: false, reason: 'addon_not_active_or_quota_exceeded' };
   }
 
   const [tenant, adminUser] = await Promise.all([
@@ -137,7 +170,7 @@ const notifyOfflineMerchantOnNewOrder = async (opts: {
 
   const shortOrder = String(opts.orderId).slice(-6).toUpperCase();
   const storeName = (tenant?.name || 'MASH ECO').slice(0, 30);
-  const message = `New order #${shortOrder} from ${opts.customerName} (${opts.totalPrice} BDT) on ${storeName}. Check your MASH ECO dashboard.`;
+  const message = `Apnar notun order eseche (#${shortOrder}) - ${opts.customerName}, ${opts.totalPrice} BDT on ${storeName}. Check MASH ECO dashboard.`;
 
   const log = await sendSingleSms({
     phone: formatted,
@@ -146,6 +179,13 @@ const notifyOfflineMerchantOnNewOrder = async (opts: {
     orderId: opts.orderId,
     triggerType: 'new_order_offline',
   });
+
+  if (log.status === 'sent' && activeSub) {
+    await Subscription.updateOne(
+      { _id: activeSub._id, 'purchasedAddons.addonId': smsAddon._id },
+      { $inc: { 'purchasedAddons.$.used': 1, 'purchasedAddons.$.paidUsed': 1 } },
+    ).catch((err) => console.error('[SMS] Failed to increment sms_notifications addon usage:', err));
+  }
 
   return { sent: log.status === 'sent', status: log.status, logId: log._id };
 };
