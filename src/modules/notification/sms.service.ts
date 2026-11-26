@@ -128,11 +128,10 @@ const notifyOfflineMerchantOnNewOrder = async (opts: {
   tenantAdminId?: string | null;
 }) => {
   if (!config.sms.enabled || !config.sms.apiKey) {
+    console.warn(
+      `[SMS] Skipping new-order SMS for tenant ${opts.tenantId}: BULKSMSBD_ENABLED=${config.sms.enabled}, hasApiKey=${Boolean(config.sms.apiKey)}`,
+    );
     return { sent: false, reason: 'sms_disabled' };
-  }
-
-  if (isMerchantOnline(opts.tenantId, opts.tenantAdminId)) {
-    return { sent: false, reason: 'merchant_online' };
   }
 
   const smsAddons = await Addon.find({ slug: { $in: SMS_ADDON_SLUGS } }).select('_id').lean();
