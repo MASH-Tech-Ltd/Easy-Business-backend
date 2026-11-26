@@ -2,7 +2,7 @@ import { IBlog, IBlogFilterOptions } from "./blog.interface";
 import { Blog } from "./blog.model";
 import CustomError from "../../helpers/CustomError";
 import { paginationHelper } from "../../helpers/paginationHelper";
-import { deleteCloudinaryFromUrl } from "../../helpers/cloudinary";
+import { MediaService } from "../media/media.service";
 
 const notifyBlogUpdate = () => {
   try {
@@ -156,37 +156,34 @@ const updateBlog = async (
     updateData.publishedAt = new Date();
   }
 
-  // If thumbnail changed or removed, clean up old Cloudinary image
+  // If thumbnail changed or removed, clean up old image (Cloudinary or R2)
   if (
     updateData.thumbnail !== undefined &&
     existing.thumbnail &&
-    existing.thumbnail !== updateData.thumbnail &&
-    existing.thumbnail.includes("cloudinary.com")
+    existing.thumbnail !== updateData.thumbnail
   ) {
-    try {
-      await deleteCloudinaryFromUrl(existing.thumbnail);
-    } catch (err) {
-      console.error("Failed to delete previous blog thumbnail from Cloudinary:", err);
-    }
+    await MediaService.deleteImages([existing.thumbnail], {
+      tenantId: null,
+      reason: "blog_thumbnail_update",
+    }).catch((err) => console.error("Failed to delete previous blog thumbnail:", err));
   }
 
-  // If content changed, delete any inline Cloudinary images that were removed
+  // If content changed, delete any inline images (Cloudinary or R2) that were removed
   if (
     updateData.content !== undefined &&
     existing.content &&
     existing.content !== updateData.content
   ) {
-    const cloudinaryUrlRegex = /https?:\/\/res\.cloudinary\.com\/[^\s"')<>]+/g;
-    const oldImages = existing.content.match(cloudinaryUrlRegex) || [];
+    const mediaUrlRegex =
+      /https?:\/\/(?:res\.cloudinary\.com|media\.masheco\.com\/platform)\/[^\s"')<>]+/g;
+    const oldImages = existing.content.match(mediaUrlRegex) || [];
     const newContent = updateData.content || "";
-    for (const oldImg of oldImages) {
-      if (!newContent.includes(oldImg)) {
-        try {
-          await deleteCloudinaryFromUrl(oldImg);
-        } catch (err) {
-          console.error("Failed to delete removed inline blog image from Cloudinary:", err);
-        }
-      }
+    const removedImages = oldImages.filter((oldImg) => !newContent.includes(oldImg));
+    if (removedImages.length > 0) {
+      await MediaService.deleteImages(removedImages, {
+        tenantId: null,
+        reason: "blog_inline_update",
+      }).catch((err) => console.error("Failed to delete removed inline blog images:", err));
     }
   }
 
@@ -203,26 +200,21 @@ const deleteBlog = async (id: string): Promise<IBlog | null> => {
     throw new CustomError(404, "Article not found");
   }
 
-  // Delete thumbnail from Cloudinary if hosted there
-  if (existing.thumbnail && existing.thumbnail.includes("cloudinary.com")) {
-    try {
-      await deleteCloudinaryFromUrl(existing.thumbnail);
-    } catch (err) {
-      console.error("Failed to delete blog thumbnail from Cloudinary:", err);
-    }
+  const imagesToDelete: string[] = [];
+  if (existing.thumbnail) {
+    imagesToDelete.push(existing.thumbnail);
   }
-
-  // Delete any inline images from Cloudinary
   if (existing.content) {
-    const cloudinaryUrlRegex = /https?:\/\/res\.cloudinary\.com\/[^\s"')<>]+/g;
-    const inlineImages = existing.content.match(cloudinaryUrlRegex) || [];
-    for (const imgUrl of inlineImages) {
-      try {
-        await deleteCloudinaryFromUrl(imgUrl);
-      } catch (err) {
-        console.error("Failed to delete inline blog image from Cloudinary:", err);
-      }
-    }
+    const mediaUrlRegex =
+      /https?:\/\/(?:res\.cloudinary\.com|media\.masheco\.com\/platform)\/[^\s"')<>]+/g;
+    const inlineImages = existing.content.match(mediaUrlRegex) || [];
+    imagesToDelete.push(...inlineImages);
+  }
+  if (imagesToDelete.length > 0) {
+    await MediaService.deleteImages(imagesToDelete, {
+      tenantId: null,
+      reason: "blog_delete",
+    }).catch((err) => console.error("Failed to delete blog images:", err));
   }
 
   const deleted = await Blog.findByIdAndDelete(id);

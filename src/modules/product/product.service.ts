@@ -4,7 +4,7 @@ import { Types } from 'mongoose';
 import { paginationHelper } from '../../helpers/paginationHelper';
 import { Category } from '../category/category.model';
 import CustomError from '../../helpers/CustomError';
-import { deleteCloudinary, deleteMultipleCloudinary } from '../../helpers/cloudinary';
+import { MediaService } from '../media/media.service';
 import { Subscription } from '../subscription/subscription.model';  
 
 
@@ -166,10 +166,9 @@ const deleteProduct = async (id: string, tenantId: string): Promise<IProduct | n
   }
   
   if (result.images && result.images.length > 0) {
-    const publicIds = result.images.map((img) => img.public_id).filter(Boolean);
-    if (publicIds.length > 0) {
-      deleteMultipleCloudinary(publicIds, 'image').catch((err) => console.error('Cloudinary product delete error:', err));
-    }
+    MediaService.deleteImages(result.images, { tenantId, reason: 'product_delete' }).catch((err) =>
+      console.error('Media product delete error:', err)
+    );
   }
   
   return result;
@@ -183,25 +182,29 @@ const deleteAllProductsByTenant = async (tenantId: string): Promise<any> => {
     Category.find({ tenantId: new Types.ObjectId(tenantId) }).select('image').lean()
   ]);
 
-  const publicIds: string[] = [];
+  const imagesToDelete: any[] = [];
   products.forEach((p) => {
     p.images?.forEach((img) => {
-      if (img.public_id) publicIds.push(img.public_id);
+      if (img?.public_id || img?.secure_url) imagesToDelete.push(img);
     });
   });
 
   categories.forEach((c: any) => {
-    if (c.image?.public_id) publicIds.push(c.image.public_id);
+    if (c.image?.public_id || c.image?.secure_url) imagesToDelete.push(c.image);
   });
 
   // Delete products and categories from database
   const result = await Product.deleteMany({ tenantId: new Types.ObjectId(tenantId) });
   await Category.deleteMany({ tenantId: new Types.ObjectId(tenantId) });
   
-  // Delete all collected images from Cloudinary
-  if (publicIds.length > 0) {
-    deleteMultipleCloudinary(publicIds, 'image').catch((err) =>
-      console.error('Background Cloudinary bulk delete error:', err)
+  // Delete all collected images via provider-aware MediaService
+  if (imagesToDelete.length > 0) {
+    MediaService.deleteImages(imagesToDelete, {
+      tenantId,
+      allowAnyTenant: true,
+      reason: 'tenant_delete_all_products',
+    }).catch((err) =>
+      console.error('Background media bulk delete error:', err)
     );
   }
   

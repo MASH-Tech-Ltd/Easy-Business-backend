@@ -27,6 +27,8 @@ import '../modules/analytics/platformTrackingEvent.model';
 import '../modules/analytics/tenantTrackingEvent.model';
 import '../modules/system/globalSetting.model';
 import '../modules/system/security.model';
+import '../modules/media/media.model';
+import '../modules/media/mediaUsage.model';
 import './backupLog.model';
 
 export const ensureAllModelsLoaded = () => {

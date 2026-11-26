@@ -15,7 +15,8 @@ const userSchema = new Schema<IUser>(
     details: { type: String },
     avatar: {
       public_id: { type: String },
-      secure_url: { type: String }
+      secure_url: { type: String },
+      provider: { type: String, enum: ['cloudinary', 'r2'] }
     },
     passwordResetToken: { type: String },
     passwordResetExpires: { type: Date },

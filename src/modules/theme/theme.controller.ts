@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { ThemeService } from './theme.service';
 import ApiResponse from '../../utils/apiResponse';
 import { asyncHandler } from '../../utils/asyncHandler';
-import { uploadCloudinary, deleteCloudinary } from '../../helpers/cloudinary';
+import { MediaService } from '../media/media.service';
 import CustomError from '../../helpers/CustomError';
 
 const isValidBDPhone = (phone?: string): boolean => {
@@ -40,23 +40,37 @@ const updateTheme = asyncHandler(async (req: Request, res: Response) => {
     ? [payload.banner.image]
     : [];
 
-  // Upload new files to Cloudinary
-  const newUploadedImages: Array<{ public_id: string; secure_url: string }> = [];
+  // Upload new files via MediaService
+  const newUploadedImages: Array<{ public_id: string; secure_url: string; provider?: 'cloudinary' | 'r2' }> = [];
   for (const file of bannerImagesFiles) {
-    try {
-      const uploadResult = await uploadCloudinary(file.path);
-      newUploadedImages.push({
-        public_id: uploadResult.public_id,
-        secure_url: uploadResult.secure_url,
-      });
-    } catch (error) {
-      console.error('Failed to upload banner image to Cloudinary:', error);
-    }
+    const uploadResult = await MediaService.uploadImage(req, file.path, {
+      tenantId,
+      kind: 'banner',
+    });
+    newUploadedImages.push({
+      public_id: uploadResult.public_id,
+      secure_url: uploadResult.secure_url,
+      provider: uploadResult.provider,
+    });
+  }
+
+  // Build map of existing banner images in DB to validate retained slots (prevents foreign public_id injection)
+  const dbBannerImages: Array<{ public_id?: string; secure_url?: string; provider?: 'cloudinary' | 'r2' }> = [
+    ...(existingTheme?.banner?.images || []),
+    ...(existingTheme?.banner?.image?.public_id || existingTheme?.banner?.image?.secure_url
+      ? [existingTheme.banner.image]
+      : []),
+  ];
+  const dbBannerByUrl = new Map<string, any>();
+  const dbBannerById = new Map<string, any>();
+  for (const dbImg of dbBannerImages) {
+    if (dbImg?.secure_url) dbBannerByUrl.set(dbImg.secure_url, dbImg);
+    if (dbImg?.public_id) dbBannerById.set(dbImg.public_id, dbImg);
   }
 
   // Reconstruct finalBannerImages respecting slot positions
   let fileCursor = 0;
-  const finalBannerImages: Array<{ public_id: string; secure_url: string }> = [];
+  const finalBannerImages: Array<{ public_id: string; secure_url: string; provider?: 'cloudinary' | 'r2' }> = [];
 
   for (const slot of imageSlots) {
     if (finalBannerImages.length >= 3) break;
@@ -65,11 +79,17 @@ const updateTheme = asyncHandler(async (req: Request, res: Response) => {
         finalBannerImages.push(newUploadedImages[fileCursor]!);
         fileCursor++;
       }
-    } else if (slot?.public_id && slot?.secure_url) {
-      finalBannerImages.push({
-        public_id: slot.public_id,
-        secure_url: slot.secure_url,
-      });
+    } else if (slot?.public_id || slot?.secure_url) {
+      const matched =
+        (slot.secure_url && dbBannerByUrl.get(slot.secure_url)) ||
+        (slot.public_id && dbBannerById.get(slot.public_id));
+      if (matched && matched.public_id && matched.secure_url) {
+        finalBannerImages.push({
+          public_id: matched.public_id,
+          secure_url: matched.secure_url,
+          ...(matched.provider ? { provider: matched.provider } : {}),
+        });
+      }
     }
   }
 
@@ -79,17 +99,13 @@ const updateTheme = asyncHandler(async (req: Request, res: Response) => {
     fileCursor++;
   }
 
-  // Identify removed images for Cloudinary cleanup AFTER database update succeeds
-  const oldImages: Array<{ public_id?: string }> = [
-    ...(existingTheme?.banner?.images || []),
-    ...(existingTheme?.banner?.image?.public_id ? [existingTheme.banner.image] : [])
-  ];
+  // Identify removed images for cleanup AFTER database update succeeds
   const retainedPublicIds = new Set(finalBannerImages.map(img => img.public_id).filter(Boolean));
-  const bannerImagesToDelete: string[] = [];
+  const bannerImagesToDelete: any[] = [];
 
-  for (const oldImg of oldImages) {
+  for (const oldImg of dbBannerImages) {
     if (oldImg?.public_id && !retainedPublicIds.has(oldImg.public_id)) {
-      bannerImagesToDelete.push(oldImg.public_id);
+      bannerImagesToDelete.push(oldImg);
     }
   }
 
@@ -115,9 +131,9 @@ const updateTheme = asyncHandler(async (req: Request, res: Response) => {
 
   // Delete old banner images ONLY AFTER successful database update
   if (bannerImagesToDelete.length > 0) {
-    for (const publicId of bannerImagesToDelete) {
-      deleteCloudinary(publicId, 'image').catch((err) => console.error('Failed to delete old banner image from Cloudinary:', err));
-    }
+    MediaService.deleteImages(bannerImagesToDelete, { tenantId, reason: 'theme_banner_update' }).catch((err) =>
+      console.error('Failed to delete old banner images:', err)
+    );
   }
 
   ApiResponse.sendSuccess(res, 200, 'Theme updated successfully', result);

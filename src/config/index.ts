@@ -87,6 +87,25 @@ const config = {
     apiSecret: process.env.CLOUDINARY_API_SECRET || '',
   },
 
+  // Media storage provider selection for NEW uploads.
+  // 'cloudinary' (default) keeps legacy behaviour; 'r2' routes new uploads to Cloudflare R2.
+  // Existing images are always served/deleted by the provider they were stored with.
+  media: {
+    storageProvider: (process.env.MEDIA_STORAGE_PROVIDER || 'cloudinary').trim().toLowerCase(),
+    // Opt-in daily sync of R2 delivery analytics from the Cloudflare GraphQL API
+    analyticsSyncEnabled: process.env.MEDIA_ANALYTICS_SYNC === 'true',
+  },
+
+  // Cloudflare R2 (S3-compatible) — server-side only, never expose to frontends
+  r2: {
+    accountId: process.env.R2_ACCOUNT_ID?.trim() || '',
+    accessKeyId: process.env.R2_ACCESS_KEY_ID?.trim() || '',
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY?.trim() || '',
+    bucketName: process.env.R2_BUCKET_NAME?.trim() || 'masheco-media',
+    endpoint: process.env.R2_ENDPOINT?.trim() || '',
+    publicUrl: (process.env.R2_PUBLIC_URL?.trim() || 'https://media.masheco.com').replace(/\/+$/, ''),
+  },
+
   // Storefront Integration
   storefront: {
     apiKey: process.env.STOREFRONT_API_KEY || '',

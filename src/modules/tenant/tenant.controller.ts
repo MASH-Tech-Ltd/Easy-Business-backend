@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { TenantService } from './tenant.service';
 import ApiResponse from '../../utils/apiResponse';
 import { asyncHandler } from '../../utils/asyncHandler';
-import { uploadCloudinary, deleteCloudinaryFromUrl } from '../../helpers/cloudinary';
+import { MediaService } from '../media/media.service';
 
 const createTenant = asyncHandler(async (req: Request, res: Response) => {
   const result = await TenantService.createTenant(req.body);
@@ -34,7 +34,7 @@ const updateMyStore = asyncHandler(async (req: Request, res: Response) => {
       console.error("Error fetching old store logo for Cloudinary cleanup:", e);
     }
 
-    const uploadResult = await uploadCloudinary(req.file.path);
+    const uploadResult = await MediaService.uploadImage(req, req.file.path, { tenantId, kind: 'logo' });
     req.body.logo = uploadResult.secure_url;
   }
   
@@ -52,7 +52,7 @@ const updateMyStore = asyncHandler(async (req: Request, res: Response) => {
 
   // Delete old logo ONLY AFTER successful database update
   if (oldLogoUrl && req.file) {
-    deleteCloudinaryFromUrl(oldLogoUrl, 'image').catch(err => console.error("Failed to delete old store logo from Cloudinary:", err));
+    MediaService.deleteImages([oldLogoUrl], { tenantId, reason: 'store_logo_update' }).catch((err: any) => console.error("Failed to delete old store logo:", err));
   }
 
   ApiResponse.sendSuccess(res, 200, 'Store updated successfully', result);

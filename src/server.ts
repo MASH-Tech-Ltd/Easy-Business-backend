@@ -12,6 +12,8 @@ import { initBackupCron } from './database/backup.cron';
 import { initSubscriptionCron } from './modules/subscription/subscription.cron';
 import { initPlatformCapiCron } from './modules/analytics/platformCapi.service';
 import { initTenantCapiCron } from './modules/analytics/tenantCapi.service';
+import { initMediaCron } from './modules/media/media.cron';
+import { validateMediaConfig } from './modules/media/providers';
 
 const PORT = Number(config.app.port) || 8000;
 const HOST = process.env.HOST?.trim();
@@ -33,11 +35,13 @@ connectDatabase()
     initSocket(server);
 
     // Initialize Background Cron Jobs
+    validateMediaConfig();
     initCourierCron();
     initBackupCron();
     initSubscriptionCron();
     initPlatformCapiCron();
     initTenantCapiCron();
+    initMediaCron();
   })
   .catch((error: unknown) => {
     console.error("Database connection failed!!", error);

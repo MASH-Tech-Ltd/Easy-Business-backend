@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { ProductService } from "./product.service";
 import ApiResponse from "../../utils/apiResponse";
 import { asyncHandler } from "../../utils/asyncHandler";
-import { uploadCloudinary, deleteCloudinary } from "../../helpers/cloudinary";
+import { MediaService } from "../media/media.service";
 import { SubscriptionService } from "../subscription/subscription.service";
 import CustomError from "../../helpers/CustomError";
 import { Product } from "./product.model";
@@ -136,10 +136,14 @@ const createProduct = asyncHandler(async (req: Request, res: Response) => {
       return ApiResponse.sendError(res, 400, "You can upload a maximum of 4 images per product.");
     }
     for (const file of req.files) {
-      const uploadResult = await uploadCloudinary(file.path);
+      const uploadResult = await MediaService.uploadImage(req, file.path, {
+        tenantId,
+        kind: 'product',
+      });
       req.body.images.push({
         public_id: uploadResult.public_id,
         secure_url: uploadResult.secure_url,
+        provider: uploadResult.provider,
       });
     }
   }
@@ -196,7 +200,7 @@ const getSingleProduct = asyncHandler(async (req: Request, res: Response) => {
 const updateProduct = asyncHandler(async (req: Request, res: Response) => {
   // SECURITY FIX (IDOR): Get tenantId from JWT, not from request body
   const tenantId = (req as any).user.tenantId;
-  const imagesToDelete: string[] = [];
+  const imagesToDelete: any[] = [];
 
   if (req.body.name && !req.body.title) {
     req.body.title = req.body.name;
@@ -316,20 +320,46 @@ const updateProduct = asyncHandler(async (req: Request, res: Response) => {
   let newImages: any[] = [];
   if (req.files && Array.isArray(req.files) && req.files.length > 0) {
     for (const file of req.files) {
-      const uploadResult = await uploadCloudinary(file.path);
+      const uploadResult = await MediaService.uploadImage(req, file.path, {
+        tenantId,
+        kind: 'product',
+      });
       newImages.push({
         public_id: uploadResult.public_id,
         secure_url: uploadResult.secure_url,
+        provider: uploadResult.provider,
       });
     }
   }
 
   if (req.body.existingImages !== undefined || newImages.length > 0) {
+    // Fetch existing product scoped to tenantId to validate retained images (prevents foreign public_id injection)
+    const existingProduct = await Product.findOne({ _id: req.params.id as string, tenantId }).select('images').lean();
+    const dbImagesByUrl = new Map<string, any>();
+    const dbImagesById = new Map<string, any>();
+    if (existingProduct?.images) {
+      for (const dbImg of existingProduct.images) {
+        if (dbImg?.secure_url) dbImagesByUrl.set(dbImg.secure_url, dbImg);
+        if (dbImg?.public_id) dbImagesById.set(dbImg.public_id, dbImg);
+      }
+    }
+
+    // Only keep existingImages that actually belong to this product in the database
+    const verifiedExistingImages: any[] = [];
+    for (const img of existingImages) {
+      const match =
+        (img?.secure_url && dbImagesByUrl.get(img.secure_url)) ||
+        (img?.public_id && dbImagesById.get(img.public_id));
+      if (match && !verifiedExistingImages.some((v) => v.secure_url === match.secure_url)) {
+        verifiedExistingImages.push(match);
+      }
+    }
+
     let combinedImages: any[] = [];
 
     if (imageManifest && Array.isArray(imageManifest) && imageManifest.length > 0) {
       const existingMap = new Map<string, any>();
-      existingImages.forEach(img => {
+      verifiedExistingImages.forEach(img => {
         if (img && img.secure_url) {
           existingMap.set(img.secure_url, img);
         }
@@ -343,40 +373,36 @@ const updateProduct = asyncHandler(async (req: Request, res: Response) => {
         }
       });
 
-      // Append any remaining images just in case
-      existingImages.forEach(img => {
+      // Append any remaining verified images just in case
+      verifiedExistingImages.forEach(img => {
         if (!combinedImages.some(ci => ci.secure_url === img.secure_url)) combinedImages.push(img);
       });
       newImages.forEach(img => {
         if (!combinedImages.some(ci => ci.secure_url === img.secure_url)) combinedImages.push(img);
       });
     } else {
-      combinedImages = [...existingImages, ...newImages];
+      combinedImages = [...verifiedExistingImages, ...newImages];
     }
 
     if (combinedImages.length > 4) {
       return ApiResponse.sendError(res, 400, "You can upload a maximum of 4 images per product.");
     }
 
-    // Identify replaced or removed images for Cloudinary cleanup AFTER database update succeeds
-    try {
-      const existingProduct = await Product.findById(req.params.id).select('images').lean();
-      if (existingProduct && existingProduct.images && existingProduct.images.length > 0) {
-        const retainedPublicIds = new Set(combinedImages.map((img: any) => img.public_id).filter(Boolean));
-        for (const oldImg of existingProduct.images) {
-          if (oldImg?.public_id && !retainedPublicIds.has(oldImg.public_id)) {
-            imagesToDelete.push(oldImg.public_id);
-          }
+    // Identify replaced or removed images for cleanup AFTER database update succeeds
+    if (existingProduct && existingProduct.images && existingProduct.images.length > 0) {
+      const retainedPublicIds = new Set(combinedImages.map((img: any) => img.public_id).filter(Boolean));
+      for (const oldImg of existingProduct.images) {
+        if (oldImg?.public_id && !retainedPublicIds.has(oldImg.public_id)) {
+          imagesToDelete.push(oldImg);
         }
       }
-    } catch (e) {
-      console.error("Error identifying images for Cloudinary cleanup:", e);
     }
 
     // CRITICAL FIX: Strip subdocument _id so Mongoose replaces array in exact order instead of matching subdocuments by _id in old slots
     req.body.images = combinedImages.map((img: any) => ({
       public_id: img.public_id,
       secure_url: img.secure_url,
+      ...(img.provider ? { provider: img.provider } : {}),
     }));
   }
 
@@ -392,9 +418,9 @@ const updateProduct = asyncHandler(async (req: Request, res: Response) => {
 
   // Delete removed old images ONLY AFTER successful database update
   if (imagesToDelete.length > 0) {
-    for (const publicId of imagesToDelete) {
-      deleteCloudinary(publicId, 'image').catch((err: any) => console.error("Cloudinary delete error:", err));
-    }
+    MediaService.deleteImages(imagesToDelete, { tenantId, reason: 'product_update' }).catch((err: any) =>
+      console.error("Media delete error:", err)
+    );
   }
 
   ApiResponse.sendSuccess(res, 200, "Product updated successfully", result);

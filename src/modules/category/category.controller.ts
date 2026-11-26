@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { CategoryService } from './category.service';
 import ApiResponse from '../../utils/apiResponse';
 import { asyncHandler } from '../../utils/asyncHandler';
-import { uploadCloudinary, deleteCloudinary } from "../../helpers/cloudinary";
+import { MediaService } from "../media/media.service";
 
 import CustomError from "../../helpers/CustomError";
 import { SubscriptionService } from "../subscription/subscription.service";
@@ -18,10 +18,14 @@ const createCategory = asyncHandler(async (req: Request, res: Response) => {
   }
 
   if (req.file) {
-    const uploadResult = await uploadCloudinary(req.file.path);
+    const uploadResult = await MediaService.uploadImage(req, req.file.path, {
+      tenantId,
+      kind: 'category',
+    });
     req.body.image = {
       public_id: uploadResult.public_id,
-      secure_url: uploadResult.secure_url
+      secure_url: uploadResult.secure_url,
+      provider: uploadResult.provider,
     };
   }
 
@@ -56,22 +60,26 @@ const getSingleCategory = asyncHandler(async (req: Request, res: Response) => {
 
 const updateCategory = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = (req as any).user.tenantId;
-  let oldImagePublicId: string | null = null;
+  let oldImage: any = null;
   
   if (req.file) {
     try {
-      const existingCategory = await Category.findById(req.params.id).select('image').lean();
-      if (existingCategory?.image?.public_id) {
-        oldImagePublicId = existingCategory.image.public_id;
+      const existingCategory = await Category.findOne({ _id: req.params.id as string, tenantId }).select('image').lean();
+      if (existingCategory?.image && (existingCategory.image.public_id || existingCategory.image.secure_url)) {
+        oldImage = existingCategory.image;
       }
     } catch (e) {
       console.error("Error finding category for image cleanup:", e);
     }
 
-    const uploadResult = await uploadCloudinary(req.file.path);
+    const uploadResult = await MediaService.uploadImage(req, req.file.path, {
+      tenantId,
+      kind: 'category',
+    });
     req.body.image = {
       public_id: uploadResult.public_id,
-      secure_url: uploadResult.secure_url
+      secure_url: uploadResult.secure_url,
+      provider: uploadResult.provider,
     };
   }
 
@@ -81,8 +89,10 @@ const updateCategory = asyncHandler(async (req: Request, res: Response) => {
   }
 
   // Delete old image ONLY AFTER successful database update
-  if (oldImagePublicId) {
-    deleteCloudinary(oldImagePublicId, 'image').catch(err => console.error("Failed to delete old category image:", err));
+  if (oldImage) {
+    MediaService.deleteImages([oldImage], { tenantId, reason: 'category_update' }).catch(err =>
+      console.error("Failed to delete old category image:", err)
+    );
   }
 
   ApiResponse.sendSuccess(res, 200, 'Category updated successfully', result);
@@ -93,6 +103,11 @@ const deleteCategory = asyncHandler(async (req: Request, res: Response) => {
   const result = await CategoryService.deleteCategory(req.params.id as string, tenantId);
   if (!result) {
     return ApiResponse.sendError(res, 404, 'Category not found or unauthorized');
+  }
+  if (result.image && (result.image.public_id || result.image.secure_url)) {
+    MediaService.deleteImages([result.image], { tenantId, reason: 'category_delete' }).catch(err =>
+      console.error("Failed to delete category image:", err)
+    );
   }
   ApiResponse.sendSuccess(res, 200, 'Category deleted successfully');
 });

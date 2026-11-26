@@ -23,6 +23,7 @@ export interface IFooterSetting {
 export interface IBannerImage {
   public_id: string;
   secure_url: string;
+  provider?: 'cloudinary' | 'r2';
 }
 
 export interface IBannerSetting {
@@ -102,6 +103,7 @@ const footerSchema = new Schema<IFooterSetting>({
 const bannerImageSchema = new Schema<IBannerImage>({
   public_id: { type: String, default: '' },
   secure_url: { type: String, default: '' },
+  provider: { type: String, enum: ['cloudinary', 'r2'] },
 }, { _id: false });
 
 const bannerSchema = new Schema<IBannerSetting>({

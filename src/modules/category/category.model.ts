@@ -9,7 +9,8 @@ const categorySchema = new Schema<ICategory>(
     description: { type: String },
     image: {
       public_id: { type: String },
-      secure_url: { type: String }
+      secure_url: { type: String },
+      provider: { type: String, enum: ['cloudinary', 'r2'] }
     },
     status: { type: String, enum: ['ACTIVE', 'DRAFT', 'INACTIVE'], default: 'ACTIVE' },
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true },

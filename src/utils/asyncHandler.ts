@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import fs from "fs";
 import path from "path";
-import { deleteMultipleCloudinary } from "../helpers/cloudinary";
+import { MediaService } from "../modules/media/media.service";
 
 type AsyncController = (
   req: Request,
@@ -53,33 +53,10 @@ export const cleanupUploadedFiles = async (req: Request | any): Promise<void> =>
     }
   }
 
-  // 3. Clean up Cloudinary images if upload happened before creation/update failed
+  // 3. Clean up ONLY server-tracked uploads from this request (never trust req.body IDs — prevents cross-tenant IDOR)
   try {
-    const publicIdsToDelete: string[] = [];
-
-    // Check req.body.images
-    if (Array.isArray(req.body?.images)) {
-      req.body.images.forEach((img: any) => {
-        const pid = typeof img === "string" ? img : img?.public_id;
-        if (pid && typeof pid === "string") publicIdsToDelete.push(pid);
-      });
-    }
-
-    // Check req.body.image
-    if (req.body?.image) {
-      const pid = typeof req.body.image === "string" ? req.body.image : req.body.image?.public_id;
-      if (pid && typeof pid === "string") publicIdsToDelete.push(pid);
-    }
-
-    // Check custom tracked uploaded Cloudinary list on req
-    if (Array.isArray(req.uploadedCloudinary)) {
-      req.uploadedCloudinary.forEach((pid: any) => {
-        if (pid && typeof pid === "string") publicIdsToDelete.push(pid);
-      });
-    }
-
-    if (publicIdsToDelete.length > 0) {
-      await deleteMultipleCloudinary(publicIdsToDelete).catch(() => {});
+    if (Array.isArray(req.uploadedMedia) && req.uploadedMedia.length > 0) {
+      await MediaService.cleanupTrackedUploads(req.uploadedMedia).catch(() => {});
     }
   } catch (_) {}
 

@@ -7,6 +7,7 @@ export interface ICategory extends Document {
   image?: {
     public_id: string;
     secure_url: string;
+    provider?: 'cloudinary' | 'r2';
   };
   status?: string;
   tenantId: Types.ObjectId;

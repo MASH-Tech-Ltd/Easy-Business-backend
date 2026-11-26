@@ -28,6 +28,7 @@ import { ReferralRoutes } from '../modules/referral/referral.route';
 import { BlogRoutes } from '../modules/blog/blog.route';
 import { AffiliateRoutes } from '../modules/affiliate/affiliate.route';
 import { BlockedPhoneRoutes } from '../modules/blockedPhone/blockedPhone.route';
+import { MediaRoutes } from '../modules/media/media.route';
 
 
 const router = Router();
@@ -144,6 +145,10 @@ const moduleRoutes = [
   {
     path: '/blocked-phones',
     route: BlockedPhoneRoutes,
+  },
+  {
+    path: '/media',
+    route: MediaRoutes,
   },
 ];
 

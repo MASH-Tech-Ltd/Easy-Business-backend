@@ -2,7 +2,7 @@ import { ITenant } from "./tenant.interface";
 import { Tenant } from "./tenant.model";
 import { User } from "../auth/auth.model";
 import CustomError from "../../helpers/CustomError";
-import { deleteCloudinary, deleteMultipleCloudinary } from '../../helpers/cloudinary';
+import { MediaService } from '../media/media.service';
 import { paginationHelper } from "../../helpers/paginationHelper";
 import { Subscription } from "../subscription/subscription.model";
 import { SubscriptionService } from "../subscription/subscription.service";
@@ -694,31 +694,24 @@ const deleteTenant = async (id: string) => {
       Category.find({ tenantId: id }, 'image', { session })
     ]);
 
-    const publicIdsToDelete: string[] = [];
+    const imagesToDelete: any[] = [];
 
-    if (adminUser?.avatar?.public_id) {
-      publicIdsToDelete.push(adminUser.avatar.public_id);
+    if (adminUser?.avatar && (adminUser.avatar.public_id || adminUser.avatar.secure_url)) {
+      imagesToDelete.push(adminUser.avatar);
     }
 
     if (tenant.logo && typeof tenant.logo === 'string') {
-      const parts = tenant.logo.split('/');
-      const filename = parts.pop();
-      if (filename) {
-        const publicId = filename.split('.')[0];
-        if (publicId) publicIdsToDelete.push(publicId);
-      }
+      imagesToDelete.push(tenant.logo);
     }
 
     products.forEach((product) => {
       product.images?.forEach((img) => {
-        if (img.public_id) publicIdsToDelete.push(img.public_id);
+        if (img?.public_id || img?.secure_url) imagesToDelete.push(img);
       });
     });
 
     categories.forEach((cat: any) => {
-      if (cat.image?.public_id) {
-        publicIdsToDelete.push(cat.image.public_id);
-      }
+      if (cat.image?.public_id || cat.image?.secure_url) imagesToDelete.push(cat.image);
     });
 
     // Identify tenant user IDs prior to deletion so we can send instant real-time socket events
@@ -745,10 +738,14 @@ const deleteTenant = async (id: string) => {
     await session.commitTransaction();
     session.endSession();
 
-    // Perform Cloudinary image deletions reliably
-    if (publicIdsToDelete.length > 0) {
-      deleteMultipleCloudinary(publicIdsToDelete, 'image').catch((err) =>
-        console.error('Background Cloudinary cleanup error on deleteTenant:', err)
+    // Perform provider-aware media deletions reliably
+    if (imagesToDelete.length > 0) {
+      MediaService.deleteImages(imagesToDelete, {
+        tenantId: id,
+        allowAnyTenant: true,
+        reason: 'tenant_delete',
+      }).catch((err) =>
+        console.error('Background media cleanup error on deleteTenant:', err)
       );
     }
 

@@ -13,6 +13,11 @@ interface CloudinaryUploadResult {
   public_id: string;
   secure_url: string;
   resource_type: string;
+  // Additive metadata (used for media usage tracking); existing callers ignore these
+  bytes?: number;
+  width?: number;
+  height?: number;
+  format?: string;
 }
 
 export type CloudinaryResourceType = 'image' | 'video' | 'raw' | 'auto';
@@ -60,6 +65,10 @@ export const uploadCloudinary = async (
       public_id: getPublicId(cloudinaryResponse.public_id),
       secure_url: cloudinaryResponse.secure_url,
       resource_type: cloudinaryResponse.resource_type,
+      bytes: cloudinaryResponse.bytes,
+      width: cloudinaryResponse.width,
+      height: cloudinaryResponse.height,
+      format: cloudinaryResponse.format,
     };
   } catch (error: any) {
     if (filePath && fs.existsSync(filePath)) {

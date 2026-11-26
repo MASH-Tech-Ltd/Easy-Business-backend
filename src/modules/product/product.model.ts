@@ -9,7 +9,8 @@ const productSchema = new Schema<IProduct>(
     description: { type: String },
     images: [{
       public_id: { type: String, required: [true, 'Image public_id is required'] },
-      secure_url: { type: String, required: [true, 'Image URL is required'] }
+      secure_url: { type: String, required: [true, 'Image URL is required'] },
+      provider: { type: String, enum: ['cloudinary', 'r2'] }
     }],
     specifications: [{
       group: { type: String },

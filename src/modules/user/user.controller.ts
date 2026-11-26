@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { UserService } from "./user.service";
 import ApiResponse from "../../utils/apiResponse";
 import { asyncHandler } from "../../utils/asyncHandler";
-import { uploadCloudinary, deleteCloudinary } from "../../helpers/cloudinary";
+import { MediaService } from "../media/media.service";
 import CustomError from "../../helpers/CustomError";
 
 const isValidBDPhone = (phone?: string): boolean => {
@@ -13,7 +13,8 @@ const isValidBDPhone = (phone?: string): boolean => {
 
 const updateProfile = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user._id;
-  let oldAvatarPublicId: string | null = null;
+  const tenantId = (req as any).user.tenantId ? String((req as any).user.tenantId) : null;
+  let oldAvatar: any = null;
 
   // Validate personal phone
   if (req.body.phone && !isValidBDPhone(req.body.phone)) {
@@ -36,22 +37,29 @@ const updateProfile = asyncHandler(async (req: Request, res: Response) => {
 
   if (req.file) {
     const oldUser = await UserService.getUserById(userId);
-    if (oldUser && oldUser.avatar && oldUser.avatar.public_id) {
-      oldAvatarPublicId = oldUser.avatar.public_id;
+    if (oldUser && oldUser.avatar && (oldUser.avatar.public_id || oldUser.avatar.secure_url)) {
+      oldAvatar = oldUser.avatar;
     }
     
-    const uploadResult = await uploadCloudinary(req.file.path);
+    const uploadResult = await MediaService.uploadImage(req, req.file.path, {
+      tenantId,
+      kind: 'avatar',
+      userId,
+    });
     req.body.avatar = {
       public_id: uploadResult.public_id,
-      secure_url: uploadResult.secure_url
+      secure_url: uploadResult.secure_url,
+      provider: uploadResult.provider,
     };
   }
 
   const result = await UserService.updateProfile(userId, req.body);
 
   // Delete old avatar ONLY AFTER successful database update
-  if (oldAvatarPublicId && req.file) {
-    deleteCloudinary(oldAvatarPublicId, 'image').catch(err => console.error("Failed to delete old avatar from Cloudinary:", err));
+  if (oldAvatar && req.file) {
+    MediaService.deleteImages([oldAvatar], { tenantId, reason: 'avatar_update' }).catch(err =>
+      console.error("Failed to delete old avatar:", err)
+    );
   }
 
   ApiResponse.sendSuccess(res, 200, "Profile updated successfully", result);

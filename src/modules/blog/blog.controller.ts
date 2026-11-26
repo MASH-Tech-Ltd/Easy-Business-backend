@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { BlogService } from './blog.service';
 import ApiResponse from '../../utils/apiResponse';
 import { asyncHandler } from '../../utils/asyncHandler';
-import { uploadCloudinary, deleteCloudinary, deleteCloudinaryFromUrl } from '../../helpers/cloudinary';
+import { MediaService } from '../media/media.service';
 import CustomError from '../../helpers/CustomError';
 
 const deleteBlogImage = asyncHandler(async (req: Request, res: Response) => {
@@ -11,29 +11,35 @@ const deleteBlogImage = asyncHandler(async (req: Request, res: Response) => {
     throw new CustomError(400, 'Image url or public_id is required');
   }
 
-  if (url) {
-    await deleteCloudinaryFromUrl(url);
-  } else if (public_id) {
-    await deleteCloudinary(public_id);
-  }
+  await MediaService.deleteImages(
+    [url ? url : { public_id }],
+    { tenantId: null, reason: 'blog_image_delete' },
+  );
 
-  ApiResponse.sendSuccess(res, 200, 'Image deleted successfully from Cloudinary');
+  ApiResponse.sendSuccess(res, 200, 'Image deleted successfully');
 });
 
 const uploadBlogImage = asyncHandler(async (req: Request, res: Response) => {
   if (!req.file) {
     throw new CustomError(400, 'Image file is required');
   }
-  const uploadResult = await uploadCloudinary(req.file.path);
+  const uploadResult = await MediaService.uploadImage(req, req.file.path, {
+    tenantId: null,
+    kind: 'blog',
+  });
   ApiResponse.sendSuccess(res, 200, 'Image uploaded successfully', {
     url: uploadResult.secure_url,
     public_id: uploadResult.public_id,
+    provider: uploadResult.provider,
   });
 });
 
 const createBlog = asyncHandler(async (req: Request, res: Response) => {
   if (req.file) {
-    const uploadResult = await uploadCloudinary(req.file.path);
+    const uploadResult = await MediaService.uploadImage(req, req.file.path, {
+      tenantId: null,
+      kind: 'blog',
+    });
     req.body.thumbnail = uploadResult.secure_url;
   }
   if (typeof req.body.isPublished === 'string') {
@@ -81,7 +87,10 @@ const getBlogBySlug = asyncHandler(async (req: Request, res: Response) => {
 
 const updateBlog = asyncHandler(async (req: Request, res: Response) => {
   if (req.file) {
-    const uploadResult = await uploadCloudinary(req.file.path);
+    const uploadResult = await MediaService.uploadImage(req, req.file.path, {
+      tenantId: null,
+      kind: 'blog',
+    });
     req.body.thumbnail = uploadResult.secure_url;
   }
   if (typeof req.body.isPublished === 'string') {

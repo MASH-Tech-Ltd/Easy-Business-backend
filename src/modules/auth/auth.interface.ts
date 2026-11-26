@@ -12,6 +12,7 @@ export interface IUser extends Document {
   avatar?: {
     public_id: string;
     secure_url: string;
+    provider?: 'cloudinary' | 'r2';
   };
   passwordResetToken?: string | undefined;
   passwordResetExpires?: Date | undefined;

@@ -8,6 +8,7 @@ export interface IProduct extends Document {
   images: {
     public_id: string;
     secure_url: string;
+    provider?: 'cloudinary' | 'r2';
   }[];
   specifications?: {
     group: string;
