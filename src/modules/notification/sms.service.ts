@@ -418,7 +418,7 @@ const sendOrderConfirmationSms = async (opts: {
   const tenant = await Tenant.findById(opts.tenantId).select('name').lean();
   const storeName = (tenant?.name || 'Store').slice(0, 30);
   const shortOrder = String(order._id).slice(-6).toUpperCase();
-  const message = `Your order #${shortOrder} (${order.totalPrice} BDT) on ${storeName} (MASH ECO) is confirmed. Thank you for shopping with us!`;
+  const message = `Your order #${shortOrder} (${order.totalPrice} BDT) on ${storeName} is confirmed. Thank you for shopping with us!`;
 
   const log = await sendSingleSms({
     phone: formattedPhone,
