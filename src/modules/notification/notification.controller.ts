@@ -81,6 +81,24 @@ export const getMySmsStats = async (req: Request, res: Response) => {
   }
 };
 
+export const sendOrderConfirmationSms = async (req: Request, res: Response) => {
+  try {
+    const tenantId = (req as any).user?.tenantId;
+    const userId = (req as any).user?._id;
+    if (!tenantId) {
+      return res.status(400).json({ success: false, message: 'Tenant context is required' });
+    }
+    const data = await SmsService.sendOrderConfirmationSms({
+      tenantId: String(tenantId),
+      orderId: String(req.params.orderId),
+      userId: userId ? String(userId) : null,
+    });
+    res.status(200).json({ success: true, message: 'Order confirmation SMS sent successfully', data });
+  } catch (error: any) {
+    res.status(error?.statusCode || 500).json({ success: false, message: error.message });
+  }
+};
+
 export const resendSms = async (req: Request, res: Response) => {
   try {
     const adminUserId = String((req as any).user._id);

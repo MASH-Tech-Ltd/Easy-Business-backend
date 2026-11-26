@@ -7,6 +7,7 @@ import {
   sendManualSms,
   getSmsLogs,
   getMySmsStats,
+  sendOrderConfirmationSms,
   resendSms,
 } from './notification.controller';
 import { authMiddleware } from '../../middleware/authMiddleware';
@@ -19,8 +20,9 @@ router.get('/sms/logs', authMiddleware('super_admin'), getSmsLogs);
 router.post('/sms/send', authMiddleware('super_admin'), sendManualSms);
 router.post('/sms/resend/:id', authMiddleware('super_admin'), resendSms);
 
-// Merchant SMS count/logs
+// Merchant SMS count/logs & order confirmation SMS
 router.get('/sms/my-stats', authMiddleware('tenant_admin'), getMySmsStats);
+router.post('/sms/send-order-confirmation/:orderId', authMiddleware('tenant_admin'), sendOrderConfirmationSms);
 
 // Routes available to merchants, admins, and affiliate partners
 router.use(authMiddleware('tenant_admin', 'super_admin', 'affiliate_partner'));

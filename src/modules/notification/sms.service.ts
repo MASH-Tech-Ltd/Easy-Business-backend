@@ -7,6 +7,7 @@ import { Tenant } from '../tenant/tenant.model';
 import { User } from '../auth/auth.model';
 import { Subscription } from '../subscription/subscription.model';
 import { Addon } from '../addon/addon.model';
+import { Order } from '../order/order.model';
 import { SmsLog, SmsTriggerType } from './smsLog.model';
 
 /** Converts 01XXXXXXXXX / +8801XXXXXXXXX / 8801XXXXXXXXX to 8801XXXXXXXXX for BulkSMSBD. */
@@ -173,7 +174,7 @@ const notifyOfflineMerchantOnNewOrder = async (opts: {
 
   const shortOrder = String(opts.orderId).slice(-6).toUpperCase();
   const storeName = (tenant?.name || 'MASH ECO').slice(0, 30);
-  const message = `Apnar notun order eseche (#${shortOrder}) - ${opts.customerName}, ${opts.totalPrice} BDT on ${storeName}. Check MASH ECO dashboard.`;
+  const message = `New order #${shortOrder} (${opts.totalPrice} BDT) received on ${storeName}. Please check your Merchant dashboard.`;
 
   const log = await sendSingleSms({
     phone: formatted,
@@ -257,7 +258,7 @@ const getSmsSummaryAndLogs = async (query: { page?: string; limit?: string; tena
   if (query.tenantId && Types.ObjectId.isValid(query.tenantId)) {
     filter.tenantId = new Types.ObjectId(query.tenantId);
   }
-  if (query.triggerType && ['new_order_offline', 'admin_manual'].includes(query.triggerType)) {
+  if (query.triggerType && ['new_order_offline', 'order_confirmation', 'admin_manual'].includes(query.triggerType)) {
     filter.triggerType = query.triggerType;
   }
 
@@ -363,9 +364,91 @@ const getSmsSummaryAndLogs = async (query: { page?: string; limit?: string; tena
   };
 };
 
+const sendOrderConfirmationSms = async (opts: {
+  tenantId: string;
+  orderId: string;
+  userId?: string | null;
+}) => {
+  if (!config.sms.apiKey) {
+    throw new CustomError(500, 'BulkSMSBD API key is not configured on the server.');
+  }
+
+  if (!Types.ObjectId.isValid(opts.orderId)) {
+    throw new CustomError(400, 'Invalid order ID');
+  }
+
+  const order = await Order.findOne({
+    _id: new Types.ObjectId(opts.orderId),
+    tenantId: new Types.ObjectId(opts.tenantId),
+  })
+    .select('_id customerName customerPhone totalPrice status')
+    .lean();
+
+  if (!order) {
+    throw new CustomError(404, 'Order not found or unauthorized');
+  }
+
+  const smsAddons = await Addon.find({ slug: { $in: SMS_ADDON_SLUGS } }).select('_id name').lean();
+  const smsAddonIds = smsAddons.map((a) => a._id);
+  const smsAddonIdSet = new Set(smsAddonIds.map((id) => id.toString()));
+
+  const activeSub = await Subscription.findOne({
+    tenantId: new Types.ObjectId(opts.tenantId),
+    status: 'active',
+    'purchasedAddons.addonId': { $in: smsAddonIds },
+  })
+    .select('_id purchasedAddons')
+    .lean();
+
+  const addonEntry = activeSub?.purchasedAddons?.find(
+    (pa: any) => pa.addonId && smsAddonIdSet.has(pa.addonId.toString()) && hasRemainingSmsAddonQuota(pa),
+  );
+
+  if (!addonEntry) {
+    throw new CustomError(
+      403,
+      'SMS Alert add-on is not active or your monthly SMS quota has been reached.',
+    );
+  }
+
+  const formattedPhone = formatBDNumberForSms(order.customerPhone);
+  if (!formattedPhone) {
+    throw new CustomError(400, `Invalid customer phone number: ${order.customerPhone || 'N/A'}`);
+  }
+
+  const tenant = await Tenant.findById(opts.tenantId).select('name').lean();
+  const storeName = (tenant?.name || 'Store').slice(0, 30);
+  const shortOrder = String(order._id).slice(-6).toUpperCase();
+  const message = `Your order #${shortOrder} (${order.totalPrice} BDT) on ${storeName} (MASH ECO) is confirmed. Thank you for shopping with us!`;
+
+  const log = await sendSingleSms({
+    phone: formattedPhone,
+    message,
+    tenantId: opts.tenantId,
+    orderId: String(order._id),
+    triggerType: 'order_confirmation',
+    sentBy: opts.userId ?? null,
+  });
+
+  if (log.status === 'sent' && activeSub) {
+    await Subscription.updateOne(
+      { _id: activeSub._id, 'purchasedAddons.addonId': (addonEntry as any).addonId },
+      { $inc: { 'purchasedAddons.$.used': 1, 'purchasedAddons.$.paidUsed': 1 } },
+    ).catch((err) => console.error('[SMS] Failed to increment sms addon usage:', err));
+  } else if (log.status === 'failed') {
+    throw new CustomError(502, log.providerMessage || 'Failed to send SMS via gateway');
+  }
+
+  return log;
+};
+
 const getMerchantSmsStats = async (tenantId: string) => {
   const tid = new Types.ObjectId(tenantId);
-  const [counts, recentLogs] = await Promise.all([
+  const smsAddons = await Addon.find({ slug: { $in: SMS_ADDON_SLUGS } }).select('_id name slug').lean();
+  const smsAddonIds = smsAddons.map((a) => a._id);
+  const addonById = new Map(smsAddons.map((a: any) => [a._id.toString(), a]));
+
+  const [counts, recentLogs, activeSub] = await Promise.all([
     SmsLog.aggregate([
       { $match: { tenantId: tid } },
       {
@@ -375,21 +458,66 @@ const getMerchantSmsStats = async (tenantId: string) => {
         },
       },
     ]),
-    SmsLog.find({ tenantId: tid }).sort({ createdAt: -1 }).limit(10).lean(),
+    SmsLog.find({ tenantId: tid }).sort({ createdAt: -1 }).limit(50).lean(),
+    smsAddonIds.length
+      ? Subscription.findOne({
+          tenantId: tid,
+          status: 'active',
+          'purchasedAddons.addonId': { $in: smsAddonIds },
+        })
+          .select('purchasedAddons')
+          .lean()
+      : null,
   ]);
 
   let totalSent = 0;
+  let totalFailed = 0;
   let orderOfflineSent = 0;
+  let orderConfirmationSent = 0;
   let adminManualSent = 0;
   for (const c of counts) {
     if (c._id.status === 'sent') {
       totalSent += c.count;
       if (c._id.triggerType === 'new_order_offline') orderOfflineSent += c.count;
+      if (c._id.triggerType === 'order_confirmation') orderConfirmationSent += c.count;
       if (c._id.triggerType === 'admin_manual') adminManualSent += c.count;
+    } else {
+      totalFailed += c.count;
     }
   }
 
-  return { totalSent, orderOfflineSent, adminManualSent, recentLogs };
+  let hasAddon = false;
+  let addonName: string | null = null;
+  let limit = 0;
+  let used = 0;
+
+  if (activeSub?.purchasedAddons) {
+    for (const pa of activeSub.purchasedAddons as any[]) {
+      const info = pa?.addonId ? addonById.get(pa.addonId.toString()) : null;
+      if (info && (Number(pa.limit) || 0) > 0) {
+        hasAddon = true;
+        addonName = info.name;
+        limit += Number(pa.limit) || 0;
+        used += Number(pa.used) || 0;
+      }
+    }
+  }
+
+  return {
+    totalSent,
+    totalFailed,
+    orderOfflineSent,
+    orderConfirmationSent,
+    adminManualSent,
+    addonQuota: {
+      hasAddon,
+      addonName,
+      limit,
+      used,
+      remaining: Math.max(0, limit - used),
+    },
+    recentLogs,
+  };
 };
 
 const resendSmsLog = async (logId: string, adminUserId: string) => {
@@ -446,6 +574,7 @@ export const SmsService = {
   sendSingleSms,
   getCreditBalance,
   notifyOfflineMerchantOnNewOrder,
+  sendOrderConfirmationSms,
   sendManualAdminSms,
   getSmsSummaryAndLogs,
   getMerchantSmsStats,

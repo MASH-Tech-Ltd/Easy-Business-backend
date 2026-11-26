@@ -1,6 +1,6 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
-export type SmsTriggerType = 'new_order_offline' | 'admin_manual';
+export type SmsTriggerType = 'new_order_offline' | 'order_confirmation' | 'admin_manual';
 export type SmsStatus = 'sent' | 'failed';
 
 export interface ISmsLog extends Document {
@@ -25,7 +25,7 @@ const smsLogSchema = new Schema<ISmsLog>(
     message: { type: String, required: true },
     triggerType: {
       type: String,
-      enum: ['new_order_offline', 'admin_manual'],
+      enum: ['new_order_offline', 'order_confirmation', 'admin_manual'],
       required: true,
     },
     status: {
