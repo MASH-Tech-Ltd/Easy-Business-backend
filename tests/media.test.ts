@@ -19,6 +19,7 @@ import { resolveProvider } from '../src/modules/media/providers';
 import { createR2Provider, R2_CACHE_CONTROL, S3Like } from '../src/modules/media/providers/r2.provider';
 import { cleanupUploadedFiles } from '../src/utils/asyncHandler';
 import { computeQuotaSummary } from '../src/modules/media/media.service';
+import { aggregateMetricsByMerchant } from '../src/modules/media/mediaAnalytics.service';
 
 const TENANT_A = '507f1f77bcf86cd799439011';
 const TENANT_B = '507f1f77bcf86cd799439022';
@@ -261,4 +262,16 @@ test('computeQuotaSummary: enforces 2 GB base limit + add-on boost accurately', 
   assert.equal(boosted.totalLimitBytes, 2 * TWO_GB);
   assert.equal(boosted.usedPercent, 50);
   assert.equal(boosted.isLimitReached, false);
+});
+
+test('aggregateMetricsByMerchant: parses /merchants/{tenantId}/... read metrics accurately', () => {
+  const agg = aggregateMetricsByMerchant([
+    { path: `/merchants/${TENANT_A}/products/1.webp`, requests: 120, bytes: 50000 },
+    { path: `/merchants/${TENANT_A}/categories/2_w400.webp`, requests: 30, bytes: 10000 },
+    { path: `/merchants/${TENANT_B}/store/logo/3.webp`, requests: 15, bytes: 4000 },
+    { path: '/platform/blog/4.webp', requests: 99, bytes: 20000 },
+  ]);
+  assert.deepEqual(agg.get(TENANT_A), { requests: 150, bytes: 60000 });
+  assert.deepEqual(agg.get(TENANT_B), { requests: 15, bytes: 4000 });
+  assert.equal(agg.size, 2);
 });

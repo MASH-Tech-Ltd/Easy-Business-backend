@@ -507,11 +507,26 @@ const getMerchantUsage = async (tenantId: string, month: string = getCurrentMont
 
   const r2Monthly = monthlyUsage.find((u) => u.provider === 'r2');
   const clMonthly = monthlyUsage.find((u) => u.provider === 'cloudinary');
+  const uploadCount = (r2Monthly?.uploadCount || 0) + (clMonthly?.uploadCount || 0);
+  const deleteCount = (r2Monthly?.deleteCount || 0) + (clMonthly?.deleteCount || 0);
 
   return {
     month,
     activeProvider: getUploadProvider().name,
     quota,
+    writes: {
+      uploadCount,
+      deleteCount,
+      totalOperations: uploadCount + deleteCount,
+      r2WriteObjects: ((r2Monthly?.uploadCount || 0) + (r2Monthly?.deleteCount || 0)) * 3,
+      uploadBytes: (r2Monthly?.uploadBytes || 0) + (clMonthly?.uploadBytes || 0),
+    },
+    reads: {
+      totalRequests: r2Monthly?.deliveryRequests ?? null,
+      totalBytes: r2Monthly?.deliveryBytes ?? null,
+      source: r2Monthly?.deliverySource ?? 'none',
+      updatedAt: r2Monthly?.deliveryUpdatedAt ?? null,
+    },
     storage: {
       r2: byProvider.r2,
       cloudinaryTracked: byProvider.cloudinary,
