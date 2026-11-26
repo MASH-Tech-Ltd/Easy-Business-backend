@@ -7,6 +7,7 @@ import {
   sendManualSms,
   getSmsLogs,
   getMySmsStats,
+  resendSms,
 } from './notification.controller';
 import { authMiddleware } from '../../middleware/authMiddleware';
 
@@ -16,6 +17,7 @@ const router = Router();
 router.get('/sms/balance', authMiddleware('super_admin'), getSmsBalance);
 router.get('/sms/logs', authMiddleware('super_admin'), getSmsLogs);
 router.post('/sms/send', authMiddleware('super_admin'), sendManualSms);
+router.post('/sms/resend/:id', authMiddleware('super_admin'), resendSms);
 
 // Merchant SMS count/logs
 router.get('/sms/my-stats', authMiddleware('tenant_admin'), getMySmsStats);

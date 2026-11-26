@@ -80,3 +80,13 @@ export const getMySmsStats = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+export const resendSms = async (req: Request, res: Response) => {
+  try {
+    const adminUserId = String((req as any).user._id);
+    const data = await SmsService.resendSmsLog(String(req.params.id), adminUserId);
+    res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    res.status(error?.statusCode || 500).json({ success: false, message: error.message });
+  }
+};

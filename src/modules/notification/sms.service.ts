@@ -389,6 +389,56 @@ const getMerchantSmsStats = async (tenantId: string) => {
   return { totalSent, orderOfflineSent, adminManualSent, recentLogs };
 };
 
+const resendSmsLog = async (logId: string, adminUserId: string) => {
+  if (!Types.ObjectId.isValid(logId)) {
+    throw new CustomError(400, 'Invalid SMS log ID');
+  }
+  const existing = await SmsLog.findById(logId);
+  if (!existing) {
+    throw new CustomError(404, 'SMS log not found');
+  }
+  if (!config.sms.apiKey) {
+    throw new CustomError(400, 'BulkSMSBD API key is not configured on the server');
+  }
+
+  const params = new URLSearchParams({
+    api_key: config.sms.apiKey,
+    type: 'text',
+    number: existing.phone,
+    senderid: config.sms.senderId,
+    message: existing.message,
+  });
+
+  let status: 'sent' | 'failed' = 'failed';
+  let providerCode: number | null = null;
+  let providerMessage = '';
+
+  try {
+    const res = await axios.post(`${config.sms.baseUrl}/smsapi`, params.toString(), {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      timeout: 15000,
+    });
+    const data = res.data || {};
+    providerCode = typeof data.response_code === 'number' ? data.response_code : Number(data.response_code) || null;
+    providerMessage = String(data.success_message || data.error_message || JSON.stringify(data)).slice(0, 300);
+    if (providerCode === 202 || providerCode === 200) {
+      status = 'sent';
+    }
+  } catch (error: any) {
+    providerMessage = String(error?.message || 'SMS resend failed').slice(0, 300);
+  }
+
+  existing.status = status;
+  existing.providerCode = providerCode;
+  existing.providerMessage = providerMessage;
+  if (!existing.sentBy && Types.ObjectId.isValid(adminUserId)) {
+    existing.sentBy = new Types.ObjectId(adminUserId);
+  }
+  await existing.save();
+
+  return existing;
+};
+
 export const SmsService = {
   sendSingleSms,
   getCreditBalance,
@@ -396,4 +446,5 @@ export const SmsService = {
   sendManualAdminSms,
   getSmsSummaryAndLogs,
   getMerchantSmsStats,
+  resendSmsLog,
 };
