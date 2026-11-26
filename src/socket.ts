@@ -140,3 +140,13 @@ export const getIO = (): Server => {
   }
   return io;
 };
+
+/** Returns true if the merchant currently has at least one active Socket.io connection. */
+export const isMerchantOnline = (tenantId?: string | null, adminUserId?: string | null): boolean => {
+  if (!io) return false;
+  const rooms = io.sockets?.adapter?.rooms;
+  if (!rooms) return false;
+  if (tenantId && (rooms.get(`tenant_${tenantId}`)?.size || 0) > 0) return true;
+  if (adminUserId && (rooms.get(`user_${adminUserId}`)?.size || 0) > 0) return true;
+  return false;
+};

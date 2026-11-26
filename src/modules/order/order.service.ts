@@ -6,6 +6,7 @@ import { Product } from '../product/product.model';
 import { Subscription } from '../subscription/subscription.model';
 import { getIO } from '../../socket';
 import { Notification } from '../notification/notification.model';
+import { SmsService } from '../notification/sms.service';
 import { Theme } from '../theme/theme.model';
 import { computeShipping } from '../../utils/computeShipping';
 import { paginationHelper } from '../../helpers/paginationHelper';
@@ -185,6 +186,15 @@ const createOrder = async (payload: IOrder): Promise<IOrder> => {
       // Emit to the merchant's personal user room so the NotificationBell component updates
       io.to(`user_${tenantAdmin._id}`).emit('new_notification', notification);
     }
+
+    // If merchant is offline, send BulkSMSBD alert (fire-and-forget)
+    SmsService.notifyOfflineMerchantOnNewOrder({
+      tenantId: String(payload.tenantId),
+      orderId: String(result._id),
+      customerName: payload.customerName,
+      totalPrice: Number(payload.totalPrice || 0),
+      tenantAdminId: tenantAdmin?._id ? String(tenantAdmin._id) : null,
+    }).catch((err) => console.error('[SMS] Offline order alert error:', err));
   } catch (error) {
     console.error('Socket emit error for new_order:', error);
   }

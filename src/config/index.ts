@@ -128,6 +128,14 @@ const config = {
     zoneId: process.env.CLOUDFLARE_ZONE_ID || '',
     apiToken: process.env.CLOUDFLARE_API_TOKEN || '',
   },
+
+  // BulkSMSBD Gateway (server-side only)
+  sms: {
+    enabled: process.env.BULKSMSBD_ENABLED === 'true',
+    apiKey: process.env.BULKSMSBD_API_KEY?.trim() || '',
+    senderId: process.env.BULKSMSBD_SENDER_ID?.trim() || '8809617629188',
+    baseUrl: 'http://bulksmsbd.net/api',
+  },
 } as const;
 
 export type Config = typeof config;

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { notificationService } from './notification.service';
+import { SmsService } from './sms.service';
 
 export const getMyNotifications = async (req: Request, res: Response) => {
   try {
@@ -33,6 +34,48 @@ export const markAllAsRead = async (req: Request, res: Response) => {
     const userId = (req as any).user._id;
     await notificationService.markAllAsRead(userId);
     res.status(200).json({ success: true, message: 'All notifications marked as read' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const getSmsBalance = async (_req: Request, res: Response) => {
+  try {
+    const data = await SmsService.getCreditBalance();
+    res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const sendManualSms = async (req: Request, res: Response) => {
+  try {
+    const adminUserId = String((req as any).user._id);
+    const { tenantIds, phone, message } = req.body || {};
+    const data = await SmsService.sendManualAdminSms({ adminUserId, tenantIds, phone, message });
+    res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    res.status(error?.statusCode || 500).json({ success: false, message: error.message });
+  }
+};
+
+export const getSmsLogs = async (req: Request, res: Response) => {
+  try {
+    const data = await SmsService.getSmsSummaryAndLogs(req.query as any);
+    res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const getMySmsStats = async (req: Request, res: Response) => {
+  try {
+    const tenantId = (req as any).user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ success: false, message: 'Tenant context is required' });
+    }
+    const data = await SmsService.getMerchantSmsStats(String(tenantId));
+    res.status(200).json({ success: true, data });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }

@@ -17,6 +17,7 @@ import '../modules/courierSync/courierSync.model';
 import '../modules/theme/theme.model';
 import '../modules/support/support.model';
 import '../modules/notification/notification.model';
+import '../modules/notification/smsLog.model';
 import '../modules/referral/referral.model';
 import '../modules/checkoutLead/checkoutLead.model';
 import '../modules/contactInquiry/contactInquiry.model';
