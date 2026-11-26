@@ -94,6 +94,9 @@ const config = {
     storageProvider: (process.env.MEDIA_STORAGE_PROVIDER || 'cloudinary').trim().toLowerCase(),
     // Opt-in daily sync of R2 delivery analytics from the Cloudflare GraphQL API
     analyticsSyncEnabled: process.env.MEDIA_ANALYTICS_SYNC === 'true',
+    // Default per-merchant image storage quota (2 GB). Set to 0 to disable enforcement.
+    merchantStorageLimitBytes:
+      Number(process.env.MEDIA_MERCHANT_STORAGE_LIMIT_BYTES) || 2 * 1024 * 1024 * 1024,
   },
 
   // Cloudflare R2 (S3-compatible) — server-side only, never expose to frontends

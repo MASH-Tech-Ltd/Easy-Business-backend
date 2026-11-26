@@ -18,6 +18,7 @@ import { processImage } from '../src/modules/media/utils/imageProcessor';
 import { resolveProvider } from '../src/modules/media/providers';
 import { createR2Provider, R2_CACHE_CONTROL, S3Like } from '../src/modules/media/providers/r2.provider';
 import { cleanupUploadedFiles } from '../src/utils/asyncHandler';
+import { computeQuotaSummary } from '../src/modules/media/media.service';
 
 const TENANT_A = '507f1f77bcf86cd799439011';
 const TENANT_B = '507f1f77bcf86cd799439022';
@@ -242,4 +243,22 @@ test('asyncHandler cleanupUploadedFiles ignores client-supplied req.body image I
     uploadedMedia: [],
   });
   assert.ok(true);
+});
+
+test('computeQuotaSummary: enforces 2 GB base limit + add-on boost accurately', () => {
+  const TWO_GB = 2 * 1024 * 1024 * 1024;
+  const half = computeQuotaSummary(1024 * 1024 * 1024, TWO_GB, 0);
+  assert.equal(half.usedPercent, 50);
+  assert.equal(half.isLimitReached, false);
+  assert.equal(half.remainingBytes, 1024 * 1024 * 1024);
+
+  const full = computeQuotaSummary(TWO_GB, TWO_GB, 0);
+  assert.equal(full.usedPercent, 100);
+  assert.equal(full.isLimitReached, true);
+  assert.equal(full.remainingBytes, 0);
+
+  const boosted = computeQuotaSummary(TWO_GB, TWO_GB, TWO_GB);
+  assert.equal(boosted.totalLimitBytes, 2 * TWO_GB);
+  assert.equal(boosted.usedPercent, 50);
+  assert.equal(boosted.isLimitReached, false);
 });

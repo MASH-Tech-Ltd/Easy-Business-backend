@@ -1,5 +1,7 @@
 import type { Request } from 'express';
 import { Types } from 'mongoose';
+import config from '../../config';
+import CustomError from '../../helpers/CustomError';
 import {
   DeleteContext,
   DeleteSummary,
@@ -12,12 +14,14 @@ import {
 import { MediaAsset } from './media.model';
 import { MediaUsage } from './mediaUsage.model';
 import { getProvider, getUploadProvider, resolveProvider } from './providers';
+import { removeTempFile } from './providers/cloudinary.provider';
 import { buildOwnerPrefix, expandWithVariantKeys, isKeyOwnedBy, isSafeKey } from './utils/mediaKey';
 import { Product } from '../product/product.model';
 import { Category } from '../category/category.model';
 import { Theme } from '../theme/theme.model';
 import { User } from '../auth/auth.model';
 import { Tenant } from '../tenant/tenant.model';
+import { Subscription } from '../subscription/subscription.model';
 
 export const getCurrentMonthKey = (date: Date = new Date()): string => {
   const y = date.getUTCFullYear();
@@ -74,6 +78,70 @@ const recordDeleteUsage = async (
   }
 };
 
+const MEDIA_ADDON_SLUGS = new Set(['media_storage_boost', 'extra_media_storage']);
+const BYTES_PER_GB = 1024 * 1024 * 1024;
+
+export interface MerchantMediaQuota {
+  baseLimitBytes: number;
+  addonLimitBytes: number;
+  totalLimitBytes: number;
+  usedBytes: number;
+  remainingBytes: number;
+  usedPercent: number;
+  isLimitReached: boolean;
+}
+
+export const computeQuotaSummary = (
+  usedBytes: number,
+  baseLimitBytes: number,
+  addonLimitBytes: number,
+): MerchantMediaQuota => {
+  const totalLimitBytes = Math.max(0, baseLimitBytes + addonLimitBytes);
+  const safeUsed = Math.max(0, usedBytes);
+  const remainingBytes = totalLimitBytes > 0 ? Math.max(0, totalLimitBytes - safeUsed) : 0;
+  const usedPercent =
+    totalLimitBytes > 0 ? Math.min(100, Math.round((safeUsed / totalLimitBytes) * 10000) / 100) : 0;
+  const isLimitReached = totalLimitBytes > 0 && safeUsed >= totalLimitBytes;
+  return {
+    baseLimitBytes,
+    addonLimitBytes,
+    totalLimitBytes,
+    usedBytes: safeUsed,
+    remainingBytes,
+    usedPercent,
+    isLimitReached,
+  };
+};
+
+const getMerchantMediaQuota = async (tenantId: string): Promise<MerchantMediaQuota> => {
+  const tid = new Types.ObjectId(tenantId);
+  const baseLimitBytes = config.media.merchantStorageLimitBytes;
+
+  const [usageAgg, subscription] = await Promise.all([
+    MediaAsset.aggregate([
+      { $match: { tenantId: tid, status: 'active' } },
+      { $group: { _id: null, totalBytes: { $sum: '$totalBytes' } } },
+    ]),
+    Subscription.findOne({ tenantId: tid, status: 'active' })
+      .populate('purchasedAddons.addonId', 'slug')
+      .select('purchasedAddons')
+      .lean(),
+  ]);
+
+  const usedBytes = usageAgg[0]?.totalBytes || 0;
+  let addonGb = 0;
+  if (subscription?.purchasedAddons && Array.isArray(subscription.purchasedAddons)) {
+    for (const pa of subscription.purchasedAddons as any[]) {
+      const slug = pa?.addonId?.slug;
+      if (slug && MEDIA_ADDON_SLUGS.has(slug)) {
+        addonGb += Math.max(0, Number(pa.limit) || 0);
+      }
+    }
+  }
+
+  return computeQuotaSummary(usedBytes, baseLimitBytes, addonGb * BYTES_PER_GB);
+};
+
 export interface ExtendedDeleteContext extends DeleteContext {
   /** Only set by super_admin cascade operations (e.g. deleteTenant). */
   allowAnyTenant?: boolean;
@@ -83,6 +151,7 @@ export interface ExtendedDeleteContext extends DeleteContext {
  * Uploads an image via the configured active provider, tracks it on `req.uploadedMedia`
  * for failure rollback, and persists a `MediaAsset` record + usage counter.
  *
+ * Enforces per-merchant storage quota (default 2 GB + storage add-ons) before uploading.
  * If MongoDB persistence fails after the storage upload succeeds, the newly uploaded
  * object is deleted from the provider before rethrowing so no orphan remains.
  */
@@ -92,6 +161,18 @@ const uploadImage = async (
   context: UploadContext,
 ): Promise<UploadedMedia> => {
   const ownerPrefix = buildOwnerPrefix(context.tenantId);
+
+  if (context.tenantId) {
+    const quota = await getMerchantMediaQuota(String(context.tenantId));
+    if (quota.isLimitReached) {
+      removeTempFile(filePath);
+      throw new CustomError(
+        403,
+        'MEDIA_STORAGE_LIMIT_REACHED: You have reached your image storage limit. Please delete unused images or purchase a storage add-on.',
+      );
+    }
+  }
+
   const provider = getUploadProvider();
 
   const uploaded = await provider.upload({
@@ -392,7 +473,7 @@ const countLegacyCloudinaryImagesForTenant = async (tenantId: string): Promise<n
 const getMerchantUsage = async (tenantId: string, month: string = getCurrentMonthKey()) => {
   const tid = new Types.ObjectId(tenantId);
 
-  const [assetAgg, monthlyUsage, legacyCloudinaryCount] = await Promise.all([
+  const [assetAgg, monthlyUsage, legacyCloudinaryCount, quota] = await Promise.all([
     MediaAsset.aggregate([
       { $match: { tenantId: tid, status: 'active' } },
       {
@@ -406,6 +487,7 @@ const getMerchantUsage = async (tenantId: string, month: string = getCurrentMont
     ]),
     MediaUsage.find({ tenantId: tid, month }).lean(),
     countLegacyCloudinaryImagesForTenant(tenantId),
+    getMerchantMediaQuota(tenantId),
   ]);
 
   const byProvider: Record<MediaProviderName, { imageCount: number; mainBytes: number; totalBytes: number }> = {
@@ -429,6 +511,7 @@ const getMerchantUsage = async (tenantId: string, month: string = getCurrentMont
   return {
     month,
     activeProvider: getUploadProvider().name,
+    quota,
     storage: {
       r2: byProvider.r2,
       cloudinaryTracked: byProvider.cloudinary,
