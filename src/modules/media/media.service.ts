@@ -608,20 +608,30 @@ const getPlatformUsage = async (month: string = getCurrentMonthKey()) => {
       cloudinaryBytes: number;
       monthlyUploadCount: number;
       monthlyUploadBytes: number;
+      monthlyDeleteCount: number;
+      monthlyWriteOps: number;
+      monthlyReadRequests: number | null;
+      monthlyReadBytes: number | null;
     }
   >();
 
+  const emptyMerchantRow = (tid: string) => ({
+    tenantId: tid,
+    r2Images: 0,
+    r2Bytes: 0,
+    cloudinaryImages: 0,
+    cloudinaryBytes: 0,
+    monthlyUploadCount: 0,
+    monthlyUploadBytes: 0,
+    monthlyDeleteCount: 0,
+    monthlyWriteOps: 0,
+    monthlyReadRequests: null as number | null,
+    monthlyReadBytes: null as number | null,
+  });
+
   for (const row of tenantStorageAgg) {
     const tid = row._id.tenantId.toString();
-    const cur = tenantMap.get(tid) || {
-      tenantId: tid,
-      r2Images: 0,
-      r2Bytes: 0,
-      cloudinaryImages: 0,
-      cloudinaryBytes: 0,
-      monthlyUploadCount: 0,
-      monthlyUploadBytes: 0,
-    };
+    const cur = tenantMap.get(tid) || emptyMerchantRow(tid);
     if (row._id.provider === 'r2') {
       cur.r2Images = row.imageCount;
       cur.r2Bytes = row.totalBytes;
@@ -632,20 +642,28 @@ const getPlatformUsage = async (month: string = getCurrentMonthKey()) => {
     tenantMap.set(tid, cur);
   }
 
+  let platformReadRequests = 0;
+  let platformReadBytes = 0;
+  let hasReadMetrics = false;
+
   for (const row of tenantMonthlyAgg) {
     if (!row.tenantId) continue;
     const tid = row.tenantId.toString();
-    const cur = tenantMap.get(tid) || {
-      tenantId: tid,
-      r2Images: 0,
-      r2Bytes: 0,
-      cloudinaryImages: 0,
-      cloudinaryBytes: 0,
-      monthlyUploadCount: 0,
-      monthlyUploadBytes: 0,
-    };
+    const cur = tenantMap.get(tid) || emptyMerchantRow(tid);
     cur.monthlyUploadCount += row.uploadCount || 0;
     cur.monthlyUploadBytes += row.uploadBytes || 0;
+    cur.monthlyDeleteCount += row.deleteCount || 0;
+    cur.monthlyWriteOps = cur.monthlyUploadCount + cur.monthlyDeleteCount;
+    if (row.deliveryRequests !== null && row.deliveryRequests !== undefined) {
+      cur.monthlyReadRequests = (cur.monthlyReadRequests || 0) + row.deliveryRequests;
+      platformReadRequests += row.deliveryRequests;
+      hasReadMetrics = true;
+    }
+    if (row.deliveryBytes !== null && row.deliveryBytes !== undefined) {
+      cur.monthlyReadBytes = (cur.monthlyReadBytes || 0) + row.deliveryBytes;
+      platformReadBytes += row.deliveryBytes;
+      hasReadMetrics = true;
+    }
     tenantMap.set(tid, cur);
   }
 
@@ -654,16 +672,19 @@ const getPlatformUsage = async (month: string = getCurrentMonthKey()) => {
     ? await Tenant.find({ _id: { $in: tenantIds } }).select('name slug').lean()
     : [];
   const tenantInfoMap = new Map(tenants.map((t: any) => [t._id.toString(), t]));
+  const baseLimitBytes = config.media.merchantStorageLimitBytes;
 
   const merchants = Array.from(tenantMap.values())
     .map((m) => {
       const info: any = tenantInfoMap.get(m.tenantId);
+      const totalBytes = m.r2Bytes + m.cloudinaryBytes;
       return {
         ...m,
         storeName: info?.name || 'Unknown Store',
         slug: info?.slug || '',
-        totalBytes: m.r2Bytes + m.cloudinaryBytes,
+        totalBytes,
         totalImages: m.r2Images + m.cloudinaryImages,
+        baseLimitBytes,
       };
     })
     .sort((a, b) => b.totalBytes - a.totalBytes);
@@ -676,6 +697,10 @@ const getPlatformUsage = async (month: string = getCurrentMonthKey()) => {
       cloudinaryTracked: byProvider.cloudinary,
       totalTrackedBytes: byProvider.r2.totalBytes + byProvider.cloudinary.totalBytes,
       totalTrackedImages: byProvider.r2.imageCount + byProvider.cloudinary.imageCount,
+    },
+    reads: {
+      totalRequests: hasReadMetrics ? platformReadRequests : null,
+      totalBytes: hasReadMetrics ? platformReadBytes : null,
     },
     monthly: monthlyAgg,
     merchants,
