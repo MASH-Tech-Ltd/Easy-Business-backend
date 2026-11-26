@@ -54,6 +54,19 @@ export const allAddonDefinitions = [
     applicablePlans: ['basic', 'standard', 'premium'],
     badge: 'All Plans',
   },
+  {
+    matchSlugs: ['new_order_sms_alert', 'new-order-sms-alert'],
+    matchNames: ['New Order SMS Alert', 'Get Notified in Number for New Order'],
+    name: 'New Order SMS Alert',
+    slug: 'new_order_sms_alert',
+    description: 'Get instant SMS alerts on your phone number whenever a new order arrives while you are offline (200 SMS/month).',
+    price: 120,
+    billingCycle: 'monthly',
+    defaultLimit: 200,
+    isActive: true,
+    applicablePlans: ['basic', 'standard', 'premium'],
+    badge: 'All Plans',
+  },
 
   // 2. Growth Add-ons (Standard & Premium)
   {

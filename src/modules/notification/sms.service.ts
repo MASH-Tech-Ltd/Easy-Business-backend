@@ -104,7 +104,7 @@ const getCreditBalance = async () => {
   };
 };
 
-const SMS_ADDON_SLUGS = ['sms_notifications', 'sms-notifications'];
+const SMS_ADDON_SLUGS = ['new_order_sms_alert', 'new-order-sms-alert', 'sms_notifications', 'sms-notifications'];
 
 export const hasRemainingSmsAddonQuota = (entry?: { limit?: number; used?: number } | null): boolean => {
   if (!entry) return false;
@@ -116,7 +116,7 @@ export const hasRemainingSmsAddonQuota = (entry?: { limit?: number; used?: numbe
 /**
  * Sends an SMS to the merchant when a new order arrives AND:
  *   1. The merchant is offline (no active Socket.io connection)
- *   2. The merchant has an active `sms_notifications` add-on with remaining quota (`used < limit`)
+ *   2. The merchant has an active `new_order_sms_alert` (or `sms_notifications`) add-on with remaining quota (`used < limit`)
  * Increments the add-on's `used` counter upon successful submission. Never throws.
  */
 const notifyOfflineMerchantOnNewOrder = async (opts: {
@@ -134,26 +134,29 @@ const notifyOfflineMerchantOnNewOrder = async (opts: {
     return { sent: false, reason: 'merchant_online' };
   }
 
-  const smsAddon = await Addon.findOne({ slug: { $in: SMS_ADDON_SLUGS } }).select('_id').lean();
-  if (!smsAddon) {
+  const smsAddons = await Addon.find({ slug: { $in: SMS_ADDON_SLUGS } }).select('_id').lean();
+  if (!smsAddons || smsAddons.length === 0) {
     return { sent: false, reason: 'sms_addon_not_defined' };
   }
+  const smsAddonIds = smsAddons.map((a) => a._id);
+  const smsAddonIdSet = new Set(smsAddonIds.map((id) => id.toString()));
 
   const activeSub = await Subscription.findOne({
     tenantId: new Types.ObjectId(opts.tenantId),
     status: 'active',
-    'purchasedAddons.addonId': smsAddon._id,
+    'purchasedAddons.addonId': { $in: smsAddonIds },
   })
     .select('_id purchasedAddons')
     .lean();
 
   const addonEntry = activeSub?.purchasedAddons?.find(
-    (pa: any) => pa.addonId?.toString() === smsAddon._id.toString(),
+    (pa: any) => pa.addonId && smsAddonIdSet.has(pa.addonId.toString()) && hasRemainingSmsAddonQuota(pa),
   );
 
-  if (!hasRemainingSmsAddonQuota(addonEntry)) {
+  if (!addonEntry) {
     return { sent: false, reason: 'addon_not_active_or_quota_exceeded' };
   }
+  const matchedAddonId = (addonEntry as any).addonId;
 
   const [tenant, adminUser] = await Promise.all([
     Tenant.findById(opts.tenantId).select('name contactPhone').lean(),
@@ -182,9 +185,9 @@ const notifyOfflineMerchantOnNewOrder = async (opts: {
 
   if (log.status === 'sent' && activeSub) {
     await Subscription.updateOne(
-      { _id: activeSub._id, 'purchasedAddons.addonId': smsAddon._id },
+      { _id: activeSub._id, 'purchasedAddons.addonId': matchedAddonId },
       { $inc: { 'purchasedAddons.$.used': 1, 'purchasedAddons.$.paidUsed': 1 } },
-    ).catch((err) => console.error('[SMS] Failed to increment sms_notifications addon usage:', err));
+    ).catch((err) => console.error('[SMS] Failed to increment sms addon usage:', err));
   }
 
   return { sent: log.status === 'sent', status: log.status, logId: log._id };
