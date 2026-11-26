@@ -442,15 +442,26 @@ const sendOrderConfirmationSms = async (opts: {
   return log;
 };
 
-const getMerchantSmsStats = async (tenantId: string) => {
+const getMerchantSmsStats = async (
+  tenantId: string,
+  query: { page?: string; limit?: string } = {},
+) => {
   const tid = new Types.ObjectId(tenantId);
+  const page = Math.max(1, Number(query.page) || 1);
+  const limitPerPage = Math.min(50, Math.max(1, Number(query.limit) || 15));
+  const skip = (page - 1) * limitPerPage;
+  const merchantTriggerFilter = {
+    tenantId: tid,
+    triggerType: { $in: ['new_order_offline', 'order_confirmation'] as SmsTriggerType[] },
+  };
+
   const smsAddons = await Addon.find({ slug: { $in: SMS_ADDON_SLUGS } }).select('_id name slug').lean();
   const smsAddonIds = smsAddons.map((a) => a._id);
   const addonById = new Map(smsAddons.map((a: any) => [a._id.toString(), a]));
 
-  const [counts, recentLogs, activeSub] = await Promise.all([
+  const [counts, recentLogs, totalLogs, activeSub] = await Promise.all([
     SmsLog.aggregate([
-      { $match: { tenantId: tid } },
+      { $match: merchantTriggerFilter },
       {
         $group: {
           _id: { triggerType: '$triggerType', status: '$status' },
@@ -458,7 +469,12 @@ const getMerchantSmsStats = async (tenantId: string) => {
         },
       },
     ]),
-    SmsLog.find({ tenantId: tid }).sort({ createdAt: -1 }).limit(50).lean(),
+    SmsLog.find(merchantTriggerFilter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitPerPage)
+      .lean(),
+    SmsLog.countDocuments(merchantTriggerFilter),
     smsAddonIds.length
       ? Subscription.findOne({
           tenantId: tid,
@@ -474,13 +490,11 @@ const getMerchantSmsStats = async (tenantId: string) => {
   let totalFailed = 0;
   let orderOfflineSent = 0;
   let orderConfirmationSent = 0;
-  let adminManualSent = 0;
   for (const c of counts) {
     if (c._id.status === 'sent') {
       totalSent += c.count;
       if (c._id.triggerType === 'new_order_offline') orderOfflineSent += c.count;
       if (c._id.triggerType === 'order_confirmation') orderConfirmationSent += c.count;
-      if (c._id.triggerType === 'admin_manual') adminManualSent += c.count;
     } else {
       totalFailed += c.count;
     }
@@ -508,7 +522,6 @@ const getMerchantSmsStats = async (tenantId: string) => {
     totalFailed,
     orderOfflineSent,
     orderConfirmationSent,
-    adminManualSent,
     addonQuota: {
       hasAddon,
       addonName,
@@ -517,6 +530,12 @@ const getMerchantSmsStats = async (tenantId: string) => {
       remaining: Math.max(0, limit - used),
     },
     recentLogs,
+    meta: {
+      page,
+      limit: limitPerPage,
+      total: totalLogs,
+      totalPages: Math.max(1, Math.ceil(totalLogs / limitPerPage)),
+    },
   };
 };
 

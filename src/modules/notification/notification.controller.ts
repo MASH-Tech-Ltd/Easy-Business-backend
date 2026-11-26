@@ -74,7 +74,7 @@ export const getMySmsStats = async (req: Request, res: Response) => {
     if (!tenantId) {
       return res.status(400).json({ success: false, message: 'Tenant context is required' });
     }
-    const data = await SmsService.getMerchantSmsStats(String(tenantId));
+    const data = await SmsService.getMerchantSmsStats(String(tenantId), req.query as any);
     res.status(200).json({ success: true, data });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
