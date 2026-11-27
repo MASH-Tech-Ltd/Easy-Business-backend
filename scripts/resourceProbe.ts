@@ -1,3 +1,4 @@
+/// <reference types="node" />
 /**
  * READ-ONLY Cloudflare probe. You run it yourself with a token that has Zone → Analytics: Read.
  *   set CLOUDFLARE_ZONE_ID=... & set CLOUDFLARE_API_TOKEN=... & npx tsx scripts/resourceProbe.ts
