@@ -54,7 +54,9 @@ const runMigration = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = String(req.params.tenantId || '');
   if (!Types.ObjectId.isValid(tenantId)) throw new CustomError(400, 'Invalid tenant ID');
   const kinds = Array.isArray(req.body?.kinds) ? req.body.kinds : undefined;
-  ApiResponse.sendSuccess(res, 200, 'Media migration to R2 completed', await migrateTenantMediaToR2(tenantId, kinds));
+  const limit = req.body?.limit ? Number(req.body.limit) : 10;
+  const actorId = (req as any).user?._id ? String((req as any).user._id) : null;
+  ApiResponse.sendSuccess(res, 200, 'Media migration chunk completed', await migrateTenantMediaToR2(tenantId, kinds, limit, actorId));
 });
 
 const cleanupMigration = asyncHandler(async (req: Request, res: Response) => {

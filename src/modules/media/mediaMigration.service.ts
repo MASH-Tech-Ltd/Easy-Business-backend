@@ -132,9 +132,30 @@ export const scanTenantCloudinaryMedia = async (tenantId: string) => {
   };
 };
 
+const emitMigrationProgress = (
+  actorUserId: string | null | undefined,
+  payload: {
+    tenantId: string;
+    kind: MigrationKind;
+    status: 'migrated' | 'failed';
+    url?: string;
+    error?: string;
+  },
+) => {
+  try {
+    const io = require('../../socket').getIO();
+    if (actorUserId) io.to(`user_${actorUserId}`).emit('media_migration_progress', payload);
+    else io.emit('media_migration_progress', payload);
+  } catch {
+    // socket optional in tests/CLI
+  }
+};
+
 export const migrateTenantMediaToR2 = async (
   tenantId: string,
   kindsInput: MigrationKind[] = ALL_KINDS,
+  batchLimit: number = 10,
+  actorUserId?: string | null,
 ) => {
   if (!getProvider('r2').isConfigured()) {
     throw new CustomError(400, 'Cloudflare R2 is not configured on the backend');
@@ -142,117 +163,156 @@ export const migrateTenantMediaToR2 = async (
   const kinds = new Set<MigrationKind>(kindsInput.filter((k) => ALL_KINDS.includes(k)));
   if (!kinds.size) throw new CustomError(400, 'Select at least one image category to migrate');
 
+  const limit = Math.max(1, Math.min(50, Number(batchLimit) || 10));
   const tid = new Types.ObjectId(tenantId);
-  const summary = { migrated: 0, failed: 0, byKind: { product: 0, category: 0, banner: 0, logo: 0, avatar: 0 }, errors: [] as string[] };
+  const summary = {
+    migrated: 0,
+    failed: 0,
+    processed: 0,
+    byKind: { product: 0, category: 0, banner: 0, logo: 0, avatar: 0 },
+    errors: [] as string[],
+  };
+  const hasRoom = () => summary.processed < limit;
 
-  if (kinds.has('product')) {
+  if (kinds.has('product') && hasRoom()) {
     const products = await Product.find({ tenantId: tid });
     for (const p of products) {
+      if (!hasRoom()) break;
       let changed = false;
       for (let i = 0; i < (p.images || []).length; i++) {
+        if (!hasRoom()) break;
         const img = p.images[i];
         if (!isCloudinaryImg(img)) continue;
+        summary.processed++;
         try {
           const up = await uploadOneToR2(tenantId, 'product', img!, p._id as Types.ObjectId);
           p.images[i] = { public_id: up.public_id, secure_url: up.secure_url, provider: 'r2' } as any;
           changed = true;
           summary.migrated++;
           summary.byKind.product++;
+          emitMigrationProgress(actorUserId, { tenantId, kind: 'product', status: 'migrated', url: up.secure_url });
         } catch (err: any) {
           summary.failed++;
-          summary.errors.push(`product ${p._id}: ${err?.message || 'failed'}`);
+          const msg = `product ${p._id}: ${err?.message || 'failed'}`;
+          summary.errors.push(msg);
+          emitMigrationProgress(actorUserId, { tenantId, kind: 'product', status: 'failed', error: msg });
         }
       }
       if (changed) await p.save();
     }
   }
 
-  if (kinds.has('category')) {
+  if (kinds.has('category') && hasRoom()) {
     const categories = await Category.find({ tenantId: tid });
     for (const c of categories) {
+      if (!hasRoom()) break;
       if (!isCloudinaryImg(c.image)) continue;
+      summary.processed++;
       try {
         const up = await uploadOneToR2(tenantId, 'category', c.image!, c._id as Types.ObjectId);
         c.image = { public_id: up.public_id, secure_url: up.secure_url, provider: 'r2' } as any;
         await c.save();
         summary.migrated++;
         summary.byKind.category++;
+        emitMigrationProgress(actorUserId, { tenantId, kind: 'category', status: 'migrated', url: up.secure_url });
       } catch (err: any) {
         summary.failed++;
-        summary.errors.push(`category ${c._id}: ${err?.message || 'failed'}`);
+        const msg = `category ${c._id}: ${err?.message || 'failed'}`;
+        summary.errors.push(msg);
+        emitMigrationProgress(actorUserId, { tenantId, kind: 'category', status: 'failed', error: msg });
       }
     }
   }
 
-  if (kinds.has('banner')) {
+  if (kinds.has('banner') && hasRoom()) {
     const theme = await Theme.findOne({ tenantId: tid });
     if (theme?.banner) {
       let changed = false;
-      if (isCloudinaryImg(theme.banner.image)) {
+      if (isCloudinaryImg(theme.banner.image) && hasRoom()) {
+        summary.processed++;
         try {
           const up = await uploadOneToR2(tenantId, 'banner', theme.banner.image!, theme._id as Types.ObjectId);
           theme.banner.image = { public_id: up.public_id, secure_url: up.secure_url, provider: 'r2' };
           changed = true;
           summary.migrated++;
           summary.byKind.banner++;
+          emitMigrationProgress(actorUserId, { tenantId, kind: 'banner', status: 'migrated', url: up.secure_url });
         } catch (err: any) {
           summary.failed++;
-          summary.errors.push(`banner main: ${err?.message || 'failed'}`);
+          const msg = `banner main: ${err?.message || 'failed'}`;
+          summary.errors.push(msg);
+          emitMigrationProgress(actorUserId, { tenantId, kind: 'banner', status: 'failed', error: msg });
         }
       }
       for (let i = 0; i < (theme.banner.images || []).length; i++) {
+        if (!hasRoom()) break;
         const img = theme.banner.images![i];
         if (!isCloudinaryImg(img)) continue;
+        summary.processed++;
         try {
           const up = await uploadOneToR2(tenantId, 'banner', img!, theme._id as Types.ObjectId);
           theme.banner.images![i] = { public_id: up.public_id, secure_url: up.secure_url, provider: 'r2' };
           changed = true;
           summary.migrated++;
           summary.byKind.banner++;
+          emitMigrationProgress(actorUserId, { tenantId, kind: 'banner', status: 'migrated', url: up.secure_url });
         } catch (err: any) {
           summary.failed++;
-          summary.errors.push(`banner[${i}]: ${err?.message || 'failed'}`);
+          const msg = `banner[${i}]: ${err?.message || 'failed'}`;
+          summary.errors.push(msg);
+          emitMigrationProgress(actorUserId, { tenantId, kind: 'banner', status: 'failed', error: msg });
         }
       }
       if (changed) await theme.save();
     }
   }
 
-  if (kinds.has('logo')) {
+  if (kinds.has('logo') && hasRoom()) {
     const tenant = await Tenant.findById(tid);
     if (tenant?.logo && isCloudinaryImg({ secure_url: tenant.logo })) {
+      summary.processed++;
       try {
         const up = await uploadOneToR2(tenantId, 'logo', { secure_url: tenant.logo }, tenant._id as Types.ObjectId);
         tenant.logo = up.secure_url;
         await tenant.save();
         summary.migrated++;
         summary.byKind.logo++;
+        emitMigrationProgress(actorUserId, { tenantId, kind: 'logo', status: 'migrated', url: up.secure_url });
       } catch (err: any) {
         summary.failed++;
-        summary.errors.push(`logo: ${err?.message || 'failed'}`);
+        const msg = `logo: ${err?.message || 'failed'}`;
+        summary.errors.push(msg);
+        emitMigrationProgress(actorUserId, { tenantId, kind: 'logo', status: 'failed', error: msg });
       }
     }
   }
 
-  if (kinds.has('avatar')) {
+  if (kinds.has('avatar') && hasRoom()) {
     const users = await User.find({ tenantId: tid });
     for (const u of users) {
+      if (!hasRoom()) break;
       if (!isCloudinaryImg(u.avatar)) continue;
+      summary.processed++;
       try {
         const up = await uploadOneToR2(tenantId, 'avatar', u.avatar!, u._id as Types.ObjectId);
         u.avatar = { public_id: up.public_id, secure_url: up.secure_url, provider: 'r2' } as any;
         await u.save();
         summary.migrated++;
         summary.byKind.avatar++;
+        emitMigrationProgress(actorUserId, { tenantId, kind: 'avatar', status: 'migrated', url: up.secure_url });
       } catch (err: any) {
         summary.failed++;
-        summary.errors.push(`avatar ${u._id}: ${err?.message || 'failed'}`);
+        const msg = `avatar ${u._id}: ${err?.message || 'failed'}`;
+        summary.errors.push(msg);
+        emitMigrationProgress(actorUserId, { tenantId, kind: 'avatar', status: 'failed', error: msg });
       }
     }
   }
 
   await reconcileStorage(tid).catch(() => {});
-  return { ...summary, errors: summary.errors.slice(0, 20) };
+  const remainingScan = await scanTenantCloudinaryMedia(tenantId);
+  const remaining = Array.from(kinds).reduce((sum, k) => sum + (remainingScan.counts[k] || 0), 0);
+  return { ...summary, remaining, counts: remainingScan.counts, errors: summary.errors.slice(0, 20) };
 };
 
 export const cleanupMigratedCloudinary = async (tenantId: string, force = false) => {
