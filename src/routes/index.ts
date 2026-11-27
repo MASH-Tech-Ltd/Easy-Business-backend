@@ -29,6 +29,7 @@ import { BlogRoutes } from '../modules/blog/blog.route';
 import { AffiliateRoutes } from '../modules/affiliate/affiliate.route';
 import { BlockedPhoneRoutes } from '../modules/blockedPhone/blockedPhone.route';
 import { MediaRoutes } from '../modules/media/media.route';
+import { ResourceRoutes } from '../modules/resource/resource.route';
 
 
 const router = Router();
@@ -149,6 +150,10 @@ const moduleRoutes = [
   {
     path: '/media',
     route: MediaRoutes,
+  },
+  {
+    path: '/resources',
+    route: ResourceRoutes,
   },
 ];
 

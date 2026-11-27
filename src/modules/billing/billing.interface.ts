@@ -25,6 +25,8 @@ export interface IPlatformPaymentSubmission extends Document {
   adminFeedback?: string;
   confirmationEmailSentCount?: number;
   lastConfirmationEmailSentAt?: Date;
+  /** Set only for resource add-on purchases (links payment → purchase by id). */
+  resourceAddonPurchaseId?: Types.ObjectId | string | null;
   createdAt?: Date;
   updatedAt?: Date;
 }

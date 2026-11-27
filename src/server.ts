@@ -14,6 +14,7 @@ import { initPlatformCapiCron } from './modules/analytics/platformCapi.service';
 import { initTenantCapiCron } from './modules/analytics/tenantCapi.service';
 import { initMediaCron } from './modules/media/media.cron';
 import { validateMediaConfig } from './modules/media/providers';
+import { initResourceCron } from './modules/resource/resource.cron';
 
 const PORT = Number(config.app.port) || 8000;
 const HOST = process.env.HOST?.trim();
@@ -42,6 +43,7 @@ connectDatabase()
     initPlatformCapiCron();
     initTenantCapiCron();
     initMediaCron();
+    initResourceCron();
   })
   .catch((error: unknown) => {
     console.error("Database connection failed!!", error);

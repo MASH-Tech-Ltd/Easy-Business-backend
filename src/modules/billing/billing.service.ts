@@ -14,6 +14,7 @@ import { AffiliateCommissionService } from '../affiliate/services/commission.ser
 import { sendEmail } from '../../utils/sendEmail';
 import { paymentConfirmationTemplate } from '../../templates/paymentConfirmation';
 import { PlatformCapiService } from '../analytics/platformCapi.service';
+import { ResourceAddonService } from '../resource/resource.addon.service';
 
 const getPlatformPaymentSettings = async () => {
   let settings = await PlatformPaymentSettings.findOne();
@@ -452,8 +453,18 @@ const verifyPaymentSubmission = async (id: string, status: 'approved' | 'rejecte
   if (adminFeedback) submission.adminFeedback = adminFeedback;
   await submission.save();
 
+  // Resource add-on (storage / bandwidth) purchases are linked by ID — never by fuzzy title matching.
+  const resourcePurchaseId = (submission as any).resourceAddonPurchaseId;
+  if (resourcePurchaseId) {
+    try {
+      await ResourceAddonService.handlePaymentDecision(String(resourcePurchaseId), status, String(submission._id));
+    } catch (err) {
+      console.error('Failed to apply resource add-on payment decision:', err);
+    }
+  }
+
   // If this payment submission was for an addon, sync the purchasedAddons array in the tenant's Subscription
-  if (submission.purpose === 'addon' && submission.tenantId) {
+  if (submission.purpose === 'addon' && submission.tenantId && !resourcePurchaseId) {
     const subscriptions = await Subscription.find({
       tenantId: submission.tenantId,
     }).populate('purchasedAddons.addonId');

@@ -15,6 +15,15 @@ const packageSchema = new Schema<IPackage>(
     isActive: { type: Boolean, default: true },
     isPopular: { type: Boolean, default: false },
     isRecommended: { type: Boolean, default: false },
+    // Resource allocation (bytes). null/undefined = inherit global default; 0 = unlimited.
+    resources: {
+      storageBytes: { type: Number, default: null, min: 0 },
+      imageBandwidthBytes: { type: Number, default: null, min: 0 },
+      generalBandwidthBytes: { type: Number, default: null, min: 0 },
+      combinedBandwidthBytes: { type: Number, default: null, min: 0 },
+      trackingEnabled: { type: Boolean, default: true },
+      overLimitPolicy: { type: String, default: null },
+    },
   },
   {
     timestamps: true,

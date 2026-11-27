@@ -1,5 +1,8 @@
 import type { Request } from 'express';
+import fs from 'fs';
 import { Types } from 'mongoose';
+import { getEffectiveLimits } from '../resource/resource.limits';
+import { ensureStorageState, finalizeStorage, releaseStorage, reserveStorage } from '../resource/resource.usage.service';
 import config from '../../config';
 import CustomError from '../../helpers/CustomError';
 import {
@@ -64,6 +67,12 @@ const recordDeleteUsage = async (
 ): Promise<void> => {
   if (count <= 0) return;
   const month = getCurrentMonthKey();
+  if (tenantId) {
+    // Storage gauge is returned only for objects that were really deleted. Bandwidth history is untouched.
+    await releaseStorage(tenantId, bytes, count).catch((e) =>
+      console.error('[media] Failed to release storage accounting:', e),
+    );
+  }
   try {
     await MediaUsage.updateOne(
       { tenantId, month, provider },
@@ -115,31 +124,9 @@ export const computeQuotaSummary = (
 
 const getMerchantMediaQuota = async (tenantId: string): Promise<MerchantMediaQuota> => {
   const tid = new Types.ObjectId(tenantId);
-  const baseLimitBytes = config.media.merchantStorageLimitBytes;
-
-  const [usageAgg, subscription] = await Promise.all([
-    MediaAsset.aggregate([
-      { $match: { tenantId: tid, status: 'active' } },
-      { $group: { _id: null, totalBytes: { $sum: '$totalBytes' } } },
-    ]),
-    Subscription.findOne({ tenantId: tid, status: 'active' })
-      .populate('purchasedAddons.addonId', 'slug')
-      .select('purchasedAddons')
-      .lean(),
-  ]);
-
-  const usedBytes = usageAgg[0]?.totalBytes || 0;
-  let addonGb = 0;
-  if (subscription?.purchasedAddons && Array.isArray(subscription.purchasedAddons)) {
-    for (const pa of subscription.purchasedAddons as any[]) {
-      const slug = pa?.addonId?.slug;
-      if (slug && MEDIA_ADDON_SLUGS.has(slug)) {
-        addonGb += Math.max(0, Number(pa.limit) || 0);
-      }
-    }
-  }
-
-  return computeQuotaSummary(usedBytes, baseLimitBytes, addonGb * BYTES_PER_GB);
+  // Limits are fully dynamic (Global Settings defaults / package resources / purchased add-ons).
+  const [limits, state] = await Promise.all([getEffectiveLimits(tid), ensureStorageState(tid)]);
+  return computeQuotaSummary(state.usedBytes, limits.storage.baseBytes, limits.storage.totalBytes > 0 ? limits.storage.addonBytes : 0);
 };
 
 export interface ExtendedDeleteContext extends DeleteContext {
@@ -162,24 +149,44 @@ const uploadImage = async (
 ): Promise<UploadedMedia> => {
   const ownerPrefix = buildOwnerPrefix(context.tenantId);
 
+  // Atomic, size-aware storage reservation (limits come from Global Settings / package / add-ons).
+  // The reserved estimate is the server-side temp-file size; it is swapped for the real stored size below.
+  let reservedBytes = 0;
   if (context.tenantId) {
-    const quota = await getMerchantMediaQuota(String(context.tenantId));
-    if (quota.isLimitReached) {
+    let estimate = 0;
+    try {
+      estimate = fs.statSync(filePath).size;
+    } catch {
+      estimate = 0;
+    }
+    try {
+      reservedBytes = await reserveStorage(String(context.tenantId), estimate);
+    } catch (reserveErr) {
       removeTempFile(filePath);
-      throw new CustomError(
-        403,
-        'MEDIA_STORAGE_LIMIT_REACHED: You have reached your image storage limit. Please delete unused images or purchase a storage add-on.',
-      );
+      throw reserveErr;
     }
   }
+  const releaseReservation = async () => {
+    if (context.tenantId && reservedBytes > 0) {
+      await releaseStorage(String(context.tenantId), reservedBytes, 0).catch((e) =>
+        console.error('[media] Failed to release storage reservation:', e),
+      );
+    }
+  };
 
   const provider = getUploadProvider();
 
-  const uploaded = await provider.upload({
-    filePath,
-    kind: context.kind,
-    ownerPrefix,
-  });
+  let uploaded: UploadedMedia;
+  try {
+    uploaded = await provider.upload({
+      filePath,
+      kind: context.kind,
+      ownerPrefix,
+    });
+  } catch (uploadErr) {
+    await releaseReservation();
+    throw uploadErr;
+  }
 
   // Track immediately on the request so any downstream failure cleans up the object
   if (req) {
@@ -217,10 +224,16 @@ const uploadImage = async (
     await provider.delete(keysToRemove).catch((delErr) => {
       console.error('[media] Compensating delete failed after DB error:', delErr);
     });
+    await releaseReservation();
     throw dbErr;
   }
 
   await recordUploadUsage(context.tenantId, uploaded.provider, totalBytes);
+  if (context.tenantId) {
+    await finalizeStorage(String(context.tenantId), reservedBytes, totalBytes).catch((e) =>
+      console.error('[media] Failed to finalize storage accounting:', e),
+    );
+  }
 
   return uploaded;
 };

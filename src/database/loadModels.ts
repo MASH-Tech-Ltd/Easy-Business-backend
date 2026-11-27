@@ -30,6 +30,7 @@ import '../modules/system/globalSetting.model';
 import '../modules/system/security.model';
 import '../modules/media/media.model';
 import '../modules/media/mediaUsage.model';
+import '../modules/resource/resource.model';
 import './backupLog.model';
 
 export const ensureAllModelsLoaded = () => {

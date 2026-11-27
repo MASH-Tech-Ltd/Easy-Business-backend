@@ -13,6 +13,14 @@ export interface IPackage extends Document {
   isActive: boolean;
   isPopular?: boolean;
   isRecommended?: boolean;
+  resources?: {
+    storageBytes?: number | null;
+    imageBandwidthBytes?: number | null;
+    generalBandwidthBytes?: number | null;
+    combinedBandwidthBytes?: number | null;
+    trackingEnabled?: boolean;
+    overLimitPolicy?: string | null;
+  };
   createdAt?: Date;
   updatedAt?: Date;
 }

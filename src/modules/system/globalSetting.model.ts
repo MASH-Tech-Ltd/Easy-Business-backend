@@ -257,6 +257,7 @@ export interface IGlobalSettings extends Document {
   maintenanceMode: boolean;
   maxTenants: number;
   allowRegistration: boolean;
+  resource?: any;
   themePreviews: {
     'design-01'?: string;
     'design-02'?: string;
@@ -330,6 +331,8 @@ const globalSettingsSchema = new Schema<IGlobalSettings>(
     maintenanceMode: { type: Boolean, default: false },
     maxTenants: { type: Number, default: 100 },
     allowRegistration: { type: Boolean, default: true },
+    // Resource & Bandwidth Management (validated by modules/resource/resource.settings.ts)
+    resource: { type: Schema.Types.Mixed },
     themePreviews: {
       'design-01': { type: String, default: '' },
       'design-02': { type: String, default: '' },

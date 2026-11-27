@@ -15,6 +15,7 @@ const platformPaymentSubmissionSchema = new Schema<IPlatformPaymentSubmission>(
     adminFeedback: { type: String },
     confirmationEmailSentCount: { type: Number, default: 0 },
     lastConfirmationEmailSentAt: { type: Date },
+    resourceAddonPurchaseId: { type: Schema.Types.ObjectId, ref: 'ResourceAddonPurchase', default: null },
   },
   { timestamps: true }
 );
