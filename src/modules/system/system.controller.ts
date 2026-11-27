@@ -795,7 +795,8 @@ const clearVisitorLogs = asyncHandler(async (req: Request, res: Response) => {
 });
 
 const syncDatabaseData = asyncHandler(async (req: Request, res: Response) => {
-  const result = await runBackup("manual");
+  const actorId = (req as any).user?._id ? String((req as any).user._id) : null;
+  const result = await runBackup("manual", actorId);
   if (result && !result.success) {
     ApiResponse.sendSuccess(res, 200, result.message || "Sync bypassed due to safety checks", result);
   } else {

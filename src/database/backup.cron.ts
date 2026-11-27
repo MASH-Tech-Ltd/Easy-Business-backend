@@ -54,8 +54,29 @@ const safeChunkedInsert = async (coll: any, docs: any[]): Promise<void> => {
   }
 };
 
+const emitDbSyncProgress = (
+  actorUserId: string | null | undefined,
+  payload: {
+    stage: 'counting' | 'replicating' | 'done' | 'error';
+    collection?: string;
+    doneCollections: number;
+    totalCollections: number;
+    percent: number;
+    message?: string;
+  },
+) => {
+  try {
+    const io = require('../socket').getIO();
+    if (actorUserId) io.to(`user_${actorUserId}`).emit('database_sync_progress', payload);
+    else io.emit('database_sync_progress', payload);
+  } catch {
+    // socket optional
+  }
+};
+
 export const runBackup = async (
-  triggerType: 'manual' | 'scheduled' = 'scheduled'
+  triggerType: 'manual' | 'scheduled' = 'scheduled',
+  actorUserId?: string | null,
 ): Promise<BackupResult> => {
   console.log(`[Backup] Starting ${triggerType} backup process at ${new Date().toISOString()}`);
 
@@ -75,6 +96,14 @@ export const runBackup = async (
     const collectionsToBackup = rawCollections
       .filter((c) => !c.name.startsWith('system.'))
       .map((c) => c.name);
+
+    emitDbSyncProgress(actorUserId, {
+      stage: 'counting',
+      doneCollections: 0,
+      totalCollections: collectionsToBackup.length,
+      percent: 0,
+      message: `Scanning ${collectionsToBackup.length} collections...`,
+    });
 
     let totalRecords = 0;
 
@@ -189,7 +218,17 @@ export const runBackup = async (
       console.warn('[Backup] No BACKUP_DATABASE_URL configured. Secondary replication skipped.');
     }
 
+    let syncedCollections = 0;
     for (const collName of collectionsToBackup) {
+      syncedCollections++;
+      emitDbSyncProgress(actorUserId, {
+        stage: 'replicating',
+        collection: collName,
+        doneCollections: syncedCollections - 1,
+        totalCollections: collectionsToBackup.length,
+        percent: Math.round(((syncedCollections - 1) / Math.max(1, collectionsToBackup.length)) * 100),
+        message: `Syncing ${collName} (${syncedCollections}/${collectionsToBackup.length})...`,
+      });
       try {
         const primaryColl = primaryDb.collection(collName);
         let secondaryColl: any = null;
@@ -292,6 +331,14 @@ export const runBackup = async (
         console.warn('[Backup] Error replicating log entry to secondary:', logSyncErr.message);
       }
     }
+
+    emitDbSyncProgress(actorUserId, {
+      stage: 'done',
+      doneCollections: collectionsToBackup.length,
+      totalCollections: collectionsToBackup.length,
+      percent: 100,
+      message: 'Database synchronization completed.',
+    });
 
     if (secondaryConn) {
       await secondaryConn.close();

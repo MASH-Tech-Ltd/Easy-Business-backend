@@ -138,8 +138,10 @@ const adminMerchantsUsage = asyncHandler(async (req, res) => {
 });
 const adminTenantOverview = asyncHandler(async (req, res) => {
   const tid = idParam(req, 'tenantId');
-  if (!(await Tenant.exists({ _id: tid }))) throw new CustomError(404, 'Tenant not found');
-  ApiResponse.sendSuccess(res, 200, 'Tenant resource usage retrieved', await getMerchantOverview(tid, period(req.query.period)));
+  const tenant = await Tenant.findById(tid).select('name slug').lean();
+  if (!tenant) throw new CustomError(404, 'Tenant not found');
+  const overview = await getMerchantOverview(tid, period(req.query.period));
+  ApiResponse.sendSuccess(res, 200, 'Tenant resource usage retrieved', { ...overview, tenantName: tenant.name, tenantSlug: tenant.slug });
 });
 const adminReconcile = asyncHandler(async (req, res) => {
   const tid = idParam(req, 'tenantId');
