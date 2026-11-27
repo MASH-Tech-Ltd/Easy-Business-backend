@@ -50,7 +50,7 @@ const toObjectIdOrNull = (
   return new Types.ObjectId(String(tenantId));
 };
 
-const recordUploadUsage = async (
+export const recordUploadUsage = async (
   tenantId: string | null | undefined,
   provider: MediaProviderName,
   bytes: number,

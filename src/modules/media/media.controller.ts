@@ -3,6 +3,12 @@ import ApiResponse from '../../utils/apiResponse';
 import { asyncHandler } from '../../utils/asyncHandler';
 import CustomError from '../../helpers/CustomError';
 import { MediaService, getCurrentMonthKey } from './media.service';
+import {
+  scanTenantCloudinaryMedia,
+  migrateTenantMediaToR2,
+  cleanupMigratedCloudinary,
+  getMigrationHistory,
+} from './mediaMigration.service';
 import { Types } from 'mongoose';
 
 const parseMonth = (raw: unknown): string => {
@@ -38,8 +44,38 @@ const getTenantUsage = asyncHandler(async (req: Request, res: Response) => {
   ApiResponse.sendSuccess(res, 200, 'Tenant media usage retrieved successfully', result);
 });
 
+const scanMigration = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = String(req.params.tenantId || '');
+  if (!Types.ObjectId.isValid(tenantId)) throw new CustomError(400, 'Invalid tenant ID');
+  ApiResponse.sendSuccess(res, 200, 'Cloudinary media scan completed', await scanTenantCloudinaryMedia(tenantId));
+});
+
+const runMigration = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = String(req.params.tenantId || '');
+  if (!Types.ObjectId.isValid(tenantId)) throw new CustomError(400, 'Invalid tenant ID');
+  const kinds = Array.isArray(req.body?.kinds) ? req.body.kinds : undefined;
+  ApiResponse.sendSuccess(res, 200, 'Media migration to R2 completed', await migrateTenantMediaToR2(tenantId, kinds));
+});
+
+const cleanupMigration = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = String(req.params.tenantId || '');
+  if (!Types.ObjectId.isValid(tenantId)) throw new CustomError(400, 'Invalid tenant ID');
+  const force = Boolean(req.body?.force);
+  ApiResponse.sendSuccess(res, 200, 'Cloudinary cleanup completed', await cleanupMigratedCloudinary(tenantId, force));
+});
+
+const migrationHistory = asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = String(req.params.tenantId || '');
+  if (!Types.ObjectId.isValid(tenantId)) throw new CustomError(400, 'Invalid tenant ID');
+  ApiResponse.sendSuccess(res, 200, 'Migration history retrieved', await getMigrationHistory(tenantId));
+});
+
 export const MediaController = {
   getMyUsage,
   getPlatformUsage,
   getTenantUsage,
+  scanMigration,
+  runMigration,
+  cleanupMigration,
+  migrationHistory,
 };
