@@ -17,7 +17,7 @@ import {
 } from './resource.settings';
 import { getMerchantOverview, reconcileStorage } from './resource.usage.service';
 import { ResourceAddonService, audit } from './resource.addon.service';
-import { getAdminAnalytics, listAdminPurchases } from './resource.analytics.service';
+import { getAdminAnalytics, listAdminPurchases, listAllMerchantsUsage } from './resource.analytics.service';
 import { ingestWindow, runCloudflareIngestCycle } from './resource.ingest.service';
 import { isValidPeriod, periodKey } from './resource.logic';
 
@@ -126,6 +126,16 @@ const adminAnalytics = asyncHandler(async (req, res) => {
     period: isValidPeriod(q.period) ? q.period : undefined, tenantId: q.tenantId, packageId: q.packageId, addonCategory: q.addonCategory,
   }));
 });
+const adminMerchantsUsage = asyncHandler(async (req, res) => {
+  const q: any = req.query;
+  const { data, meta } = await listAllMerchantsUsage({
+    period: isValidPeriod(q.period) ? q.period : undefined,
+    search: typeof q.search === 'string' ? q.search : undefined,
+    page: q.page ? Number(q.page) : undefined,
+    limit: q.limit ? Number(q.limit) : undefined,
+  });
+  ApiResponse.sendSuccess(res, 200, 'Merchants resource usage retrieved', data, meta);
+});
 const adminTenantOverview = asyncHandler(async (req, res) => {
   const tid = idParam(req, 'tenantId');
   if (!(await Tenant.exists({ _id: tid }))) throw new CustomError(404, 'Tenant not found');
@@ -192,7 +202,7 @@ export const ResourceController = {
   myOverview, listAddons, purchaseAddon, myPurchases,
   getSettings, updateSettings, listPackageResources, updatePackageResources,
   adminListAddons, adminCreateAddon, adminUpdateAddon, adminToggleAddon, adminDeleteAddon,
-  adminPurchases, adminRefund, adminAnalytics, adminTenantOverview, adminReconcile,
+  adminPurchases, adminRefund, adminAnalytics, adminMerchantsUsage, adminTenantOverview, adminReconcile,
   adminAuditLogs, adminIngestStatus, adminRunIngest, adminMockEvents,
 };
 void (null as unknown as Response);

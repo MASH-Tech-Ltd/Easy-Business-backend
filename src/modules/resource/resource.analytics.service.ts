@@ -136,3 +136,72 @@ export const listAdminPurchases = async (q: { status?: string; tenantId?: string
   ]);
   return { data, meta: { page, limit, total } };
 };
+
+export const listAllMerchantsUsage = async (q: {
+  period?: string | undefined;
+  search?: string | undefined;
+  page?: number | undefined;
+  limit?: number | undefined;
+}) => {
+  const period = q.period || periodKey();
+  const page = Math.max(1, Number(q.page) || 1);
+  const limit = Math.min(100, Math.max(1, Number(q.limit) || 20));
+  const filter: any = {};
+  if (q.search && q.search.trim()) {
+    const rx = new RegExp(q.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    filter.$or = [{ name: rx }, { slug: rx }, { customDomain: rx }];
+  }
+
+  const [tenants, total] = await Promise.all([
+    Tenant.find(filter)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .select('name slug customDomain status')
+      .lean<any[]>(),
+    Tenant.countDocuments(filter),
+  ]);
+
+  const ids = tenants.map((t) => t._id);
+  const [storages, usages, subs] = ids.length
+    ? await Promise.all([
+        MerchantStorageState.find({ tenantId: { $in: ids } }).lean<any[]>(),
+        MerchantResourceUsage.find({ tenantId: { $in: ids }, period }).lean<any[]>(),
+        Subscription.find({ tenantId: { $in: ids }, status: 'active' })
+          .populate('packageId', 'name')
+          .select('tenantId packageId')
+          .lean<any[]>(),
+      ])
+    : [[], [], []];
+
+  const stMap = new Map(storages.map((s) => [String(s.tenantId), s]));
+  const usMap = new Map(usages.map((u) => [String(u.tenantId), u]));
+  const subMap = new Map(subs.map((s) => [String(s.tenantId), s]));
+
+  const data = tenants.map((t) => {
+    const id = String(t._id);
+    const st = stMap.get(id);
+    const us = usMap.get(id);
+    const sub = subMap.get(id);
+    const imageBytes = num(us?.image?.bytes);
+    const generalBytes = num(us?.general?.bytes);
+    return {
+      tenantId: id,
+      name: t.name,
+      slug: t.slug,
+      customDomain: t.customDomain || null,
+      status: t.status,
+      packageName: sub?.packageId?.name || 'Default',
+      storageBytes: num(st?.usedBytes),
+      storageLimitBytes: num(st?.limitBytes),
+      fileCount: num(st?.fileCount),
+      imageBytes,
+      imageRequests: num(us?.image?.requests),
+      generalBytes,
+      generalRequests: num(us?.general?.requests),
+      combinedBytes: imageBytes + generalBytes,
+    };
+  });
+
+  return { data, meta: { page, limit, total } };
+};

@@ -30,6 +30,7 @@ router.get('/admin/purchases', ...admin, C.adminPurchases);
 router.post('/admin/purchases/:id/refund', ...admin, C.adminRefund);
 
 router.get('/admin/analytics', ...admin, C.adminAnalytics);
+router.get('/admin/merchants', ...admin, C.adminMerchantsUsage);
 router.get('/admin/tenants/:tenantId/overview', ...admin, C.adminTenantOverview);
 router.post('/admin/tenants/:tenantId/reconcile-storage', ...admin, C.adminReconcile);
 router.get('/admin/audit-logs', ...admin, C.adminAuditLogs);
