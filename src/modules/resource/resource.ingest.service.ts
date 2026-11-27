@@ -256,16 +256,15 @@ export const pullCloudflareWindow = async (w: TimeWindow): Promise<{ rows: Usage
 
   const qHosts = `query($zoneTag:String!,$since:Time!,$until:Time!,$host:String!){viewer{zones(filter:{zoneTag:$zoneTag}){
     httpRequestsAdaptiveGroups(limit:${GROUP_LIMIT},filter:{datetime_geq:$since,datetime_lt:$until,clientRequestHTTPHost_neq:$host}){
-      count sum{edgeResponseBytes} dimensions{clientRequestHTTPHost edgeResponseContentType cacheStatus}}}}}`;
+      count sum{edgeResponseBytes} dimensions{clientRequestHTTPHost cacheStatus}}}}}`;
   const qMedia = `query($zoneTag:String!,$since:Time!,$until:Time!,$host:String!){viewer{zones(filter:{zoneTag:$zoneTag}){
     httpRequestsAdaptiveGroups(limit:${GROUP_LIMIT},filter:{datetime_geq:$since,datetime_lt:$until,clientRequestHTTPHost:$host}){
-      count sum{edgeResponseBytes} dimensions{clientRequestPath cacheStatus edgeResponseContentType}}}}}`;
+      count sum{edgeResponseBytes} dimensions{clientRequestPath cacheStatus}}}}}`;
 
   const [a, b] = await Promise.all([runGraphql(qHosts, common), runGraphql(qMedia, common)]);
   const rows: UsageRow[] = [
     ...a.map((g: any) => ({
       host: String(g.dimensions?.clientRequestHTTPHost || ''),
-      contentType: String(g.dimensions?.edgeResponseContentType || ''),
       cacheStatus: String(g.dimensions?.cacheStatus || ''),
       bytes: Number(g.sum?.edgeResponseBytes || 0),
       requests: Number(g.count || 0),
@@ -273,7 +272,7 @@ export const pullCloudflareWindow = async (w: TimeWindow): Promise<{ rows: Usage
     ...b.map((g: any) => ({
       host: mediaHost,
       path: String(g.dimensions?.clientRequestPath || ''),
-      contentType: String(g.dimensions?.edgeResponseContentType || '') || 'image/webp',
+      contentType: 'image/webp',
       cacheStatus: String(g.dimensions?.cacheStatus || ''),
       bytes: Number(g.sum?.edgeResponseBytes || 0),
       requests: Number(g.count || 0),

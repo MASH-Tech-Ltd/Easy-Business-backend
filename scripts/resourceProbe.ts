@@ -4,6 +4,7 @@
  * It writes nothing and touches no database. It only checks which GraphQL dimensions your plan exposes
  * and prints a few sample rows, so the ingestion queries can be confirmed before enabling sync.
  */
+import 'dotenv/config';
 import axios from 'axios';
 
 const zone = process.env.CLOUDFLARE_ZONE_ID || '';
@@ -34,6 +35,6 @@ const attempt = async (name: string, dims: string) => {
 (async () => {
   console.log(`Window: ${since.toISOString()} → ${until.toISOString()}`);
   await attempt('host', 'clientRequestHTTPHost');
-  await attempt('host + contentType + cacheStatus', 'clientRequestHTTPHost edgeResponseContentType cacheStatus');
-  await attempt('path (media host grouping)', 'clientRequestPath cacheStatus edgeResponseContentType');
+  await attempt('host + cacheStatus', 'clientRequestHTTPHost cacheStatus');
+  await attempt('path + cacheStatus (media host grouping)', 'clientRequestPath cacheStatus');
 })();
