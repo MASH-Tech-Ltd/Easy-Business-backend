@@ -819,7 +819,17 @@ const getPlatformUsage = async (month: string = getCurrentMonthKey()) => {
         .lean()
     : [];
   const tenantInfoMap = new Map(tenants.map((t: any) => [t._id.toString(), t]));
-  const baseLimitBytes = config.media.merchantStorageLimitBytes;
+  const limitPairs = await Promise.all(
+    Array.from(tenantMap.keys()).map(async (tid) => {
+      try {
+        const lim = await getEffectiveLimits(tid);
+        return [tid, lim.storage.totalBytes] as const;
+      } catch {
+        return [tid, 0] as const;
+      }
+    }),
+  );
+  const limitByTenant = new Map(limitPairs);
 
   const merchants = Array.from(tenantMap.values())
     .map((m) => {
@@ -831,7 +841,7 @@ const getPlatformUsage = async (month: string = getCurrentMonthKey()) => {
         slug: info?.slug || "",
         totalBytes,
         totalImages: m.r2Images + m.cloudinaryImages,
-        baseLimitBytes,
+        baseLimitBytes: limitByTenant.get(m.tenantId) ?? 0,
       };
     })
     .sort((a, b) => b.totalBytes - a.totalBytes);
