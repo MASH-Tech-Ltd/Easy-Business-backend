@@ -1,10 +1,15 @@
-import type { Request } from 'express';
-import fs from 'fs';
-import { Types } from 'mongoose';
-import { getEffectiveLimits } from '../resource/resource.limits';
-import { ensureStorageState, finalizeStorage, releaseStorage, reserveStorage } from '../resource/resource.usage.service';
-import config from '../../config';
-import CustomError from '../../helpers/CustomError';
+import type { Request } from "express";
+import fs from "fs";
+import { Types } from "mongoose";
+import { getEffectiveLimits } from "../resource/resource.limits";
+import {
+  ensureStorageState,
+  finalizeStorage,
+  releaseStorage,
+  reserveStorage,
+} from "../resource/resource.usage.service";
+import config from "../../config";
+import CustomError from "../../helpers/CustomError";
 import {
   DeleteContext,
   DeleteSummary,
@@ -13,26 +18,33 @@ import {
   TrackedUpload,
   UploadContext,
   UploadedMedia,
-} from './media.interface';
-import { MediaAsset } from './media.model';
-import { MediaUsage } from './mediaUsage.model';
-import { getProvider, getUploadProvider, resolveProvider } from './providers';
-import { removeTempFile } from './providers/cloudinary.provider';
-import { buildOwnerPrefix, expandWithVariantKeys, isKeyOwnedBy, isSafeKey } from './utils/mediaKey';
-import { Product } from '../product/product.model';
-import { Category } from '../category/category.model';
-import { Theme } from '../theme/theme.model';
-import { User } from '../auth/auth.model';
-import { Tenant } from '../tenant/tenant.model';
-import { Subscription } from '../subscription/subscription.model';
+} from "./media.interface";
+import { MediaAsset } from "./media.model";
+import { MediaUsage } from "./mediaUsage.model";
+import { getProvider, getUploadProvider, resolveProvider } from "./providers";
+import { removeTempFile } from "./providers/cloudinary.provider";
+import {
+  buildOwnerPrefix,
+  expandWithVariantKeys,
+  isKeyOwnedBy,
+  isSafeKey,
+} from "./utils/mediaKey";
+import { Product } from "../product/product.model";
+import { Category } from "../category/category.model";
+import { Theme } from "../theme/theme.model";
+import { User } from "../auth/auth.model";
+import { Tenant } from "../tenant/tenant.model";
+import { Subscription } from "../subscription/subscription.model";
 
 export const getCurrentMonthKey = (date: Date = new Date()): string => {
   const y = date.getUTCFullYear();
-  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
   return `${y}-${m}`;
 };
 
-const toObjectIdOrNull = (tenantId: string | null | undefined): Types.ObjectId | null => {
+const toObjectIdOrNull = (
+  tenantId: string | null | undefined,
+): Types.ObjectId | null => {
   if (!tenantId) return null;
   if (!Types.ObjectId.isValid(String(tenantId))) return null;
   return new Types.ObjectId(String(tenantId));
@@ -50,12 +62,17 @@ const recordUploadUsage = async (
       { tenantId: tid, month, provider },
       {
         $inc: { uploadCount: 1, uploadBytes: Math.max(0, bytes) },
-        $setOnInsert: { tenantId: tid, month, provider, deliverySource: 'none' },
+        $setOnInsert: {
+          tenantId: tid,
+          month,
+          provider,
+          deliverySource: "none",
+        },
       },
       { upsert: true },
     );
   } catch (err) {
-    console.error('[media] Failed to update upload usage counter:', err);
+    console.error("[media] Failed to update upload usage counter:", err);
   }
 };
 
@@ -70,7 +87,7 @@ const recordDeleteUsage = async (
   if (tenantId) {
     // Storage gauge is returned only for objects that were really deleted. Bandwidth history is untouched.
     await releaseStorage(tenantId, bytes, count).catch((e) =>
-      console.error('[media] Failed to release storage accounting:', e),
+      console.error("[media] Failed to release storage accounting:", e),
     );
   }
   try {
@@ -78,16 +95,19 @@ const recordDeleteUsage = async (
       { tenantId, month, provider },
       {
         $inc: { deleteCount: count, deletedBytes: Math.max(0, bytes) },
-        $setOnInsert: { tenantId, month, provider, deliverySource: 'none' },
+        $setOnInsert: { tenantId, month, provider, deliverySource: "none" },
       },
       { upsert: true },
     );
   } catch (err) {
-    console.error('[media] Failed to update delete usage counter:', err);
+    console.error("[media] Failed to update delete usage counter:", err);
   }
 };
 
-const MEDIA_ADDON_SLUGS = new Set(['media_storage_boost', 'extra_media_storage']);
+const MEDIA_ADDON_SLUGS = new Set([
+  "media_storage_boost",
+  "extra_media_storage",
+]);
 const BYTES_PER_GB = 1024 * 1024 * 1024;
 
 export interface MerchantMediaQuota {
@@ -107,9 +127,12 @@ export const computeQuotaSummary = (
 ): MerchantMediaQuota => {
   const totalLimitBytes = Math.max(0, baseLimitBytes + addonLimitBytes);
   const safeUsed = Math.max(0, usedBytes);
-  const remainingBytes = totalLimitBytes > 0 ? Math.max(0, totalLimitBytes - safeUsed) : 0;
+  const remainingBytes =
+    totalLimitBytes > 0 ? Math.max(0, totalLimitBytes - safeUsed) : 0;
   const usedPercent =
-    totalLimitBytes > 0 ? Math.min(100, Math.round((safeUsed / totalLimitBytes) * 10000) / 100) : 0;
+    totalLimitBytes > 0
+      ? Math.min(100, Math.round((safeUsed / totalLimitBytes) * 10000) / 100)
+      : 0;
   const isLimitReached = totalLimitBytes > 0 && safeUsed >= totalLimitBytes;
   return {
     baseLimitBytes,
@@ -122,11 +145,20 @@ export const computeQuotaSummary = (
   };
 };
 
-const getMerchantMediaQuota = async (tenantId: string): Promise<MerchantMediaQuota> => {
+const getMerchantMediaQuota = async (
+  tenantId: string,
+): Promise<MerchantMediaQuota> => {
   const tid = new Types.ObjectId(tenantId);
   // Limits are fully dynamic (Global Settings defaults / package resources / purchased add-ons).
-  const [limits, state] = await Promise.all([getEffectiveLimits(tid), ensureStorageState(tid)]);
-  return computeQuotaSummary(state.usedBytes, limits.storage.baseBytes, limits.storage.totalBytes > 0 ? limits.storage.addonBytes : 0);
+  const [limits, state] = await Promise.all([
+    getEffectiveLimits(tid),
+    ensureStorageState(tid),
+  ]);
+  return computeQuotaSummary(
+    state.usedBytes,
+    limits.storage.baseBytes,
+    limits.storage.totalBytes > 0 ? limits.storage.addonBytes : 0,
+  );
 };
 
 export interface ExtendedDeleteContext extends DeleteContext {
@@ -168,8 +200,9 @@ const uploadImage = async (
   }
   const releaseReservation = async () => {
     if (context.tenantId && reservedBytes > 0) {
-      await releaseStorage(String(context.tenantId), reservedBytes, 0).catch((e) =>
-        console.error('[media] Failed to release storage reservation:', e),
+      await releaseStorage(String(context.tenantId), reservedBytes, 0).catch(
+        (e) =>
+          console.error("[media] Failed to release storage reservation:", e),
       );
     }
   };
@@ -215,14 +248,19 @@ const uploadImage = async (
       width: uploaded.width,
       height: uploaded.height,
       variants: uploaded.variants,
-      status: 'active',
+      status: "active",
     });
   } catch (dbErr) {
     // Compensating delete: remove the just-uploaded object so it does not become an orphan
     const keysToRemove =
-      uploaded.provider === 'r2' ? expandWithVariantKeys(uploaded.public_id) : [uploaded.public_id];
+      uploaded.provider === "r2"
+        ? expandWithVariantKeys(uploaded.public_id)
+        : [uploaded.public_id];
     await provider.delete(keysToRemove).catch((delErr) => {
-      console.error('[media] Compensating delete failed after DB error:', delErr);
+      console.error(
+        "[media] Compensating delete failed after DB error:",
+        delErr,
+      );
     });
     await releaseReservation();
     throw dbErr;
@@ -230,8 +268,12 @@ const uploadImage = async (
 
   await recordUploadUsage(context.tenantId, uploaded.provider, totalBytes);
   if (context.tenantId) {
-    await finalizeStorage(String(context.tenantId), reservedBytes, totalBytes).catch((e) =>
-      console.error('[media] Failed to finalize storage accounting:', e),
+    await finalizeStorage(
+      String(context.tenantId),
+      reservedBytes,
+      totalBytes,
+    ).catch((e) =>
+      console.error("[media] Failed to finalize storage accounting:", e),
     );
   }
 
@@ -261,19 +303,22 @@ const deleteImages = async (
 
   for (const img of images) {
     const resolved = resolveProvider(img);
-    if (resolved.provider === 'external' || !resolved.id) {
+    if (resolved.provider === "external" || !resolved.id) {
       summary.skipped++;
       continue;
     }
 
-    if (resolved.provider === 'r2') {
+    if (resolved.provider === "r2") {
       if (!isSafeKey(resolved.id)) {
         summary.refused++;
         continue;
       }
-      if (!context.allowAnyTenant && !isKeyOwnedBy(resolved.id, context.tenantId)) {
+      if (
+        !context.allowAnyTenant &&
+        !isKeyOwnedBy(resolved.id, context.tenantId)
+      ) {
         console.warn(
-          `[media:security] Refused cross-tenant R2 delete attempt: key=${resolved.id} callerTenant=${context.tenantId ?? 'platform'}`,
+          `[media:security] Refused cross-tenant R2 delete attempt: key=${resolved.id} callerTenant=${context.tenantId ?? "platform"}`,
         );
         summary.refused++;
         continue;
@@ -287,29 +332,41 @@ const deleteImages = async (
   // 1. Delete Cloudinary objects
   if (cloudinaryIds.length > 0) {
     const uniqueCl = Array.from(new Set(cloudinaryIds));
-    const res = await getProvider('cloudinary').delete(uniqueCl);
+    const res = await getProvider("cloudinary").delete(uniqueCl);
     summary.deleted += res.deleted.length;
 
     if (res.deleted.length > 0) {
       const assets = await MediaAsset.find({
-        provider: 'cloudinary',
+        provider: "cloudinary",
         key: { $in: res.deleted },
-        status: { $ne: 'deleted' },
+        status: { $ne: "deleted" },
       }).lean();
       await MediaAsset.updateMany(
-        { provider: 'cloudinary', key: { $in: res.deleted } },
-        { $set: { status: 'deleted', deletedAt: new Date() } },
+        { provider: "cloudinary", key: { $in: res.deleted } },
+        { $set: { status: "deleted", deletedAt: new Date() } },
       );
-      const byTenant = new Map<string, { tid: Types.ObjectId | null; count: number; bytes: number }>();
+      const byTenant = new Map<
+        string,
+        { tid: Types.ObjectId | null; count: number; bytes: number }
+      >();
       for (const a of assets) {
-        const k = a.tenantId ? a.tenantId.toString() : 'platform';
-        const cur = byTenant.get(k) || { tid: a.tenantId ?? null, count: 0, bytes: 0 };
+        const k = a.tenantId ? a.tenantId.toString() : "platform";
+        const cur = byTenant.get(k) || {
+          tid: a.tenantId ?? null,
+          count: 0,
+          bytes: 0,
+        };
         cur.count++;
         cur.bytes += a.totalBytes || a.bytes || 0;
         byTenant.set(k, cur);
       }
       for (const entry of byTenant.values()) {
-        await recordDeleteUsage(entry.tid, 'cloudinary', entry.count, entry.bytes);
+        await recordDeleteUsage(
+          entry.tid,
+          "cloudinary",
+          entry.count,
+          entry.bytes,
+        );
       }
     }
 
@@ -317,9 +374,9 @@ const deleteImages = async (
       summary.queuedForRetry += res.failed.length;
       for (const f of res.failed) {
         await MediaAsset.updateOne(
-          { provider: 'cloudinary', key: f.id },
+          { provider: "cloudinary", key: f.id },
           {
-            $set: { status: 'pending_delete', lastError: f.error },
+            $set: { status: "pending_delete", lastError: f.error },
             $inc: { deleteAttempts: 1 },
           },
         ).catch(() => {});
@@ -333,7 +390,7 @@ const deleteImages = async (
     const allKeysToDelete = Array.from(
       new Set(uniqueMainKeys.flatMap((k) => expandWithVariantKeys(k))),
     );
-    const res = await getProvider('r2').delete(allKeysToDelete);
+    const res = await getProvider("r2").delete(allKeysToDelete);
     const failedSet = new Set(res.failed.map((f) => f.id));
 
     const deletedMainKeys: string[] = [];
@@ -353,24 +410,31 @@ const deleteImages = async (
 
     if (deletedMainKeys.length > 0) {
       const assets = await MediaAsset.find({
-        provider: 'r2',
+        provider: "r2",
         key: { $in: deletedMainKeys },
-        status: { $ne: 'deleted' },
+        status: { $ne: "deleted" },
       }).lean();
       await MediaAsset.updateMany(
-        { provider: 'r2', key: { $in: deletedMainKeys } },
-        { $set: { status: 'deleted', deletedAt: new Date() } },
+        { provider: "r2", key: { $in: deletedMainKeys } },
+        { $set: { status: "deleted", deletedAt: new Date() } },
       );
-      const byTenant = new Map<string, { tid: Types.ObjectId | null; count: number; bytes: number }>();
+      const byTenant = new Map<
+        string,
+        { tid: Types.ObjectId | null; count: number; bytes: number }
+      >();
       for (const a of assets) {
-        const k = a.tenantId ? a.tenantId.toString() : 'platform';
-        const cur = byTenant.get(k) || { tid: a.tenantId ?? null, count: 0, bytes: 0 };
+        const k = a.tenantId ? a.tenantId.toString() : "platform";
+        const cur = byTenant.get(k) || {
+          tid: a.tenantId ?? null,
+          count: 0,
+          bytes: 0,
+        };
         cur.count++;
         cur.bytes += a.totalBytes || a.bytes || 0;
         byTenant.set(k, cur);
       }
       for (const entry of byTenant.values()) {
-        await recordDeleteUsage(entry.tid, 'r2', entry.count, entry.bytes);
+        await recordDeleteUsage(entry.tid, "r2", entry.count, entry.bytes);
       }
     }
 
@@ -378,9 +442,9 @@ const deleteImages = async (
       summary.queuedForRetry += failedMainKeys.length;
       for (const f of failedMainKeys) {
         await MediaAsset.updateOne(
-          { provider: 'r2', key: f.id },
+          { provider: "r2", key: f.id },
           {
-            $set: { status: 'pending_delete', lastError: f.error },
+            $set: { status: "pending_delete", lastError: f.error },
             $inc: { deleteAttempts: 1 },
           },
         ).catch(() => {});
@@ -395,28 +459,36 @@ const deleteImages = async (
  * Deletes only server-tracked uploads from a failed/aborted request.
  * Never trusts req.body for image IDs (prevents cross-tenant IDOR deletion).
  */
-const cleanupTrackedUploads = async (tracked: TrackedUpload[]): Promise<void> => {
+const cleanupTrackedUploads = async (
+  tracked: TrackedUpload[],
+): Promise<void> => {
   if (!tracked || tracked.length === 0) return;
   const byTenant = new Map<string, TrackedUpload[]>();
   for (const item of tracked) {
-    const k = item.tenantId ?? '__platform__';
+    const k = item.tenantId ?? "__platform__";
     const arr = byTenant.get(k) || [];
     arr.push(item);
     byTenant.set(k, arr);
   }
   for (const [k, items] of byTenant.entries()) {
-    const tenantId = k === '__platform__' ? null : k;
+    const tenantId = k === "__platform__" ? null : k;
     await deleteImages(
-      items.map((i) => ({ provider: i.provider, public_id: i.public_id, secure_url: i.secure_url })),
-      { tenantId, reason: 'request_failure_cleanup' },
+      items.map((i) => ({
+        provider: i.provider,
+        public_id: i.public_id,
+        secure_url: i.secure_url,
+      })),
+      { tenantId, reason: "request_failure_cleanup" },
     );
   }
 };
 
 /** Retries pending_delete assets (up to 10 attempts). Called by media.cron.ts. */
-const retryPendingDeletes = async (limit: number = 50): Promise<{ retried: number; deleted: number }> => {
+const retryPendingDeletes = async (
+  limit: number = 50,
+): Promise<{ retried: number; deleted: number }> => {
   const pending = await MediaAsset.find({
-    status: 'pending_delete',
+    status: "pending_delete",
     deleteAttempts: { $lt: 10 },
   })
     .sort({ updatedAt: 1 })
@@ -428,8 +500,18 @@ const retryPendingDeletes = async (limit: number = 50): Promise<{ retried: numbe
   let deleted = 0;
   for (const asset of pending) {
     const res = await deleteImages(
-      [{ provider: asset.provider, public_id: asset.key, secure_url: asset.publicUrl }],
-      { tenantId: asset.tenantId ? asset.tenantId.toString() : null, allowAnyTenant: true, reason: 'cron_retry' },
+      [
+        {
+          provider: asset.provider,
+          public_id: asset.key,
+          secure_url: asset.publicUrl,
+        },
+      ],
+      {
+        tenantId: asset.tenantId ? asset.tenantId.toString() : null,
+        allowAnyTenant: true,
+        reason: "cron_retry",
+      },
     );
     deleted += res.deleted;
   }
@@ -437,39 +519,60 @@ const retryPendingDeletes = async (limit: number = 50): Promise<{ retried: numbe
 };
 
 const isCloudinaryUrl = (url?: string | null): boolean =>
-  Boolean(url && (url.includes('cloudinary.com') || url.includes('cdn.masheco.com')));
+  Boolean(
+    url && (url.includes("cloudinary.com") || url.includes("cdn.masheco.com")),
+  );
 
 /** Counts legacy Cloudinary images embedded in business documents for a tenant. */
-const countLegacyCloudinaryImagesForTenant = async (tenantId: string): Promise<number> => {
+const countLegacyCloudinaryImagesForTenant = async (
+  tenantId: string,
+): Promise<number> => {
   const tid = new Types.ObjectId(tenantId);
   const [products, categories, theme, tenant, users] = await Promise.all([
-    Product.find({ tenantId: tid }).select('images.secure_url images.provider').lean(),
-    Category.find({ tenantId: tid }).select('image.secure_url image.provider').lean(),
-    Theme.findOne({ tenantId: tid }).select('banner.images banner.image').lean(),
-    Tenant.findById(tid).select('logo').lean(),
-    User.find({ tenantId: tid }).select('avatar.secure_url avatar.provider').lean(),
+    Product.find({ tenantId: tid })
+      .select("images.secure_url images.provider")
+      .lean(),
+    Category.find({ tenantId: tid })
+      .select("image.secure_url image.provider")
+      .lean(),
+    Theme.findOne({ tenantId: tid })
+      .select("banner.images banner.image")
+      .lean(),
+    Tenant.findById(tid).select("logo").lean(),
+    User.find({ tenantId: tid })
+      .select("avatar.secure_url avatar.provider")
+      .lean(),
   ]);
 
   let count = 0;
   for (const p of products) {
     for (const img of p.images || []) {
-      if ((img as any).provider !== 'r2' && isCloudinaryUrl(img.secure_url)) count++;
+      if ((img as any).provider !== "r2" && isCloudinaryUrl(img.secure_url))
+        count++;
     }
   }
   for (const c of categories) {
-    if ((c.image as any)?.provider !== 'r2' && isCloudinaryUrl(c.image?.secure_url)) count++;
+    if (
+      (c.image as any)?.provider !== "r2" &&
+      isCloudinaryUrl(c.image?.secure_url)
+    )
+      count++;
   }
   if (theme?.banner) {
     const seen = new Set<string>();
     for (const img of theme.banner.images || []) {
-      if ((img as any).provider !== 'r2' && isCloudinaryUrl(img.secure_url) && !seen.has(img.secure_url)) {
+      if (
+        (img as any).provider !== "r2" &&
+        isCloudinaryUrl(img.secure_url) &&
+        !seen.has(img.secure_url)
+      ) {
         seen.add(img.secure_url);
         count++;
       }
     }
     if (
       theme.banner.image?.secure_url &&
-      (theme.banner.image as any).provider !== 'r2' &&
+      (theme.banner.image as any).provider !== "r2" &&
       isCloudinaryUrl(theme.banner.image.secure_url) &&
       !seen.has(theme.banner.image.secure_url)
     ) {
@@ -478,38 +581,49 @@ const countLegacyCloudinaryImagesForTenant = async (tenantId: string): Promise<n
   }
   if (isCloudinaryUrl(tenant?.logo)) count++;
   for (const u of users) {
-    if ((u.avatar as any)?.provider !== 'r2' && isCloudinaryUrl(u.avatar?.secure_url)) count++;
+    if (
+      (u.avatar as any)?.provider !== "r2" &&
+      isCloudinaryUrl(u.avatar?.secure_url)
+    )
+      count++;
   }
   return count;
 };
 
-const getMerchantUsage = async (tenantId: string, month: string = getCurrentMonthKey()) => {
+const getMerchantUsage = async (
+  tenantId: string,
+  month: string = getCurrentMonthKey(),
+) => {
   const tid = new Types.ObjectId(tenantId);
 
-  const [assetAgg, monthlyUsage, legacyCloudinaryCount, quota] = await Promise.all([
-    MediaAsset.aggregate([
-      { $match: { tenantId: tid, status: 'active' } },
-      {
-        $group: {
-          _id: '$provider',
-          imageCount: { $sum: 1 },
-          mainBytes: { $sum: '$bytes' },
-          totalBytes: { $sum: '$totalBytes' },
+  const [assetAgg, monthlyUsage, legacyCloudinaryCount, quota] =
+    await Promise.all([
+      MediaAsset.aggregate([
+        { $match: { tenantId: tid, status: "active" } },
+        {
+          $group: {
+            _id: "$provider",
+            imageCount: { $sum: 1 },
+            mainBytes: { $sum: "$bytes" },
+            totalBytes: { $sum: "$totalBytes" },
+          },
         },
-      },
-    ]),
-    MediaUsage.find({ tenantId: tid, month }).lean(),
-    countLegacyCloudinaryImagesForTenant(tenantId),
-    getMerchantMediaQuota(tenantId),
-  ]);
+      ]),
+      MediaUsage.find({ tenantId: tid, month }).lean(),
+      countLegacyCloudinaryImagesForTenant(tenantId),
+      getMerchantMediaQuota(tenantId),
+    ]);
 
-  const byProvider: Record<MediaProviderName, { imageCount: number; mainBytes: number; totalBytes: number }> = {
+  const byProvider: Record<
+    MediaProviderName,
+    { imageCount: number; mainBytes: number; totalBytes: number }
+  > = {
     r2: { imageCount: 0, mainBytes: 0, totalBytes: 0 },
     cloudinary: { imageCount: 0, mainBytes: 0, totalBytes: 0 },
   };
 
   for (const row of assetAgg) {
-    if (row._id === 'r2' || row._id === 'cloudinary') {
+    if (row._id === "r2" || row._id === "cloudinary") {
       byProvider[row._id as MediaProviderName] = {
         imageCount: row.imageCount,
         mainBytes: row.mainBytes,
@@ -518,10 +632,12 @@ const getMerchantUsage = async (tenantId: string, month: string = getCurrentMont
     }
   }
 
-  const r2Monthly = monthlyUsage.find((u) => u.provider === 'r2');
-  const clMonthly = monthlyUsage.find((u) => u.provider === 'cloudinary');
-  const uploadCount = (r2Monthly?.uploadCount || 0) + (clMonthly?.uploadCount || 0);
-  const deleteCount = (r2Monthly?.deleteCount || 0) + (clMonthly?.deleteCount || 0);
+  const r2Monthly = monthlyUsage.find((u) => u.provider === "r2");
+  const clMonthly = monthlyUsage.find((u) => u.provider === "cloudinary");
+  const uploadCount =
+    (r2Monthly?.uploadCount || 0) + (clMonthly?.uploadCount || 0);
+  const deleteCount =
+    (r2Monthly?.deleteCount || 0) + (clMonthly?.deleteCount || 0);
 
   return {
     month,
@@ -531,78 +647,91 @@ const getMerchantUsage = async (tenantId: string, month: string = getCurrentMont
       uploadCount,
       deleteCount,
       totalOperations: uploadCount + deleteCount,
-      r2WriteObjects: ((r2Monthly?.uploadCount || 0) + (r2Monthly?.deleteCount || 0)) * 3,
-      uploadBytes: (r2Monthly?.uploadBytes || 0) + (clMonthly?.uploadBytes || 0),
+      r2WriteObjects:
+        ((r2Monthly?.uploadCount || 0) + (r2Monthly?.deleteCount || 0)) * 3,
+      uploadBytes:
+        (r2Monthly?.uploadBytes || 0) + (clMonthly?.uploadBytes || 0),
     },
     reads: {
       totalRequests: r2Monthly?.deliveryRequests ?? null,
       totalBytes: r2Monthly?.deliveryBytes ?? null,
-      source: r2Monthly?.deliverySource ?? 'none',
+      source: r2Monthly?.deliverySource ?? "none",
       updatedAt: r2Monthly?.deliveryUpdatedAt ?? null,
     },
     storage: {
       r2: byProvider.r2,
       cloudinaryTracked: byProvider.cloudinary,
       legacyCloudinaryImageCount: legacyCloudinaryCount,
-      totalTrackedBytes: byProvider.r2.totalBytes + byProvider.cloudinary.totalBytes,
-      totalImageCount: byProvider.r2.imageCount + Math.max(byProvider.cloudinary.imageCount, legacyCloudinaryCount),
+      totalTrackedBytes:
+        byProvider.r2.totalBytes + byProvider.cloudinary.totalBytes,
+      totalImageCount:
+        byProvider.r2.imageCount +
+        Math.max(byProvider.cloudinary.imageCount, legacyCloudinaryCount),
     },
     monthly: {
-      uploadCount: (r2Monthly?.uploadCount || 0) + (clMonthly?.uploadCount || 0),
-      uploadBytes: (r2Monthly?.uploadBytes || 0) + (clMonthly?.uploadBytes || 0),
-      deleteCount: (r2Monthly?.deleteCount || 0) + (clMonthly?.deleteCount || 0),
-      deletedBytes: (r2Monthly?.deletedBytes || 0) + (clMonthly?.deletedBytes || 0),
+      uploadCount:
+        (r2Monthly?.uploadCount || 0) + (clMonthly?.uploadCount || 0),
+      uploadBytes:
+        (r2Monthly?.uploadBytes || 0) + (clMonthly?.uploadBytes || 0),
+      deleteCount:
+        (r2Monthly?.deleteCount || 0) + (clMonthly?.deleteCount || 0),
+      deletedBytes:
+        (r2Monthly?.deletedBytes || 0) + (clMonthly?.deletedBytes || 0),
       deliveryRequests: r2Monthly?.deliveryRequests ?? null,
       deliveryBytes: r2Monthly?.deliveryBytes ?? null,
-      deliverySource: r2Monthly?.deliverySource ?? 'none',
+      deliverySource: r2Monthly?.deliverySource ?? "none",
     },
   };
 };
 
 const getPlatformUsage = async (month: string = getCurrentMonthKey()) => {
-  const [providerStorageAgg, tenantStorageAgg, monthlyAgg, tenantMonthlyAgg] = await Promise.all([
-    MediaAsset.aggregate([
-      { $match: { status: 'active' } },
-      {
-        $group: {
-          _id: '$provider',
-          imageCount: { $sum: 1 },
-          mainBytes: { $sum: '$bytes' },
-          totalBytes: { $sum: '$totalBytes' },
+  const [providerStorageAgg, tenantStorageAgg, monthlyAgg, tenantMonthlyAgg] =
+    await Promise.all([
+      MediaAsset.aggregate([
+        { $match: { status: "active" } },
+        {
+          $group: {
+            _id: "$provider",
+            imageCount: { $sum: 1 },
+            mainBytes: { $sum: "$bytes" },
+            totalBytes: { $sum: "$totalBytes" },
+          },
         },
-      },
-    ]),
-    MediaAsset.aggregate([
-      { $match: { status: 'active', tenantId: { $ne: null } } },
-      {
-        $group: {
-          _id: { tenantId: '$tenantId', provider: '$provider' },
-          imageCount: { $sum: 1 },
-          totalBytes: { $sum: '$totalBytes' },
+      ]),
+      MediaAsset.aggregate([
+        { $match: { status: "active", tenantId: { $ne: null } } },
+        {
+          $group: {
+            _id: { tenantId: "$tenantId", provider: "$provider" },
+            imageCount: { $sum: 1 },
+            totalBytes: { $sum: "$totalBytes" },
+          },
         },
-      },
-    ]),
-    MediaUsage.aggregate([
-      { $match: { month } },
-      {
-        $group: {
-          _id: '$provider',
-          uploadCount: { $sum: '$uploadCount' },
-          uploadBytes: { $sum: '$uploadBytes' },
-          deleteCount: { $sum: '$deleteCount' },
-          deletedBytes: { $sum: '$deletedBytes' },
+      ]),
+      MediaUsage.aggregate([
+        { $match: { month } },
+        {
+          $group: {
+            _id: "$provider",
+            uploadCount: { $sum: "$uploadCount" },
+            uploadBytes: { $sum: "$uploadBytes" },
+            deleteCount: { $sum: "$deleteCount" },
+            deletedBytes: { $sum: "$deletedBytes" },
+          },
         },
-      },
-    ]),
-    MediaUsage.find({ month, tenantId: { $ne: null } }).lean(),
-  ]);
+      ]),
+      MediaUsage.find({ month, tenantId: { $ne: null } }).lean(),
+    ]);
 
-  const byProvider: Record<MediaProviderName, { imageCount: number; mainBytes: number; totalBytes: number }> = {
+  const byProvider: Record<
+    MediaProviderName,
+    { imageCount: number; mainBytes: number; totalBytes: number }
+  > = {
     r2: { imageCount: 0, mainBytes: 0, totalBytes: 0 },
     cloudinary: { imageCount: 0, mainBytes: 0, totalBytes: 0 },
   };
   for (const row of providerStorageAgg) {
-    if (row._id === 'r2' || row._id === 'cloudinary') {
+    if (row._id === "r2" || row._id === "cloudinary") {
       byProvider[row._id as MediaProviderName] = {
         imageCount: row.imageCount,
         mainBytes: row.mainBytes,
@@ -645,7 +774,7 @@ const getPlatformUsage = async (month: string = getCurrentMonthKey()) => {
   for (const row of tenantStorageAgg) {
     const tid = row._id.tenantId.toString();
     const cur = tenantMap.get(tid) || emptyMerchantRow(tid);
-    if (row._id.provider === 'r2') {
+    if (row._id.provider === "r2") {
       cur.r2Images = row.imageCount;
       cur.r2Bytes = row.totalBytes;
     } else {
@@ -668,7 +797,8 @@ const getPlatformUsage = async (month: string = getCurrentMonthKey()) => {
     cur.monthlyDeleteCount += row.deleteCount || 0;
     cur.monthlyWriteOps = cur.monthlyUploadCount + cur.monthlyDeleteCount;
     if (row.deliveryRequests !== null && row.deliveryRequests !== undefined) {
-      cur.monthlyReadRequests = (cur.monthlyReadRequests || 0) + row.deliveryRequests;
+      cur.monthlyReadRequests =
+        (cur.monthlyReadRequests || 0) + row.deliveryRequests;
       platformReadRequests += row.deliveryRequests;
       hasReadMetrics = true;
     }
@@ -680,9 +810,13 @@ const getPlatformUsage = async (month: string = getCurrentMonthKey()) => {
     tenantMap.set(tid, cur);
   }
 
-  const tenantIds = Array.from(tenantMap.keys()).map((id) => new Types.ObjectId(id));
+  const tenantIds = Array.from(tenantMap.keys()).map(
+    (id) => new Types.ObjectId(id),
+  );
   const tenants = tenantIds.length
-    ? await Tenant.find({ _id: { $in: tenantIds } }).select('name slug').lean()
+    ? await Tenant.find({ _id: { $in: tenantIds } })
+        .select("name slug")
+        .lean()
     : [];
   const tenantInfoMap = new Map(tenants.map((t: any) => [t._id.toString(), t]));
   const baseLimitBytes = config.media.merchantStorageLimitBytes;
@@ -693,8 +827,8 @@ const getPlatformUsage = async (month: string = getCurrentMonthKey()) => {
       const totalBytes = m.r2Bytes + m.cloudinaryBytes;
       return {
         ...m,
-        storeName: info?.name || 'Unknown Store',
-        slug: info?.slug || '',
+        storeName: info?.name || "Unknown Store",
+        slug: info?.slug || "",
         totalBytes,
         totalImages: m.r2Images + m.cloudinaryImages,
         baseLimitBytes,
@@ -708,8 +842,10 @@ const getPlatformUsage = async (month: string = getCurrentMonthKey()) => {
     storage: {
       r2: byProvider.r2,
       cloudinaryTracked: byProvider.cloudinary,
-      totalTrackedBytes: byProvider.r2.totalBytes + byProvider.cloudinary.totalBytes,
-      totalTrackedImages: byProvider.r2.imageCount + byProvider.cloudinary.imageCount,
+      totalTrackedBytes:
+        byProvider.r2.totalBytes + byProvider.cloudinary.totalBytes,
+      totalTrackedImages:
+        byProvider.r2.imageCount + byProvider.cloudinary.imageCount,
     },
     reads: {
       totalRequests: hasReadMetrics ? platformReadRequests : null,
