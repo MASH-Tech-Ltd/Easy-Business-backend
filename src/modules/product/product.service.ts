@@ -5,7 +5,11 @@ import { paginationHelper } from '../../helpers/paginationHelper';
 import { Category } from '../category/category.model';
 import CustomError from '../../helpers/CustomError';
 import { MediaService } from '../media/media.service';
-import { Subscription } from '../subscription/subscription.model';  
+import { Subscription } from '../subscription/subscription.model';
+import { CacheService } from '../../services/cache/cache.service';
+import { CacheKeys } from '../../services/cache/cache.keys';
+import { CACHE_TTL } from '../../services/cache/cache.ttl';
+import { CacheInvalidation } from '../../services/cache/cache.invalidation';
 
 
 const createProduct = async (payload: Partial<IProduct>): Promise<IProduct> => {
@@ -30,6 +34,8 @@ const createProduct = async (payload: Partial<IProduct>): Promise<IProduct> => {
   }
 
   const result = await Product.create(payload);
+  void CacheInvalidation.invalidateProduct(tenantId.toString(), result._id.toString(), result.slug);
+  void CacheInvalidation.invalidateMerchantDashboard(tenantId.toString());
   return result;
 };
 
@@ -155,6 +161,8 @@ const updateProduct = async (id: string, tenantId: string, payload: Partial<IPro
   if (!result) {
     throw new CustomError(404, 'Product not found or you do not have permission to update it');
   }
+  void CacheInvalidation.invalidateProduct(tenantId.toString(), id, result.slug);
+  void CacheInvalidation.invalidateMerchantDashboard(tenantId.toString());
   return result;
 };
 
@@ -170,7 +178,9 @@ const deleteProduct = async (id: string, tenantId: string): Promise<IProduct | n
       console.error('Media product delete error:', err)
     );
   }
-  
+
+  void CacheInvalidation.invalidateProduct(tenantId.toString(), id, result.slug);
+  void CacheInvalidation.invalidateMerchantDashboard(tenantId.toString());
   return result;
 };
 
@@ -196,6 +206,7 @@ const deleteAllProductsByTenant = async (tenantId: string): Promise<any> => {
   // Delete products and categories from database
   const result = await Product.deleteMany({ tenantId: new Types.ObjectId(tenantId) });
   await Category.deleteMany({ tenantId: new Types.ObjectId(tenantId) });
+  void CacheInvalidation.clearStoreCache(tenantId.toString());
   
   // Delete all collected images via provider-aware MediaService
   if (imagesToDelete.length > 0) {

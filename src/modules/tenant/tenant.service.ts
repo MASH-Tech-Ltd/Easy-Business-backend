@@ -16,6 +16,7 @@ import { Theme } from "../theme/theme.model";
 import mongoose from "mongoose";
 import axios from "axios";
 import config from "../../config";
+import { CacheInvalidation } from "../../services/cache/cache.invalidation";
 
 const notifyTenantUpdate = async (tenantId?: string, deletedUserIds: string[] = []) => {
   try {
@@ -34,6 +35,13 @@ const notifyTenantUpdate = async (tenantId?: string, deletedUserIds: string[] = 
 
       const tenant = await Tenant.findById(tenantId);
       if (tenant) {
+        void CacheInvalidation.invalidateStoreSettings(tenantId, [
+          tenant.slug,
+          tenant.domain || '',
+          tenant.customDomain || '',
+        ]);
+        void CacheInvalidation.invalidateMerchantDashboard(tenantId);
+        void CacheInvalidation.invalidateAdminDashboard();
         const event = tenant?.status === 'banned' ? 'account_banned' : 'account_status_changed';
         if (tenant.ownerId) {
           io.to('user_' + tenant.ownerId.toString()).emit(event);

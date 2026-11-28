@@ -4,6 +4,7 @@ import ApiResponse from '../../utils/apiResponse';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { MediaService } from '../media/media.service';
 import CustomError from '../../helpers/CustomError';
+import { CacheInvalidation } from '../../services/cache/cache.invalidation';
 
 const isValidBDPhone = (phone?: string): boolean => {
   if (!phone || !phone.trim()) return true;
@@ -135,6 +136,9 @@ const updateTheme = asyncHandler(async (req: Request, res: Response) => {
       console.error('Failed to delete old banner images:', err)
     );
   }
+
+  void CacheInvalidation.invalidateStoreSettings(String(tenantId));
+  void CacheInvalidation.invalidateMerchantDashboard(String(tenantId));
 
   ApiResponse.sendSuccess(res, 200, 'Theme updated successfully', result);
 });

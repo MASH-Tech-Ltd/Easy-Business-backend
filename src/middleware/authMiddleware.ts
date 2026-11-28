@@ -4,6 +4,9 @@ import config from '../config';
 import { roleBasedRateLimiter } from './rateLimiter';
 import { Tenant } from '../modules/tenant/tenant.model';
 import { User } from '../modules/auth/auth.model';
+import { CacheService } from '../services/cache/cache.service';
+import { CacheKeys } from '../services/cache/cache.keys';
+import { CACHE_TTL } from '../services/cache/cache.ttl';
 
 export const authMiddleware = (...requiredRoles: string[]) => {
   return async (req: Request, res: Response, next: NextFunction) => {
@@ -55,15 +58,40 @@ export const authMiddleware = (...requiredRoles: string[]) => {
 
       // Enforce merchant store status (see tenant status policy)
       if (verifiedUser.role === 'tenant_admin') {
-        const [tenant, userExists] = await Promise.all([
-          Tenant.findOne({
-            $or: [
-              ...(verifiedUser.tenantId ? [{ _id: verifiedUser.tenantId }] : []),
-              { ownerId: verifiedUser._id },
-            ],
-          }).select('status').lean(),
-          User.exists({ _id: verifiedUser._id }),
-        ]);
+        const authCtxKey = CacheKeys.authMerchantContext(
+          String(verifiedUser._id),
+          verifiedUser.tenantId ? String(verifiedUser.tenantId) : undefined
+        );
+        const { value: authCtx } = await CacheService.getOrSet<{
+          tenantStatus: string | null;
+          userExists: boolean;
+        }>(
+          authCtxKey,
+          async () => {
+            const [tenantDoc, userDoc] = await Promise.all([
+              Tenant.findOne({
+                $or: [
+                  ...(verifiedUser.tenantId ? [{ _id: verifiedUser.tenantId }] : []),
+                  { ownerId: verifiedUser._id },
+                ],
+              }).select('status').lean(),
+              User.exists({ _id: verifiedUser._id }),
+            ]);
+            return {
+              tenantStatus: tenantDoc?.status || null,
+              userExists: Boolean(userDoc),
+            };
+          },
+          {
+            group: 'auth_tenant',
+            ttlSeconds: CACHE_TTL.AUTH_CONTEXT,
+            jitter: false,
+            shouldCache: (ctx) => Boolean(ctx.tenantStatus && ctx.userExists),
+          }
+        );
+
+        const tenant = authCtx.tenantStatus ? { status: authCtx.tenantStatus } : null;
+        const userExists = authCtx.userExists;
 
         // If merchant tenant or merchant user was deleted, reject immediately
         if (!tenant || !userExists) {

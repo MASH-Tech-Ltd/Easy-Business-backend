@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { OrderService } from './order.service';
 import ApiResponse from '../../utils/apiResponse';
 import { asyncHandler } from '../../utils/asyncHandler';
+import { CacheInvalidation } from '../../services/cache/cache.invalidation';
 
 const createOrder = asyncHandler(async (req: Request, res: Response) => {
   // SECURITY FIX: Resolve tenantId from the tenant middleware (set via Host header / subdomain),
@@ -14,6 +15,11 @@ const createOrder = asyncHandler(async (req: Request, res: Response) => {
     return ApiResponse.sendError(res, 400, 'Tenant context could not be resolved');
   }
   const result = await OrderService.createOrder(req.body);
+  if (req.body.tenantId) {
+    const tid = String(req.body.tenantId);
+    void CacheInvalidation.invalidateProductListings(tid);
+    void CacheInvalidation.invalidateMerchantDashboard(tid);
+  }
   ApiResponse.sendSuccess(res, 201, 'Order created successfully', result);
 });
 
@@ -25,6 +31,8 @@ const createManualOrder = asyncHandler(async (req: Request, res: Response) => {
     return ApiResponse.sendError(res, 401, 'Unauthorized: Tenant context could not be resolved');
   }
   const result = await OrderService.createManualOrder(req.body, tenantId, userId);
+  void CacheInvalidation.invalidateProductListings(String(tenantId));
+  void CacheInvalidation.invalidateMerchantDashboard(String(tenantId));
   ApiResponse.sendSuccess(res, 201, 'Manual order created successfully', result);
 });
 
@@ -38,6 +46,8 @@ const updateOrder = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = (req as any).user.tenantId;
   const { id } = req.params;
   const result = await OrderService.updateOrder(id as string, req.body, tenantId);
+  void CacheInvalidation.invalidateProductListings(String(tenantId));
+  void CacheInvalidation.invalidateMerchantDashboard(String(tenantId));
   ApiResponse.sendSuccess(res, 200, 'Order updated successfully', result);
 });
 
@@ -45,6 +55,8 @@ const deleteOrder = asyncHandler(async (req: Request, res: Response) => {
   const tenantId = (req as any).user.tenantId;
   const { id } = req.params;
   await OrderService.deleteOrder(id as string, tenantId);
+  void CacheInvalidation.invalidateProductListings(String(tenantId));
+  void CacheInvalidation.invalidateMerchantDashboard(String(tenantId));
   ApiResponse.sendSuccess(res, 200, 'Order deleted successfully');
 });
 

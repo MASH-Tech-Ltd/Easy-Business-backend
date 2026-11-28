@@ -15,12 +15,14 @@ import { initTenantCapiCron } from './modules/analytics/tenantCapi.service';
 import { initMediaCron } from './modules/media/media.cron';
 import { validateMediaConfig } from './modules/media/providers';
 import { initResourceCron } from './modules/resource/resource.cron';
+import { initRedis, closeRedis } from './infrastructure/redis/redis.client';
 
 const PORT = Number(config.app.port) || 8000;
 const HOST = process.env.HOST?.trim();
 
 connectDatabase()
   .then(async () => {
+    await initRedis();
     await seedSuperAdmin();
     await ensurePackageFreeCredits();
     await ensureAddons();
@@ -44,6 +46,21 @@ connectDatabase()
     initTenantCapiCron();
     initMediaCron();
     initResourceCron();
+
+    const shutdown = async (signal: string) => {
+      console.log(`[Server] ${signal} received. Closing HTTP server and Redis...`);
+      server.close(async () => {
+        await closeRedis();
+        process.exit(0);
+      });
+      setTimeout(async () => {
+        await closeRedis();
+        process.exit(0);
+      }, 5000).unref();
+    };
+
+    process.once('SIGINT', () => void shutdown('SIGINT'));
+    process.once('SIGTERM', () => void shutdown('SIGTERM'));
   })
   .catch((error: unknown) => {
     console.error("Database connection failed!!", error);

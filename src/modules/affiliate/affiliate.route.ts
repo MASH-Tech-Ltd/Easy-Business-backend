@@ -3,6 +3,9 @@ import { authMiddleware } from '../../middleware/authMiddleware';
 import { validateRequest } from '../../middleware/validateRequest';
 import { AffiliateController } from './affiliate.controller';
 import { AffiliateValidation } from './affiliate.validation';
+import { cacheResponse } from '../../services/cache/cache.middleware';
+import { CacheKeys } from '../../services/cache/cache.keys';
+import { CACHE_TTL } from '../../services/cache/cache.ttl';
 import {
   requireAffiliatePartner,
   affiliatePublicConfigLimiter,
@@ -29,6 +32,11 @@ const router = Router();
 router.get(
   '/public-config',
   affiliatePublicConfigLimiter,
+  cacheResponse({
+    group: 'affiliate_dashboard',
+    ttlSeconds: CACHE_TTL.DEFAULT,
+    keyBuilder: () => CacheKeys.affiliatePublicConfig(),
+  }),
   AffiliateController.getPublicConfig
 );
 
@@ -86,6 +94,11 @@ router.get(
   authMiddleware('affiliate_partner'),
   requireAffiliatePartner({ allowReadOnlyWhenSuspended: true }),
   affiliateQueryLimiter,
+  cacheResponse({
+    group: 'affiliate_dashboard',
+    ttlSeconds: CACHE_TTL.DASHBOARD,
+    keyBuilder: (req) => CacheKeys.affiliateDashboardOverview(String((req as any).affiliate?._id || (req as any).user?.userId || 'unknown'), req.query as Record<string, unknown>),
+  }),
   AffiliateController.getOverview
 );
 
@@ -249,6 +262,11 @@ router.get(
   '/admin/overview',
   authMiddleware('super_admin'),
   affiliateQueryLimiter,
+  cacheResponse({
+    group: 'admin_dashboard',
+    ttlSeconds: CACHE_TTL.DASHBOARD,
+    keyBuilder: () => CacheKeys.adminAffiliateOverview(),
+  }),
   AffiliateController.getAdminOverview
 );
 

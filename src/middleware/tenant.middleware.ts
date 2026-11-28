@@ -2,6 +2,9 @@ import { Request, Response, NextFunction } from "express";
 import { Tenant } from "../modules/tenant/tenant.model";
 import ApiResponse from "../utils/apiResponse";
 import config from "../config";
+import { CacheService } from "../services/cache/cache.service";
+import { CacheKeys } from "../services/cache/cache.keys";
+import { CACHE_TTL } from "../services/cache/cache.ttl";
 
 export const tenantMiddleware = async (
   req: Request,

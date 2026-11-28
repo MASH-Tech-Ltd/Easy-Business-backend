@@ -33,6 +33,7 @@ import {
 } from './middleware/security.middleware';
 import { visitorTrackingMiddleware } from './middleware/visitorTracking.middleware';
 import { getClientIp, resolveClientIp } from './utils/ipHelper';
+import { apiPerformanceMiddleware } from './infrastructure/redis/redis.metrics';
 
 // SECURITY FIX: Strict CORS allow-list — never trust unknown origins
 const allowedOrigins = [
@@ -176,7 +177,7 @@ if (config.app.env === "development") {
 }
 
 // Routes
-app.use("/api/v1", tenantMiddleware, visitorTrackingMiddleware, routes);
+app.use("/api/v1", apiPerformanceMiddleware, tenantMiddleware, visitorTrackingMiddleware, routes);
 
 // Cloudflare Custom Hostname Ownership HTTP Validation
 app.get("/.well-known/cf-custom-hostname-challenge/:uuid", async (req: Request, res: Response) => {

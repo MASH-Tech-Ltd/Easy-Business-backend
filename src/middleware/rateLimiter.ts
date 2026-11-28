@@ -4,6 +4,7 @@ import { SecurityLog, BlockedIp } from '../modules/system/security.model';
 import { getRequestedFrom } from './security.middleware';
 import { getClientIp, getRateLimitKey, canAutoBlockIp, isInternalOrWhitelistedIp } from '../utils/ipHelper';
 import config from '../config/index';
+import { RedisRateLimitStore } from '../infrastructure/redis/redis.rateLimitStore';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Bounded MemoryStore for express-rate-limit
@@ -158,7 +159,7 @@ export const globalRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false, default: false, singleCount: false },
-  store: new BoundedMemoryStore(50_000),
+  store: new RedisRateLimitStore('global', new BoundedMemoryStore(50_000)),
   skip: (req: Request) => {
     if (req.originalUrl.startsWith('/socket.io')) return true;
     const ip = getClientIp(req);
@@ -182,7 +183,7 @@ export const storefrontPublicLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false, default: false, singleCount: false },
-  store: new BoundedMemoryStore(20_000),
+  store: new RedisRateLimitStore('storefront', new BoundedMemoryStore(20_000)),
   skip: (req: Request) => {
     const ip = getClientIp(req);
     if (isInternalOrWhitelistedIp(ip)) return true;
@@ -210,7 +211,7 @@ export const searchLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false, default: false, singleCount: false },
-  store: new BoundedMemoryStore(10_000),
+  store: new RedisRateLimitStore('search', new BoundedMemoryStore(10_000)),
   keyGenerator: (req: Request) => req.user?.userId || getRateLimitKey(req),
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
     const ip = getClientIp(req);
@@ -231,7 +232,7 @@ export const manualOrderLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false, default: false, singleCount: false },
-  store: new BoundedMemoryStore(10_000),
+  store: new RedisRateLimitStore('manual_order', new BoundedMemoryStore(10_000)),
   keyGenerator: (req: Request) => req.user?.userId || getRateLimitKey(req),
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
     const ip = getClientIp(req);
@@ -251,7 +252,7 @@ export const checkoutLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false, default: false, singleCount: false },
-  store: new BoundedMemoryStore(5_000),
+  store: new RedisRateLimitStore('checkout', new BoundedMemoryStore(5_000)),
   keyGenerator: (req: Request) => getRateLimitKey(req),
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
     const ip = getClientIp(req);
@@ -290,7 +291,7 @@ export const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false, default: false, singleCount: false },
-  store: new BoundedMemoryStore(10_000),
+  store: new RedisRateLimitStore('auth', new BoundedMemoryStore(10_000)),
   keyGenerator: (req: Request) => getRateLimitKey(req),
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
     const ip = getClientIp(req);
@@ -310,7 +311,7 @@ export const dashboardLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false, default: false, singleCount: false },
-  store: new BoundedMemoryStore(10_000),
+  store: new RedisRateLimitStore('dashboard', new BoundedMemoryStore(10_000)),
   keyGenerator: (req: Request) => req.user?.userId || getRateLimitKey(req),
   handler: async (req: Request, res: Response, _next: NextFunction, options) => {
     const ip = getClientIp(req);

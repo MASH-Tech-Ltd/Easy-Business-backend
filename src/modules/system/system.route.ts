@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { SystemController } from './system.controller';
+import { RedisMonitoringController } from './redisMonitoring.controller';
 import { authMiddleware } from '../../middleware/authMiddleware';
 
 const router = Router();
@@ -31,5 +32,17 @@ router.put('/global-settings', authMiddleware('super_admin'), SystemController.u
 router.get('/public-settings', SystemController.getPublicSettings);
 router.get('/active-stores', SystemController.getActiveStoresForSeo);
 router.get('/theme-previews', SystemController.getThemePreviews);
+
+// Redis & Cache Monitoring (Super Admin only)
+router.get('/redis/overview', authMiddleware('super_admin'), RedisMonitoringController.getOverview);
+router.get('/redis/memory', authMiddleware('super_admin'), RedisMonitoringController.getMemory);
+router.get('/redis/stats', authMiddleware('super_admin'), RedisMonitoringController.getStats);
+router.get('/redis/cache-analytics', authMiddleware('super_admin'), RedisMonitoringController.getCacheAnalytics);
+router.get('/redis/api-performance', authMiddleware('super_admin'), RedisMonitoringController.getApiPerformance);
+router.get('/redis/top-endpoints', authMiddleware('super_admin'), RedisMonitoringController.getTopEndpoints);
+router.get('/redis/health', authMiddleware('super_admin'), RedisMonitoringController.getHealth);
+router.post('/redis/cache/clear', authMiddleware('super_admin'), RedisMonitoringController.clearAllCache);
+router.post('/redis/cache/clear-group', authMiddleware('super_admin'), RedisMonitoringController.clearCacheGroup);
+router.post('/redis/cache/clear-store', authMiddleware('super_admin'), RedisMonitoringController.clearStoreCache);
 
 export const SystemRoutes = router;
