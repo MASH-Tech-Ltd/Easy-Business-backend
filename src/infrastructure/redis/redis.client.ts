@@ -51,6 +51,9 @@ export const initRedis = async (): Promise<RedisClientType | null> => {
           connectTimeout: redisConfig.connectTimeoutMs,
           reconnectStrategy: (retries: number) => {
             state.reconnectAttempts = retries;
+            if (process.env.NODE_ENV !== 'production' && retries >= redisConfig.maxRetries) {
+              return new Error('Redis unavailable in local development (fail-open active)');
+            }
             if (retries > 20) {
               // Back off to once every 30 seconds instead of spamming or crashing
               return 30_000;

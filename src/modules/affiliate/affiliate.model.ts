@@ -290,7 +290,7 @@ const affiliateAuditLogSchema = new Schema<IAffiliateAuditLog>(
     reason: { type: String, default: '' },
     metadata: { type: Schema.Types.Mixed, default: {} },
     ipAddress: { type: String, default: '' },
-    createdAt: { type: Date, default: Date.now, expires: 86400, index: true },
+    createdAt: { type: Date, default: Date.now },
   },
   { timestamps: false }
 );

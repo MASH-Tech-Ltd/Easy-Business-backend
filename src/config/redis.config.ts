@@ -11,7 +11,11 @@ const parsePositiveInt = (raw: string | undefined, fallback: number, min = 1): n
 };
 
 export const redisConfig = {
-  enabled: process.env.REDIS_ENABLED !== 'false',
+  // In production, enabled by default unless REDIS_ENABLED=false.
+  // In local development, disabled by default unless REDIS_ENABLED=true.
+  enabled:
+    process.env.REDIS_ENABLED === 'true' ||
+    (process.env.NODE_ENV === 'production' && process.env.REDIS_ENABLED !== 'false'),
   host: (process.env.REDIS_HOST || '127.0.0.2').trim(),
   port: parsePositiveInt(process.env.REDIS_PORT, 6379),
   password: process.env.REDIS_PASSWORD?.trim() || undefined,

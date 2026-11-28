@@ -22,7 +22,7 @@ const HOST = process.env.HOST?.trim();
 
 connectDatabase()
   .then(async () => {
-    await initRedis();
+    void initRedis();
     await seedSuperAdmin();
     await ensurePackageFreeCredits();
     await ensureAddons();
